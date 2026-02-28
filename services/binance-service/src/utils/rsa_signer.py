@@ -28,9 +28,7 @@ class RSASigner:
         """
         try:
             self._private_key = serialization.load_pem_private_key(
-                private_key_pem,
-                password=None,
-                backend=default_backend()
+                private_key_pem, password=None, backend=default_backend()
             )
         except Exception as e:
             raise ValueError(f"Invalid RSA private key: {e}") from e
@@ -50,12 +48,10 @@ class RSASigner:
         try:
             # 使用SHA-256进行签名
             signature = self._private_key.sign(
-                payload.encode('ascii'),
-                padding.PKCS1v15(),
-                hashes.SHA256()
+                payload.encode("ascii"), padding.PKCS1v15(), hashes.SHA256()
             )
 
             # Base64编码
-            return base64.b64encode(signature).decode('ascii')
+            return base64.b64encode(signature).decode("ascii")
         except Exception as e:
             raise RuntimeError(f"Failed to sign payload: {e}") from e

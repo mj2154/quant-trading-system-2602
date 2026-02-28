@@ -20,16 +20,30 @@ class FuturesAsset(BaseModel):
     """
 
     asset: str = Field(..., description="资产名称，如 USDT, BUSD, BTC")
-    wallet_balance: Optional[str] = Field(None, alias="walletBalance", description="余额")
-    unrealized_profit: Optional[str] = Field(None, alias="unrealizedProfit", description="未实现盈亏")
-    margin_balance: Optional[str] = Field(None, alias="marginBalance", description="保证金余额")
-    maint_margin: Optional[str] = Field(None, alias="maintMargin", description="维持保证金")
-    initial_margin: Optional[str] = Field(None, alias="initialMargin", description="当前所需起始保证金")
+    wallet_balance: Optional[str] = Field(
+        None, alias="walletBalance", description="余额"
+    )
+    unrealized_profit: Optional[str] = Field(
+        None, alias="unrealizedProfit", description="未实现盈亏"
+    )
+    margin_balance: Optional[str] = Field(
+        None, alias="marginBalance", description="保证金余额"
+    )
+    maint_margin: Optional[str] = Field(
+        None, alias="maintMargin", description="维持保证金"
+    )
+    initial_margin: Optional[str] = Field(
+        None, alias="initialMargin", description="当前所需起始保证金"
+    )
     position_initial_margin: Optional[str] = Field(
-        None, alias="positionInitialMargin", description="持仓所需起始保证金(基于最新标记价格)"
+        None,
+        alias="positionInitialMargin",
+        description="持仓所需起始保证金(基于最新标记价格)",
     )
     open_order_initial_margin: Optional[str] = Field(
-        None, alias="openOrderInitialMargin", description="当前挂单所需起始保证金(基于最新标记价格)"
+        None,
+        alias="openOrderInitialMargin",
+        description="当前挂单所需起始保证金(基于最新标记价格)",
     )
     cross_wallet_balance: Optional[str] = Field(
         None, alias="crossWalletBalance", description="全仓账户余额"
@@ -63,16 +77,30 @@ class FuturesPosition(BaseModel):
 
     # 核心字段 (与币安API完全一致)
     symbol: str = Field(..., description="交易对符号，如 BTCUSDT")
-    position_side: Optional[str] = Field(None, alias="positionSide", description="持仓方向: BOTH, LONG, SHORT")
-    position_amt: Optional[str] = Field(None, alias="positionAmt", description="持仓数量")
-    unrealized_profit: Optional[str] = Field(None, alias="unrealizedProfit", description="持仓未实现盈亏")
+    position_side: Optional[str] = Field(
+        None, alias="positionSide", description="持仓方向: BOTH, LONG, SHORT"
+    )
+    position_amt: Optional[str] = Field(
+        None, alias="positionAmt", description="持仓数量"
+    )
+    unrealized_profit: Optional[str] = Field(
+        None, alias="unrealizedProfit", description="持仓未实现盈亏"
+    )
 
     # V3版本字段
-    isolated_margin: Optional[str] = Field(None, alias="isolatedMargin", description="逐仓保证金")
+    isolated_margin: Optional[str] = Field(
+        None, alias="isolatedMargin", description="逐仓保证金"
+    )
     notional: Optional[str] = Field(None, alias="notional", description="名义价值")
-    isolated_wallet: Optional[str] = Field(None, alias="isolatedWallet", description="逐仓钱包余额")
-    initial_margin: Optional[str] = Field(None, alias="initialMargin", description="持仓所需起始保证金(基于最新标记价格)")
-    maint_margin: Optional[str] = Field(None, alias="maintMargin", description="维持保证金")
+    isolated_wallet: Optional[str] = Field(
+        None, alias="isolatedWallet", description="逐仓钱包余额"
+    )
+    initial_margin: Optional[str] = Field(
+        None, alias="initialMargin", description="持仓所需起始保证金(基于最新标记价格)"
+    )
+    maint_margin: Optional[str] = Field(
+        None, alias="maintMargin", description="维持保证金"
+    )
     update_time: Optional[int] = Field(None, alias="updateTime", description="更新时间")
 
     model_config = {
@@ -100,68 +128,67 @@ class FuturesAccountInfo(BaseModel):
 
     # 总保证金相关
     total_initial_margin: Optional[str] = Field(
-        None, alias="totalInitialMargin",
-        description="当前所需起始保证金总额(存在逐仓请忽略), 仅计算usdt资产"
+        None,
+        alias="totalInitialMargin",
+        description="当前所需起始保证金总额(存在逐仓请忽略), 仅计算usdt资产",
     )
     total_maint_margin: Optional[str] = Field(
-        None, alias="totalMaintMargin",
-        description="维持保证金总额, 仅计算usdt资产"
+        None, alias="totalMaintMargin", description="维持保证金总额, 仅计算usdt资产"
     )
     total_wallet_balance: Optional[str] = Field(
-        None, alias="totalWalletBalance",
-        description="账户总余额, 仅计算usdt资产"
+        None, alias="totalWalletBalance", description="账户总余额, 仅计算usdt资产"
     )
     total_unrealized_profit: Optional[str] = Field(
-        None, alias="totalUnrealizedProfit",
-        description="持仓未实现盈亏总额, 仅计算usdt资产"
+        None,
+        alias="totalUnrealizedProfit",
+        description="持仓未实现盈亏总额, 仅计算usdt资产",
     )
     total_margin_balance: Optional[str] = Field(
-        None, alias="totalMarginBalance",
-        description="保证金总余额, 仅计算usdt资产"
+        None, alias="totalMarginBalance", description="保证金总余额, 仅计算usdt资产"
     )
 
     # 持仓相关保证金
     total_position_initial_margin: Optional[str] = Field(
-        None, alias="totalPositionInitialMargin",
-        description="持仓所需起始保证金(基于最新标记价格), 仅计算usdt资产"
+        None,
+        alias="totalPositionInitialMargin",
+        description="持仓所需起始保证金(基于最新标记价格), 仅计算usdt资产",
     )
     total_open_order_initial_margin: Optional[str] = Field(
-        None, alias="totalOpenOrderInitialMargin",
-        description="当前挂单所需起始保证金(基于最新标记价格), 仅计算usdt资产"
+        None,
+        alias="totalOpenOrderInitialMargin",
+        description="当前挂单所需起始保证金(基于最新标记价格), 仅计算usdt资产",
     )
 
     # 全仓相关
     total_cross_wallet_balance: Optional[str] = Field(
-        None, alias="totalCrossWalletBalance",
-        description="全仓账户余额, 仅计算usdt资产"
+        None,
+        alias="totalCrossWalletBalance",
+        description="全仓账户余额, 仅计算usdt资产",
     )
     total_cross_unrealized_profit: Optional[str] = Field(
-        None, alias="totalCrossUnPnl",
-        description="全仓持仓未实现盈亏总额, 仅计算usdt资产"
+        None,
+        alias="totalCrossUnPnl",
+        description="全仓持仓未实现盈亏总额, 仅计算usdt资产",
     )
 
     # 可用余额
     available_balance: Optional[str] = Field(
-        None, alias="availableBalance",
-        description="可用余额, 仅计算usdt资产"
+        None, alias="availableBalance", description="可用余额, 仅计算usdt资产"
     )
     max_withdraw_amount: Optional[str] = Field(
-        None, alias="maxWithdrawAmount",
-        description="最大可转出余额, 仅计算usdt资产"
+        None, alias="maxWithdrawAmount", description="最大可转出余额, 仅计算usdt资产"
     )
 
     # ===== 详细列表 =====
 
     # 资产列表（每个资产的详细余额）
     assets: list[FuturesAsset] = Field(
-        default_factory=list,
-        description="资产列表，包含每个资产的余额和保证金信息"
+        default_factory=list, description="资产列表，包含每个资产的余额和保证金信息"
     )
 
     # 持仓列表（仅有仓位或挂单的交易对会被返回）
     positions: list[FuturesPosition] = Field(
-        default_factory=list,
-        description="持仓列表"
+        default_factory=list, description="持仓列表"
     )
 
     model_config = {

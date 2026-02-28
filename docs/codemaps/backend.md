@@ -1,6 +1,6 @@
 # Backend Codemap
 
-> Last updated: 2026-02-22T12:00:00Z
+> Last updated: 2026-03-01T04:42:00Z
 > Detailed structure of backend services and their dependencies.
 
 ## Service Directory Structure
@@ -17,32 +17,40 @@ services/
 │   │   │   ├── data_processor.py
 │   │   │   ├── task_router.py
 │   │   │   ├── protocol.py
-│   │   │   ├── strategy_handler.py
-│   │   │   ├── strategy_metadata_handler.py
-│   │   │   └── alert_handler.py
+│   │   │   ├── alert_handler.py
+│   │   │   └── strategy_handler.py (legacy)
 │   │   ├── db/
 │   │   │   ├── database.py
 │   │   │   ├── tasks_repository.py
 │   │   │   ├── subscription_repository.py
 │   │   │   ├── exchange_info_repository.py
 │   │   │   ├── realtime_data_repository.py
-│   │   │   ├── strategy_config_repository.py
 │   │   │   ├── strategy_signals_repository.py
+│   │   │   ├── alert_signal_repository.py
 │   │   │   ├── strategy_metadata_repository.py
-│   │   │   └── alert_signal_repository.py
+│   │   │   └── strategy_config_repository.py
 │   │   ├── models/
-│   │   │   ├── task.py
-│   │   │   ├── unified_models.py
-│   │   │   ├── binance_api.py
-│   │   │   ├── subscription_models.py
-│   │   │   ├── kline.py
-│   │   │   ├── websocket.py
+│   │   │   ├── base.py
 │   │   │   ├── error_models.py
-│   │   │   ├── strategy_models.py
-│   │   │   └── alert_models.py
+│   │   │   ├── trading/
+│   │   │   │   ├── kline_models.py
+│   │   │   │   ├── futures_models.py
+│   │   │   │   ├── quote_models.py
+│   │   │   │   └── symbol_models.py
+│   │   │   ├── db/
+│   │   │   │   ├── exchange_models.py
+│   │   │   │   ├── kline_history_models.py
+│   │   │   │   ├── realtime_data_models.py
+│   │   │   │   ├── task_models.py
+│   │   │   │   ├── account_models.py
+│   │   │   │   ├── signal_models.py
+│   │   │   │   └── alert_config_models.py
+│   │   │   └── protocol/
+│   │   │       ├── ws_payload.py
+│   │   │       ├── ws_message.py
+│   │   │       └── constants.py
 │   │   ├── api/
-│   │   │   ├── strategy.py
-│   │   │   └── alert.py
+│   │   │   └── (REST endpoints)
 │   │   ├── services/
 │   │   │   └── exchange_sync_service.py
 │   │   ├── converters/
@@ -54,16 +62,12 @@ services/
 │   │   └── utils/
 │   │       └── symbol.py
 │   └── tests/
-│       ├── e2e/
-│       │   ├── base_e2e_test.py
-│       │   ├── test_spot_rest_e2e.py
-│       │   ├── test_spot_ws_e2e.py
-│       │   ├── test_futures_rest_e2e.py
-│       │   ├── test_futures_ws_e2e.py
-│       │   ├── test_ws_reconnect_e2e.py
-│       │   └── run_e2e_tests.py
-│       ├── test_clients.py
-│       └── conftest.py
+│       ├── unit/
+│       ├── integration/
+│       └── e2e/
+│           ├── futures/ (REST + WS tests)
+│           ├── spot/ (REST + WS tests)
+│           └── run_*.py
 │
 ├── binance-service/
 │   ├── src/
@@ -72,32 +76,40 @@ services/
 │   │   │   ├── base_http_client.py
 │   │   │   ├── spot_http_client.py
 │   │   │   ├── spot_ws_client.py
+│   │   │   ├── spot_private_http_client.py
 │   │   │   ├── futures_http_client.py
 │   │   │   ├── futures_ws_client.py
-│   │   │   └── base_ws_client.py
+│   │   │   ├── futures_private_http_client.py
+│   │   │   ├── base_ws_client.py
+│   │   │   ├── spot_user_stream_client.py
+│   │   │   └── futures_user_stream_client.py
 │   │   ├── storage/
-│   │   │   ├── kline_repository.py
 │   │   │   └── exchange_repository.py
 │   │   ├── events/
 │   │   │   ├── task_listener.py
 │   │   │   ├── exchange_info_handler.py
-│   │   │   ├── subscription_sync.py
-│   │   │   └── notification.py
+│   │   │   ├── notification.py
+│   │   │   └── account_subscription_service.py
 │   │   ├── db/
 │   │   │   ├── tasks_repository.py
 │   │   │   └── realtime_data_repository.py
 │   │   ├── models/
 │   │   │   ├── task.py
-│   │   │   ├── binance_kline.py
+│   │   │   ├── kline_models.py
 │   │   │   ├── exchange_info.py
 │   │   │   ├── ticker.py
-│   │   │   └── unified_models.py
+│   │   │   ├── base.py
+│   │   │   ├── spot_account.py
+│   │   │   └── futures_account.py
 │   │   ├── services/
 │   │   │   └── binance_service.py
 │   │   ├── constants/
 │   │   │   └── binance.py
-│   │   └── utils/
-│   │       └── resolution.py
+│   │   ├── utils/
+│   │   │   ├── resolution.py
+│   │   │   ├── rsa_signer.py
+│   │   │   └── ed25519_signer.py
+│   │   └── ws_subscription_manager.py
 │
 ├── signal-service/
 │   ├── src/
@@ -110,7 +122,6 @@ services/
 │   │   │   ├── macd_resonance_strategy.py
 │   │   │   └── registry.py     # Strategy registry
 │   │   ├── indicators/
-│   │   │   ├── base.py
 │   │   │   ├── ema.py
 │   │   │   ├── ema_indicator.py
 │   │   │   ├── macd.py
@@ -121,15 +132,18 @@ services/
 │   │   │   ├── declining_highs_indicator.py
 │   │   │   ├── price_crossover_ema_indicator.py
 │   │   │   ├── ema_crossover_reversal_indicator.py
-│   │   │   ├── indicator_cache.py
-│   │   │   └── indicator_nb.py
+│   │   │   └── indicator_cache.py
 │   │   ├── listener/
 │   │   │   ├── realtime_update_listener.py
 │   │   │   └── alert_signal_listener.py
 │   │   ├── services/
 │   │   │   ├── signal_service.py
 │   │   │   ├── trigger_engine.py
-│   │   │   └── alert_signal.py
+│   │   │   ├── alert_signal.py
+│   │   │   ├── kline_cache.py
+│   │   │   ├── kline_validator.py
+│   │   │   ├── kline_utils.py
+│   │   │   └── subscription_utils.py
 │   │   └── db/
 │   │       ├── database.py
 │   │       ├── tasks_repository.py
@@ -157,9 +171,8 @@ main.py
 │   ├── client_manager.py
 │   ├── subscription_manager.py
 │   ├── data_processor.py
-│   ├── strategy_handler.py
-│   ├── strategy_metadata_handler.py
-│   └── alert_handler.py
+│   ├── alert_handler.py
+│   └── task_router.py
 ├── db/
 │   ├── database.py (asyncpg)
 │   └── repositories/
@@ -174,14 +187,17 @@ main.py
 │   ├── spot_http_client.py (httpx)
 │   ├── futures_http_client.py (httpx)
 │   ├── spot_ws_client.py (websockets)
-│   └── futures_ws_client.py (websockets)
+│   ├── futures_ws_client.py (websockets)
+│   ├── spot_private_http_client.py (HMAC/RSA)
+│   ├── futures_private_http_client.py (HMAC/RSA/ED25519)
+│   ├── spot_user_stream_client.py
+│   └── futures_user_stream_client.py
 ├── storage/
-│   ├── kline_repository.py
 │   └── exchange_repository.py
 ├── events/
 │   ├── task_listener.py
 │   ├── exchange_info_handler.py
-│   └── subscription_sync.py
+│   └── account_subscription_service.py
 └── db/ (sqlalchemy core)
 ```
 
@@ -205,7 +221,9 @@ main.py
 ├── services/
 │   ├── signal_service.py
 │   ├── trigger_engine.py
-│   └── alert_signal.py
+│   ├── alert_signal.py
+│   ├── kline_cache.py
+│   └── kline_validator.py
 └── db/
     ├── database.py
     └── repositories/
@@ -235,6 +253,7 @@ main.py
 | strategy_configs | signal-service | Strategy configurations |
 | strategy_signals | signal-service | Generated signals |
 | alert_configs | signal-service | Alert configurations |
+| account_info | binance-service | Account balances and positions |
 
 ## Entry Points
 
@@ -259,3 +278,21 @@ The signal-service includes the following technical indicators:
 | Declining Highs | `declining_highs_indicator.py` | Declining highs pattern |
 | Price Crossover EMA | `price_crossover_ema_indicator.py` | Price crossing EMA |
 | EMA Crossover | `ema_crossover_reversal_indicator.py` | EMA crossover reversal |
+
+## Account Integration
+
+Binance Service now supports private API endpoints:
+
+- **Spot Account**: Balance queries via `/api/v3/account`
+- **Futures Account**: Account balance via `/fapi/v2/account`
+- **User Data Streams**: Real-time account updates via WebSocket
+- **Signature Methods**: HMAC SHA256, RSA SHA256, ED25519
+
+## File Statistics
+
+| Service | Python Files | Test Files | Total |
+|---------|-------------|------------|-------|
+| api-service | 53 | 76 | 129 |
+| binance-service | 41 | 23 | 64 |
+| signal-service | 35 | 19 | 54 |
+| **Total** | **129** | **118** | **248** |

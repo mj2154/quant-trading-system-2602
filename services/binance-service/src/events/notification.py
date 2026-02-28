@@ -15,15 +15,15 @@ class EventType(str, Enum):
 
     # 任务相关
     TASK_SUBSCRIBE = "task.subscribe"  # 新任务订阅
-    TASK_COMPLETE = "task.complete"   # 任务完成
-    TASK_FAIL = "task.fail"           # 任务失败
+    TASK_COMPLETE = "task.complete"  # 任务完成
+    TASK_FAIL = "task.fail"  # 任务失败
 
     # K线相关
-    KLINE_NEW = "kline.new"          # 新K线数据
-    KLINE_CLOSED = "kline.closed"     # K线收盘
+    KLINE_NEW = "kline.new"  # 新K线数据
+    KLINE_CLOSED = "kline.closed"  # K线收盘
 
     # 信号相关
-    SIGNAL_NEW = "signal.new"         # 新信号
+    SIGNAL_NEW = "signal.new"  # 新信号
 
 
 @dataclass
@@ -58,7 +58,7 @@ class TaskPayload:
 
     def to_json(self) -> str:
         """序列化为JSON字符串"""
-        data = {
+        data: dict = {
             "task_type": self.task_type,
             "symbol": self.symbol,
             "interval": self.interval,

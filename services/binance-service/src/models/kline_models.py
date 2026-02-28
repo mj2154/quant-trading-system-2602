@@ -18,10 +18,10 @@ from typing import Optional, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # 使用本地基类
-from .base import SnakeCaseModel
 
 
 # ========== 共享验证器 Mixin ==========
+
 
 class KlineValidatorMixin:
     """K线数据验证器 Mixin
@@ -92,6 +92,7 @@ class KlineValidatorMixin:
 
 # ========== K线数据模型 ==========
 
+
 class KlineData(KlineValidatorMixin, BaseModel):
     """
     K线数据模型
@@ -111,7 +112,7 @@ class KlineData(KlineValidatorMixin, BaseModel):
     symbol: str = Field(
         ...,
         description="语义化交易对符号，格式: EXCHANGE:SYMBOL[.CONTRACT_TYPE]，"
-                    "例如: BINANCE:BTCUSDT (现货), BINANCE:BTCUSDT.PERP (永续合约)"
+        "例如: BINANCE:BTCUSDT (现货), BINANCE:BTCUSDT.PERP (永续合约)",
     )
     interval: str = Field(..., description="K线间隔，如1m, 5m, 1h, 1d")
 
@@ -123,7 +124,9 @@ class KlineData(KlineValidatorMixin, BaseModel):
 
     # 成交量信息
     volume: Decimal = Field(..., ge=0, description="成交量（基础资产），必须大于等于0")
-    quote_volume: Decimal = Field(..., ge=0, description="成交额（报价资产），必须大于等于0")
+    quote_volume: Decimal = Field(
+        ..., ge=0, description="成交额（报价资产），必须大于等于0"
+    )
 
     # 交易统计
     number_of_trades: int = Field(..., ge=0, description="交易笔数，必须大于等于0")
@@ -144,12 +147,20 @@ class KlineData(KlineValidatorMixin, BaseModel):
     # 事件时间（WebSocket）
     event_time: Optional[datetime] = Field(None, description="事件发生时间")
 
-    @field_validator("open_price", "high_price", "low_price", "close_price", mode="before")
+    @field_validator(
+        "open_price", "high_price", "low_price", "close_price", mode="before"
+    )
     @classmethod
     def _validate_price_wrapper(cls, v):
         return cls._validate_price(v)
 
-    @field_validator("volume", "quote_volume", "taker_buy_base_volume", "taker_buy_quote_volume", mode="before")
+    @field_validator(
+        "volume",
+        "quote_volume",
+        "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+        mode="before",
+    )
     @classmethod
     def _validate_volume_wrapper(cls, v):
         return cls._validate_volume(v)
@@ -166,7 +177,10 @@ class KlineData(KlineValidatorMixin, BaseModel):
         return self
 
     model_config = ConfigDict(
-        json_encoders={Decimal: lambda v: str(v), datetime: lambda v: int(v.timestamp() * 1000)},
+        json_encoders={
+            Decimal: lambda v: str(v),
+            datetime: lambda v: int(v.timestamp() * 1000),
+        },
         populate_by_name=True,
     )
 
@@ -179,8 +193,7 @@ class KlineCreate(KlineValidatorMixin, BaseModel):
     """
 
     symbol: str = Field(
-        ...,
-        description="语义化交易对符号，格式: EXCHANGE:SYMBOL[.CONTRACT_TYPE]"
+        ..., description="语义化交易对符号，格式: EXCHANGE:SYMBOL[.CONTRACT_TYPE]"
     )
     interval: str = Field(..., description="K线间隔")
 
@@ -197,19 +210,31 @@ class KlineCreate(KlineValidatorMixin, BaseModel):
 
     number_of_trades: int = Field(..., ge=0, description="交易笔数")
 
-    taker_buy_base_volume: Decimal = Field(default=Decimal("0"), ge=0, description="主动买入成交量")
-    taker_buy_quote_volume: Decimal = Field(default=Decimal("0"), ge=0, description="主动买入成交额")
+    taker_buy_base_volume: Decimal = Field(
+        default=Decimal("0"), ge=0, description="主动买入成交量"
+    )
+    taker_buy_quote_volume: Decimal = Field(
+        default=Decimal("0"), ge=0, description="主动买入成交额"
+    )
 
     first_trade_id: Optional[int] = Field(None, ge=0, description="第一笔交易ID")
     last_trade_id: Optional[int] = Field(None, ge=0, description="最后一笔交易ID")
     is_closed: bool = Field(default=False, description="K线是否已结束")
 
-    @field_validator("open_price", "high_price", "low_price", "close_price", mode="before")
+    @field_validator(
+        "open_price", "high_price", "low_price", "close_price", mode="before"
+    )
     @classmethod
     def _validate_price_wrapper(cls, v):
         return cls._validate_price(v)
 
-    @field_validator("volume", "quote_volume", "taker_buy_base_volume", "taker_buy_quote_volume", mode="before")
+    @field_validator(
+        "volume",
+        "quote_volume",
+        "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+        mode="before",
+    )
     @classmethod
     def _validate_volume_wrapper(cls, v):
         return cls._validate_volume(v)
@@ -242,7 +267,10 @@ class KlineCreate(KlineValidatorMixin, BaseModel):
         )
 
     model_config = ConfigDict(
-        json_encoders={Decimal: lambda v: str(v), datetime: lambda v: int(v.timestamp() * 1000)},
+        json_encoders={
+            Decimal: lambda v: str(v),
+            datetime: lambda v: int(v.timestamp() * 1000),
+        },
         populate_by_name=True,
     )
 
@@ -274,12 +302,20 @@ class KlineResponse(BaseModel):
             return int(v.timestamp() * 1000)
         return v
 
-    @field_validator("open_price", "high_price", "low_price", "close_price", mode="before")
+    @field_validator(
+        "open_price", "high_price", "low_price", "close_price", mode="before"
+    )
     @classmethod
     def validate_price(cls, v):
         return str(v)
 
-    @field_validator("volume", "quote_volume", "taker_buy_base_volume", "taker_buy_quote_volume", mode="before")
+    @field_validator(
+        "volume",
+        "quote_volume",
+        "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+        mode="before",
+    )
     @classmethod
     def validate_volume(cls, v):
         return str(v)
@@ -368,17 +404,29 @@ class KlineWebSocketData(KlineValidatorMixin, BaseModel):
 
     number_of_trades: int = Field(..., ge=0, description="交易笔数", alias="n")
 
-    taker_buy_base_volume: Decimal = Field(default=Decimal("0"), ge=0, description="主动买入成交量", alias="V")
-    taker_buy_quote_volume: Decimal = Field(default=Decimal("0"), ge=0, description="主动买入成交额", alias="Q")
+    taker_buy_base_volume: Decimal = Field(
+        default=Decimal("0"), ge=0, description="主动买入成交量", alias="V"
+    )
+    taker_buy_quote_volume: Decimal = Field(
+        default=Decimal("0"), ge=0, description="主动买入成交额", alias="Q"
+    )
 
     is_closed: bool = Field(..., description="K线是否已结束", alias="x")
 
-    @field_validator("open_price", "close_price", "high_price", "low_price", mode="before")
+    @field_validator(
+        "open_price", "close_price", "high_price", "low_price", mode="before"
+    )
     @classmethod
     def _validate_price_wrapper(cls, v):
         return cls._validate_price(v)
 
-    @field_validator("volume", "quote_volume", "taker_buy_base_volume", "taker_buy_quote_volume", mode="before")
+    @field_validator(
+        "volume",
+        "quote_volume",
+        "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+        mode="before",
+    )
     @classmethod
     def _validate_volume_wrapper(cls, v):
         return cls._validate_volume(v)
@@ -414,7 +462,10 @@ class KlineWebSocketData(KlineValidatorMixin, BaseModel):
         )
 
     model_config = ConfigDict(
-        json_encoders={Decimal: lambda v: str(v), datetime: lambda v: int(v.timestamp() * 1000)},
+        json_encoders={
+            Decimal: lambda v: str(v),
+            datetime: lambda v: int(v.timestamp() * 1000),
+        },
         populate_by_name=True,
     )
 
@@ -450,7 +501,10 @@ class KlineWebSocket(BaseModel):
         return self.kline.to_kline_data(self.symbol)
 
     model_config = ConfigDict(
-        json_encoders={Decimal: lambda v: str(v), datetime: lambda v: int(v.timestamp() * 1000)},
+        json_encoders={
+            Decimal: lambda v: str(v),
+            datetime: lambda v: int(v.timestamp() * 1000),
+        },
         populate_by_name=True,
     )
 
@@ -481,26 +535,42 @@ class KlineInterval:
     @classmethod
     def get_all_intervals(cls) -> list[str]:
         return [
-            cls.INTERVAL_1M, cls.INTERVAL_3M, cls.INTERVAL_5M,
-            cls.INTERVAL_15M, cls.INTERVAL_30M,
-            cls.INTERVAL_1H, cls.INTERVAL_2H, cls.INTERVAL_4H,
-            cls.INTERVAL_6H, cls.INTERVAL_8H, cls.INTERVAL_12H,
-            cls.INTERVAL_1D, cls.INTERVAL_3D,
-            cls.INTERVAL_1W, cls.INTERVAL_1M_MONTH,
+            cls.INTERVAL_1M,
+            cls.INTERVAL_3M,
+            cls.INTERVAL_5M,
+            cls.INTERVAL_15M,
+            cls.INTERVAL_30M,
+            cls.INTERVAL_1H,
+            cls.INTERVAL_2H,
+            cls.INTERVAL_4H,
+            cls.INTERVAL_6H,
+            cls.INTERVAL_8H,
+            cls.INTERVAL_12H,
+            cls.INTERVAL_1D,
+            cls.INTERVAL_3D,
+            cls.INTERVAL_1W,
+            cls.INTERVAL_1M_MONTH,
         ]
 
     @classmethod
     def get_minute_intervals(cls) -> list[str]:
         return [
-            cls.INTERVAL_1M, cls.INTERVAL_3M, cls.INTERVAL_5M,
-            cls.INTERVAL_15M, cls.INTERVAL_30M,
+            cls.INTERVAL_1M,
+            cls.INTERVAL_3M,
+            cls.INTERVAL_5M,
+            cls.INTERVAL_15M,
+            cls.INTERVAL_30M,
         ]
 
     @classmethod
     def get_hour_intervals(cls) -> list[str]:
         return [
-            cls.INTERVAL_1H, cls.INTERVAL_2H, cls.INTERVAL_4H,
-            cls.INTERVAL_6H, cls.INTERVAL_8H, cls.INTERVAL_12H,
+            cls.INTERVAL_1H,
+            cls.INTERVAL_2H,
+            cls.INTERVAL_4H,
+            cls.INTERVAL_6H,
+            cls.INTERVAL_8H,
+            cls.INTERVAL_12H,
         ]
 
     @classmethod

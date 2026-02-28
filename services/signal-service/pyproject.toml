@@ -49,6 +49,7 @@ report = ["text", "json", "html"]
 
 [dependency-groups]
 dev = [
+    "bandit>=1.9.4",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",

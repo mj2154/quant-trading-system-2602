@@ -4,7 +4,6 @@
 包含币安现货和期货交易的所有API端点、常量和枚举值。
 """
 
-from typing import Dict, List
 
 
 class BinanceBaseURL:
@@ -41,7 +40,7 @@ class BinanceWebSocketURL:
 
     # 组合Streams
     @classmethod
-    def get_combined_stream_url(cls, base: str, streams: List[str]) -> str:
+    def get_combined_stream_url(cls, base: str, streams: list[str]) -> str:
         """生成组合Streams URL
 
         Args:
@@ -200,7 +199,7 @@ class BinanceSymbol:
     ETHDAI = "ETHDAI"
 
     @classmethod
-    def get_major_pairs(cls) -> List[str]:
+    def get_major_pairs(cls) -> list[str]:
         """获取主流交易对"""
         return [
             cls.BTCUSDT,
@@ -216,7 +215,7 @@ class BinanceSymbol:
         ]
 
     @classmethod
-    def get_usdt_pairs(cls) -> List[str]:
+    def get_usdt_pairs(cls) -> list[str]:
         """获取USDT交易对"""
         return [
             cls.BTCUSDT,
@@ -242,7 +241,7 @@ class BinanceSymbol:
         ]
 
     @classmethod
-    def get_btc_pairs(cls) -> List[str]:
+    def get_btc_pairs(cls) -> list[str]:
         """获取BTC交易对"""
         return [
             cls.ETHBTC,
@@ -287,7 +286,7 @@ class BinanceInterval:
     INTERVAL_1M_MONTH = "1M"
 
     @classmethod
-    def get_all(cls) -> List[str]:
+    def get_all(cls) -> list[str]:
         """获取所有间隔"""
         return [
             cls.INTERVAL_1M,
@@ -308,7 +307,7 @@ class BinanceInterval:
         ]
 
     @classmethod
-    def get_minute_intervals(cls) -> List[str]:
+    def get_minute_intervals(cls) -> list[str]:
         """获取分钟级间隔"""
         return [
             cls.INTERVAL_1M,
@@ -319,7 +318,7 @@ class BinanceInterval:
         ]
 
     @classmethod
-    def get_hour_intervals(cls) -> List[str]:
+    def get_hour_intervals(cls) -> list[str]:
         """获取小时级间隔"""
         return [
             cls.INTERVAL_1H,
@@ -331,7 +330,7 @@ class BinanceInterval:
         ]
 
     @classmethod
-    def get_day_intervals(cls) -> List[str]:
+    def get_day_intervals(cls) -> list[str]:
         """获取日级间隔"""
         return [
             cls.INTERVAL_1D,

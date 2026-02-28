@@ -1,11 +1,11 @@
 # Frontend Codemap
 
-> Last updated: 2026-02-22T12:00:00Z
+> Last updated: 2026-03-01T04:42:00Z
 > Overview of frontend application structure and type definitions.
 
 ## Application Overview
 
-The frontend is a Vue 3 + TypeScript application using Vite as the build tool. It provides a trading panel interface with real-time chart visualization, signal monitoring, and alert configuration.
+The frontend is a Vue 3 + TypeScript application using Vite as the build tool. It provides a trading panel interface with real-time chart visualization, signal monitoring, alert configuration, and account management.
 
 ## Directory Structure
 
@@ -13,11 +13,14 @@ The frontend is a Vue 3 + TypeScript application using Vite as the build tool. I
 frontend/trading-panel/
 ├── src/
 │   ├── main.ts                 # Application entry point
+│   ├── App.vue                 # Root component
+│   ├── style.css               # Global styles
 │   ├── components/
 │   │   ├── HelloWorld.vue     # Welcome component
+│   │   ├── GlobalAlertHandler.vue  # Global alert handling
 │   │   ├── TradingViewChart/
 │   │   │   ├── index.vue      # TradingView chart wrapper
-│   │   │   └── library/       # Cached TradingView library
+│   │   │   └── library/        # Cached TradingView library
 │   │   ├── layout/
 │   │   │   ├── AppHeader.vue  # Application header
 │   │   │   ├── AppContent.vue # Main content area
@@ -28,14 +31,25 @@ frontend/trading-panel/
 │   │   └── alert/
 │   │       ├── AlertConfigForm.vue    # Alert configuration form
 │   │       ├── AlertConfigList.vue    # Alert list display
-│   │       └── RealtimeAlerts.vue     # Real-time alerts
+│   │       └── RealtimeAlerts.vue    # Real-time alerts
+│   ├── views/
+│   │   ├── ModuleA.vue
+│   │   ├── ModuleB.vue
+│   │   ├── ModuleC.vue
+│   │   ├── AlertDashboard.vue
+│   │   ├── AlertTest.vue
+│   │   └── AccountDashboard.vue
 │   ├── stores/                # Pinia stores
 │   │   ├── tab-store.ts       # Tab navigation state
 │   │   ├── strategy-store.ts  # Strategy state management
-│   │   └── alert-store.ts    # Alert state management
+│   │   ├── alert-store.ts     # Alert state management
+│   │   └── account-store.ts   # Account balance state
 │   ├── types/                 # TypeScript type definitions
 │   │   ├── tradingview-data-models.ts
-│   │   └── alert-types.ts
+│   │   ├── alert-types.ts
+│   │   └── account-types.ts
+│   ├── composables/
+│   │   └── useAlertSettings.ts
 │   ├── theme/
 │   │   └── alert-theme.ts    # Alert theming
 │   └── vite-env.d.ts         # Vite type definitions
@@ -51,9 +65,12 @@ App
 ├── AppContent
 │   ├── HelloWorld
 │   ├── TradingViewChart
+│   ├── ModuleA / ModuleB / ModuleC
 │   ├── SignalList / RealtimeSignals
-│   └── AlertConfigForm / AlertConfigList / RealtimeAlerts
-└── AppFooter
+│   ├── AlertDashboard / AlertTest
+│   └── AccountDashboard
+├── AppFooter
+└── GlobalAlertHandler
 ```
 
 ## State Management
@@ -64,7 +81,7 @@ Manages the active tab/panel in the application.
 
 ```typescript
 interface TabState {
-  activeTab: 'chart' | 'signals' | 'alerts';
+  activeTab: 'chart' | 'signals' | 'alerts' | 'account';
   // ...
 }
 ```
@@ -90,6 +107,18 @@ interface AlertState {
   alerts: AlertConfig[];
   notifications: Alert[];
   // ...
+}
+```
+
+### Account Store (`account-store.ts`)
+
+Manages account balances and positions.
+
+```typescript
+interface AccountState {
+  balances: Balance[];
+  positions: Position[];
+  lastUpdate: Date;
 }
 ```
 
@@ -123,6 +152,31 @@ interface Alert {
 }
 ```
 
+### Account Types (`account-types.ts`)
+
+```typescript
+interface Balance {
+  asset: string;
+  free: string;
+  locked: string;
+}
+
+interface Position {
+  symbol: string;
+  positionSide: 'LONG' | 'SHORT' | 'BOTH';
+  positionAmt: string;
+  entryPrice: string;
+  markPrice: string;
+  unrealProfit: string;
+}
+
+interface AccountInfo {
+  balances: Balance[];
+  totalAssetInBtc: string;
+  totalAssetInUsdt: string;
+}
+```
+
 ## Key Features
 
 | Feature | Component | Description |
@@ -133,6 +187,9 @@ interface Alert {
 | Alert Config | `AlertConfigForm.vue` | Create/edit alert configurations |
 | Alert List | `AlertConfigList.vue` | Manage existing alerts |
 | Real-time Alerts | `RealtimeAlerts.vue` | Live alert notifications |
+| Alert Dashboard | `AlertDashboard.vue` | Overview of all alerts |
+| Alert Testing | `AlertTest.vue` | Test alert sounds |
+| Account Overview | `AccountDashboard.vue` | View balances and positions |
 
 ## Technology Stack
 
@@ -153,12 +210,23 @@ The frontend connects to the API service via WebSocket for real-time updates:
 - Kline updates
 - Signal generation events
 - Alert notifications
+- Account balance updates
 
 ## File Statistics
 
 | Category | Count |
 |----------|-------|
-| Vue Components | 10 |
-| TypeScript Stores | 3 |
-| Type Definition Files | 2 |
+| Vue Components | 16 |
+| TypeScript Stores | 4 |
+| Type Definition Files | 3 |
 | Theme Files | 1 |
+| Composable Functions | 1 |
+
+## Recent Updates (Since Feb 22)
+
+1. Added `account-store.ts` for account state management
+2. Added `account-types.ts` with Balance and Position types
+3. Added `AccountDashboard.vue` for viewing account info
+4. Added `GlobalAlertHandler.vue` for global alert handling
+5. Added `AlertTest.vue` for testing alert sounds
+6. Added `AlertDashboard.vue` for alert overview

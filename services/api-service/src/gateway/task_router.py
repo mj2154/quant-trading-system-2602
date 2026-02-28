@@ -21,15 +21,15 @@ K线历史数据查询策略（重要）：
 import logging
 from typing import Any
 
-from ..db.tasks_repository import TasksRepository
-from ..db.exchange_info_repository import ExchangeInfoRepository
 from ..db.alert_signal_repository import AlertSignalRepository
+from ..db.exchange_info_repository import ExchangeInfoRepository
 from ..db.strategy_signals_repository import StrategySignalsRepository
-from ..models.trading.kline_models import KlineBars, KlineBar
+from ..db.tasks_repository import TasksRepository
+from ..models.trading.kline_models import KlineBar, KlineBars
 from ..protocol.messages import MessageAck
-from .subscription_manager import SubscriptionManager
-from .client_manager import ClientManager
 from .alert_handler import AlertHandler
+from .client_manager import ClientManager
+from .subscription_manager import SubscriptionManager
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ class TaskRouter:
 
     async def handle(
         self, client_id: str, request: dict[str, Any]
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         """处理客户端请求（严格遵循07-websocket-protocol.md）
 
         协议格式：顶层type字段直接是具体操作类型（如GET_CONFIG, GET_KLINES等）

@@ -118,8 +118,8 @@ class StrategySignalsRepository:
             (信号列表, 总数)
         """
         # 构建动态查询条件
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
         param_idx = 1
 
         if symbol:
@@ -199,8 +199,8 @@ class StrategySignalsRepository:
         Returns:
             信号列表
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
         param_idx = 1
 
         if symbol:

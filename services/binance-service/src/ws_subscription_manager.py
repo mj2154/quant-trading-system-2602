@@ -179,7 +179,9 @@ class WSSubscriptionManager:
         # 从数据中提取流名称
         stream = self._extract_stream(package.data)
         if not stream:
-            logger.warning(f"[WS_DATA] 无法识别的数据格式: {package.data.get('e', 'unknown')}")
+            logger.warning(
+                f"[WS_DATA] 无法识别的数据格式: {package.data.get('e', 'unknown')}"
+            )
             return
 
         # 通过 client_id 判断数据来源，添加正确的后缀
@@ -195,7 +197,9 @@ class WSSubscriptionManager:
                 data=package.data,
                 event_time=datetime.now(timezone.utc),
             )
-            logger.debug(f"[WS_DATA] 写入数据: {subscription_key} from {package.client_id}")
+            logger.debug(
+                f"[WS_DATA] 写入数据: {subscription_key} from {package.client_id}"
+            )
         except Exception as e:
             logger.error(f"写入实时数据失败: {subscription_key}, {e}")
 
@@ -306,7 +310,9 @@ class WSSubscriptionManager:
         payload: str,
     ) -> None:
         """通知处理器"""
-        logger.debug(f"[LISTEN] 收到通知: channel={channel}, pid={pid}, payload={payload[:100]}")
+        logger.debug(
+            f"[LISTEN] 收到通知: channel={channel}, pid={pid}, payload={payload[:100]}"
+        )
         asyncio.create_task(self._handle_notification(channel, payload))
 
     async def _handle_notification(self, channel: str, payload: str) -> None:
@@ -333,7 +339,9 @@ class WSSubscriptionManager:
                 event_data = data.get("data", {})
                 subscription_key = event_data.get("subscription_key")
                 data_type = event_data.get("data_type")
-                logger.debug(f"[HANDLE] subscription.add: key={subscription_key}, type={data_type}")
+                logger.debug(
+                    f"[HANDLE] subscription.add: key={subscription_key}, type={data_type}"
+                )
                 if subscription_key and data_type:
                     await self._add_subscribe(subscription_key)
 
@@ -342,7 +350,9 @@ class WSSubscriptionManager:
                 event_data = data.get("data", {})
                 subscription_key = event_data.get("subscription_key")
                 data_type = event_data.get("data_type")
-                logger.debug(f"[HANDLE] subscription.remove: key={subscription_key}, type={data_type}")
+                logger.debug(
+                    f"[HANDLE] subscription.remove: key={subscription_key}, type={data_type}"
+                )
                 if subscription_key and data_type:
                     await self._add_unsubscribe(subscription_key)
 
@@ -387,7 +397,9 @@ class WSSubscriptionManager:
         if not subscribes and not unsubscribes:
             return
 
-        logger.debug(f"[FLUSH] 执行批处理: subscribes={len(subscribes)}, unsubscribes={len(unsubscribes)}")
+        logger.debug(
+            f"[FLUSH] 执行批处理: subscribes={len(subscribes)}, unsubscribes={len(unsubscribes)}"
+        )
 
         if subscribes:
             await self._execute_batch_subscribe(list(subscribes))
@@ -410,7 +422,9 @@ class WSSubscriptionManager:
 
         for key in subscription_keys:
             try:
-                stream, is_futures = self._repository.subscription_key_to_binance_stream(key)
+                stream, is_futures = (
+                    self._repository.subscription_key_to_binance_stream(key)
+                )
                 if is_futures:
                     futures_streams.append(stream)
                 else:
@@ -424,11 +438,13 @@ class WSSubscriptionManager:
             if client:
                 try:
                     await client.subscribe(spot_streams)
-                    logger.info(f"[EXEC_SUB] 现货批量订阅成功: {len(spot_streams)} 个流")
+                    logger.info(
+                        f"[EXEC_SUB] 现货批量订阅成功: {len(spot_streams)} 个流"
+                    )
                 except Exception as e:
                     logger.error(f"[EXEC_SUB] 现货批量订阅失败: {e}")
             else:
-                logger.error(f"[EXEC_SUB] 现货客户端不存在")
+                logger.error("[EXEC_SUB] 现货客户端不存在")
 
         # 期货客户端批量订阅
         if futures_streams:
@@ -436,15 +452,19 @@ class WSSubscriptionManager:
             if client:
                 try:
                     await client.subscribe(futures_streams)
-                    logger.info(f"[EXEC_SUB] 期货批量订阅成功: {len(futures_streams)} 个流")
+                    logger.info(
+                        f"[EXEC_SUB] 期货批量订阅成功: {len(futures_streams)} 个流"
+                    )
                 except Exception as e:
                     logger.error(f"[EXEC_SUB] 期货批量订阅失败: {e}")
             else:
-                logger.error(f"[EXEC_SUB] 期货客户端不存在")
+                logger.error("[EXEC_SUB] 期货客户端不存在")
 
     async def _execute_batch_unsubscribe(self, subscription_keys: list[str]) -> None:
         """执行批量取消订阅"""
-        logger.info(f"[EXEC_UNSUB] 开始执行批量取消订阅: {len(subscription_keys)} 个订阅")
+        logger.info(
+            f"[EXEC_UNSUB] 开始执行批量取消订阅: {len(subscription_keys)} 个订阅"
+        )
 
         # 按客户端分组订阅键
         spot_streams: list[str] = []
@@ -452,7 +472,9 @@ class WSSubscriptionManager:
 
         for key in subscription_keys:
             try:
-                stream, is_futures = self._repository.subscription_key_to_binance_stream(key)
+                stream, is_futures = (
+                    self._repository.subscription_key_to_binance_stream(key)
+                )
                 if is_futures:
                     futures_streams.append(stream)
                 else:
@@ -466,7 +488,9 @@ class WSSubscriptionManager:
             if client:
                 try:
                     await client.unsubscribe(spot_streams)
-                    logger.info(f"[EXEC_UNSUB] 现货批量取消订阅成功: {len(spot_streams)} 个流")
+                    logger.info(
+                        f"[EXEC_UNSUB] 现货批量取消订阅成功: {len(spot_streams)} 个流"
+                    )
                 except Exception as e:
                     logger.error(f"[EXEC_UNSUB] 现货批量取消订阅失败: {e}")
 
@@ -476,7 +500,9 @@ class WSSubscriptionManager:
             if client:
                 try:
                     await client.unsubscribe(futures_streams)
-                    logger.info(f"[EXEC_UNSUB] 期货批量取消订阅成功: {len(futures_streams)} 个流")
+                    logger.info(
+                        f"[EXEC_UNSUB] 期货批量取消订阅成功: {len(futures_streams)} 个流"
+                    )
                 except Exception as e:
                     logger.error(f"[EXEC_UNSUB] 期货批量取消订阅失败: {e}")
 
@@ -504,7 +530,9 @@ class WSSubscriptionManager:
             if rows:
                 subscription_keys = [row["subscription_key"] for row in rows]
                 data_types = [row["data_type"] for row in rows]
-                logger.info(f"全量同步：发现 {len(subscription_keys)} 个订阅: {data_types}")
+                logger.info(
+                    f"全量同步：发现 {len(subscription_keys)} 个订阅: {data_types}"
+                )
                 await self._execute_batch_subscribe(subscription_keys)
             else:
                 logger.info("全量同步：无订阅")

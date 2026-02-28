@@ -1,10 +1,13 @@
 import copy
 import hashlib
 import threading
+from typing import TypeVar
 
 import numpy as np
 import pandas as pd
 from cachetools import LRUCache
+
+T = TypeVar("T")
 
 
 class IndicatorCache:
@@ -27,34 +30,48 @@ class IndicatorCache:
             self._cache_lock = threading.RLock()
 
     @staticmethod
-    def _hash_data(data) -> str:
+    def _hash_data(
+        data: pd.DataFrame | pd.Series | np.ndarray,
+    ) -> str:
         if isinstance(data, pd.DataFrame):
             # 增加时间范围哈希
             time_range_hash = hashlib.md5(
-                f"{data.index[0]}_{data.index[-1]}".encode()
+                f"{data.index[0]}_{data.index[-1]}".encode(),
+                usedforsecurity=False,
             ).hexdigest()[:8]
 
             # 对关键列采样（首尾各50行+最后100行）
-            head = data[['open','high','low','close']].head(50)
-            tail = data[['open','high','low','close']].tail(50)
+            head = data[["open", "high", "low", "close"]].head(50)
+            tail = data[["open", "high", "low", "close"]].tail(50)
             sample = pd.concat([head, tail]).to_numpy()
 
-            return time_range_hash + hashlib.md5(sample.tobytes()).hexdigest()
+            return time_range_hash + hashlib.md5(
+                sample.tobytes(), usedforsecurity=False
+            ).hexdigest()
 
         elif isinstance(data, pd.Series):
             # 时间序列增加起止点哈希
-            if data.index.dtype == 'datetime64[ns]':
+            if data.index.dtype == "datetime64[ns]":
                 range_hash = hashlib.md5(
-                    f"{data.index[0]}_{data.index[-1]}".encode()
+                    f"{data.index[0]}_{data.index[-1]}".encode(),
+                    usedforsecurity=False,
                 ).hexdigest()[:8]
-                return range_hash + hashlib.md5(data.tail(50).to_numpy().tobytes()).hexdigest()
+                return range_hash + hashlib.md5(
+                    data.tail(50).to_numpy().tobytes(), usedforsecurity=False
+                ).hexdigest()
 
-            return hashlib.md5(data.tail(50).to_numpy().tobytes()).hexdigest()
+            return hashlib.md5(
+                data.tail(50).to_numpy().tobytes(), usedforsecurity=False
+            ).hexdigest()
 
         else:
-            return hashlib.md5(np.asarray(data).tobytes()).hexdigest()
+            return hashlib.md5(
+                np.asarray(data).tobytes(), usedforsecurity=False
+            ).hexdigest()
 
-    def get_cache_key(self, indicator_cls, params: dict, data) -> str:
+    def get_cache_key(
+        self, indicator_cls: type, params: dict, data: pd.DataFrame | pd.Series | np.ndarray
+    ) -> str:
         """生成标准化的缓存键"""
         # 参数排序确保一致
         sorted_params = tuple(sorted(params.items()))
@@ -63,7 +80,7 @@ class IndicatorCache:
         # 将元组转换为字符串作为缓存键
         return str(hash(key_tuple))
 
-    def get(self, key):
+    def get(self, key: str) -> T | None:
         """线程安全的缓存获取"""
         with self._cache_lock:
             value = self._cache.get(key)
@@ -74,7 +91,7 @@ class IndicatorCache:
             self._stats["misses"] += 1
             return None
 
-    def set(self, key, value):
+    def set(self, key: str, value: T) -> None:
         """线程安全的缓存设置"""
         with self._cache_lock:
             # 由于使用了cachetools的LRUCache，它会自动处理大小限制和LRU淘汰策略

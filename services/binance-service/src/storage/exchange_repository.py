@@ -11,7 +11,6 @@
 
 import json
 import logging
-from datetime import datetime
 from typing import Optional
 
 import asyncpg
@@ -244,8 +243,12 @@ class ExchangeInfoRepository:
                 is_spot_trading_allowed=row["is_spot_trading_allowed"],
                 is_margin_trading_allowed=row["is_margin_trading_allowed"],
                 permission_sets=row["permission_sets"],
-                default_self_trade_prevention_mode=row["default_self_trade_prevention_mode"],
-                allowed_self_trade_prevention_modes=row["allowed_self_trade_prevention_modes"],
+                default_self_trade_prevention_mode=row[
+                    "default_self_trade_prevention_mode"
+                ],
+                allowed_self_trade_prevention_modes=row[
+                    "allowed_self_trade_prevention_modes"
+                ],
                 last_updated=row["last_updated"],
             )
         return None
@@ -338,8 +341,12 @@ class ExchangeInfoRepository:
                 is_spot_trading_allowed=row["is_spot_trading_allowed"],
                 is_margin_trading_allowed=row["is_margin_trading_allowed"],
                 permission_sets=row["permission_sets"],
-                default_self_trade_prevention_mode=row["default_self_trade_prevention_mode"],
-                allowed_self_trade_prevention_modes=row["allowed_self_trade_prevention_modes"],
+                default_self_trade_prevention_mode=row[
+                    "default_self_trade_prevention_mode"
+                ],
+                allowed_self_trade_prevention_modes=row[
+                    "allowed_self_trade_prevention_modes"
+                ],
                 last_updated=row["last_updated"],
             )
             for row in rows

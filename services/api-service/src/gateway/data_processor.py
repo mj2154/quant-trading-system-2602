@@ -19,13 +19,15 @@ from uuid import UUID
 
 import asyncpg
 
-from .client_manager import ClientManager
 from ..converters import convert_binance_to_tv
-from ..models.trading.kline_models import KlineBars, KlineBar
-from ..models.protocol.ws_message import MessageSuccess
 from ..models.protocol.constants import PROTOCOL_VERSION
+from ..models.protocol.ws_message import MessageSuccess
+from ..models.trading.kline_models import KlineBar, KlineBars
+from .client_manager import ClientManager
 
 if TYPE_CHECKING:
+    from ..db.tasks_repository import TasksRepository
+else:
     from ..db.tasks_repository import TasksRepository
 
 logger = logging.getLogger(__name__)
@@ -82,7 +84,7 @@ class DataProcessor:
         self,
         dsn: str,
         client_manager: ClientManager,
-        tasks_repo: "TasksRepository | None" = None,
+        tasks_repo: TasksRepository | None = None,
     ) -> None:
         """初始化通知监听器
 
@@ -98,7 +100,7 @@ class DataProcessor:
         self._listener_task: asyncio.Task | None = None
         self._running = False
 
-    def set_tasks_repository(self, tasks_repo: "TasksRepository") -> None:
+    def set_tasks_repository(self, tasks_repo: TasksRepository) -> None:
         """设置任务仓储
 
         Args:
@@ -261,7 +263,7 @@ class DataProcessor:
                         message,
                     )
                 else:
-                    logger.warning(f"[Broadcast] signal.new has no alert_id, skipping broadcast")
+                    logger.warning("[Broadcast] signal.new has no alert_id, skipping broadcast")
 
             # 注意：alert_config 事件（alert_config.new/update/delete）不再广播到 SIGNAL: 频道
             # 前端通过订阅 SIGNAL:{alert_id} 来接收真正的信号 (signal.new)
@@ -398,7 +400,7 @@ class DataProcessor:
                 return
 
             if not self._tasks_repo:
-                logger.error(f"任务仓储未设置，无法查询 klines_history")
+                logger.error("任务仓储未设置，无法查询 klines_history")
                 await self._send_error_to_client(
                     client_id, "REPO_NOT_SET", "Task repository not set"
                 )
@@ -481,7 +483,7 @@ class DataProcessor:
             request_id = payload.get("requestId")
 
             if not self._tasks_repo:
-                logger.error(f"任务仓储未设置，无法查询 account_info")
+                logger.error("任务仓储未设置，无法查询 account_info")
                 await self._send_error_to_client(
                     client_id, "REPO_NOT_SET", "Task repository not set"
                 )
@@ -599,7 +601,7 @@ class DataProcessor:
             data: 通知数据
             payload: 通知中的 payload（包含 requestId）
         """
-        task_id = data.get("id")
+        _task_id = data.get("id")  # 保留以备将来使用
         request_id = payload.get("requestId")
 
         result = data.get("result")
@@ -667,7 +669,6 @@ class DataProcessor:
             subscription_key = event_data.get("subscription_key")
             data_type = event_data.get("data_type")
             realtime_data = event_data.get("data")
-            event_time = event_data.get("event_time")
 
             logger.debug(
                 f"收到实时数据更新: subscription_key={subscription_key}, "
@@ -694,7 +695,7 @@ class DataProcessor:
             }
 
             # 调试：获取订阅的客户端
-            clients = self._client_manager._subscription_manager.get_subscribed_clients(subscription_key) if self._client_manager._subscription_manager else []
+            clients: list[str] = self._client_manager._subscription_manager.get_subscribed_clients(subscription_key) if self._client_manager._subscription_manager else []
             logger.debug(f"[DEBUG] 订阅 {subscription_key} 的客户端: {clients}")
 
             # 广播给订阅的客户端

@@ -4,7 +4,7 @@
 继承BinanceHTTPClient基类，配置现货交易API端点。
 """
 
-from typing import Optional
+from typing import Optional, Union
 
 from .base_http_client import BinanceHTTPClient
 
