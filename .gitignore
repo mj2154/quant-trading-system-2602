@@ -1,0 +1,27 @@
+# Claude Code
+.claude/
+.claude.*
+
+# Playwright MCP
+.playwright-mcp/
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# API Keys and secrets
+services/binance-service/keys/
+
+# Frontend (Electron + Vue)
+frontend/trading-panel/node_modules/
+frontend/trading-panel/dist/
+frontend/trading-panel/dist-electron/
+frontend/trading-panel/release/
+*.local

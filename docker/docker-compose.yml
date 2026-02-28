@@ -1,0 +1,168 @@
+name: quant-trading-system
+
+# 量化交易系统 Docker Compose 配置
+# 精简版：三个核心模块
+
+services:
+  # TimescaleDB 数据库
+  # 使用官方镜像 timescale/timescaledb:latest-pg18
+  # 扩展已预装，无需安装，直接创建超表
+  timescale-db:
+    image: timescale/timescaledb:latest-pg18
+    container_name: timescale-db
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    environment:
+      - POSTGRES_DB=trading_db
+      - POSTGRES_USER=dbuser
+      - POSTGRES_PASSWORD=pass
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbuser -d trading_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Clash 代理
+  clash-proxy:
+    image: metacubex/mihomo:latest
+    container_name: clash-proxy
+    ports:
+      - "7890:7890"
+      - "7891:7891"
+      - "9090:9090"
+    volumes:
+      - ./clash-proxy/config/config.yaml:/root/.config/mihomo/config.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai
+
+  # K线采集器（待实现）
+  # kline-collector:
+  #   build:
+  #     context: ../services/kline-collector
+  #     dockerfile: Dockerfile
+  #   image: kline-collector:latest
+  #   container_name: kline-collector
+  #   ports:
+  #     - "8001:8001"
+  #   volumes:
+  #     - ../services/kline-collector/.env:/app/.env:ro
+  #   environment:
+  #     - DATABASE_URL=postgresql://dbuser:pass@timescale-db:5432/trading_db
+  #     - PROXY_URL=http://clash-proxy:7890
+  #     - TZ=Asia/Shanghai
+  #     - LOG_LEVEL=INFO
+  #   depends_on:
+  #     timescale-db:
+  #       condition: service_healthy
+  #     clash-proxy:
+  #       condition: service_started
+
+  # 信号计算系统（待实现）
+  # backtest:
+  #   build:
+  #     context: ../services/backtest
+  #     dockerfile: Dockerfile
+  #   image: backtest-service:latest
+  #   container_name: backtest-service
+  #   ports:
+  #     - "8002:8002"
+  #   volumes:
+  #     - ../services/backtest/.env:/app/.env:ro
+  #   environment:
+  #     - TZ=Asia/Shanghai
+  #     - LOG_LEVEL=INFO
+  #   depends_on:
+  #     timescale-db:
+  #       condition: service_healthy
+
+  # API服务（统一管理器）
+  api-service:
+    build:
+      context: ../services/api-service
+      dockerfile: Dockerfile
+    image: api-service:latest
+    container_name: api-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../services/api-service/src:/app/src
+      - ../services/api-service/pyproject.toml:/app/pyproject.toml
+
+    environment:
+      - DATABASE_URL=postgresql://dbuser:pass@timescale-db:5432/trading_db
+      - CLASH_PROXY_HTTP_URL=http://clash-proxy:7890
+      - TZ=Asia/Shanghai
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      timescale-db:
+        condition: service_healthy
+      clash-proxy:
+        condition: service_started
+    command: uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --ws websockets --ws-ping-interval 20 --ws-ping-timeout 60
+
+  # 币安数据采集服务
+  binance-service:
+    build:
+      context: ../services/binance-service
+      dockerfile: Dockerfile
+    image: binance-service:latest
+    container_name: binance-service
+    volumes:
+      - ../services/binance-service/src:/app/src
+      - ../services/binance-service/pyproject.toml:/app/pyproject.toml
+      - ../services/binance-service/keys:/app/keys
+      - ../services/binance-service/tests:/app/tests
+
+    env_file:
+      - ../services/binance-service/.env
+
+    environment:
+      - DATABASE_HOST=timescale-db
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=trading_db
+      - DATABASE_USER=dbuser
+      - DATABASE_PASSWORD=pass
+      - CLASH_PROXY_HTTP_URL=http://clash-proxy:7890
+      - CLASH_PROXY_WS_URL=http://clash-proxy:7890
+      - TZ=Asia/Shanghai
+      - LOG_LEVEL=INFO
+    depends_on:
+      timescale-db:
+        condition: service_healthy
+      clash-proxy:
+        condition: service_started
+    command: uv run python src/main.py
+
+  # 信号计算服务
+  signal-service:
+    build:
+      context: ../services/signal-service
+      dockerfile: Dockerfile
+    image: signal-service:latest
+    container_name: signal-service
+    volumes:
+      - ../services/signal-service/src:/app/src
+      - ../services/signal-service/pyproject.toml:/app/pyproject.toml
+      - ../services/signal-service/main.py:/app/main.py
+
+    environment:
+      - DATABASE_HOST=timescale-db
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=trading_db
+      - DATABASE_USER=dbuser
+      - DATABASE_PASSWORD=pass
+      - TZ=Asia/Shanghai
+      - LOG_LEVEL=INFO
+    depends_on:
+      timescale-db:
+        condition: service_healthy
+    command: uv run python main.py
+
+
+volumes:
+  timescale_data:

@@ -1,0 +1,141 @@
+# HTTP代理端口
+port: 7890
+
+# SOCKS5代理端口
+socks-port: 7891
+
+# 混合代理端口
+mixed-port: 7892
+
+# 允许局域网访问
+allow-lan: true
+
+# 模式: rule
+mode: rule
+
+# 日志级别: silent/info/debug/warning/error
+log-level: info
+
+# 外部控制接口(用于Dashboard)
+external-controller: 0.0.0.0:9090
+secret: "clash-secret-key-2024"
+
+# IPv6
+ipv6: false
+
+# DNS设置
+dns:
+  enable: true
+  ipv6: false
+  listen: 0.0.0.0:53
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver:
+    - 114.114.114.114
+    - 8.8.8.8
+    - 1.1.1.1
+
+# 代理提供者(订阅)
+proxy-providers:
+  # 币安代理订阅
+  binance_proxy:
+    type: http
+    behavior: classical
+    url: "https://x1.332244.icu/api/v1/client/subscribe?token=05e3a82290dbdbae9653614a28b80eb3"
+    interval: 86400
+    path: ./providers/binance_proxy.yaml
+
+# 代理组策略
+proxy-groups:
+  # 自动选择最优代理(仅亚洲节点)
+  # 使用 url-test 模式：每 30 秒测试一次延迟，选择最优代理
+  # 阈值：< 100ms 的代理为优秀，> 100ms 切换到下一个
+  - name: 自动选择
+    type: url-test
+    use:
+      - binance_proxy
+    filter: '^(?!.*(美国|USA|US|united)).*'  # 排除美国节点
+    url: 'http://www.gstatic.com/generate_204'
+    interval: 30  # 🔧 减少到30秒，更频繁的健康检查
+    timeout: 3000  # 🔧 减少超时时间，快速检测失败
+    tolerance: 50   # 🔧 50ms容差，更敏感的切换机制
+    lazy: false     # 🔧 启动时立即测试，避免使用失效节点
+
+# 规则配置
+rules:
+  # 代理Google服务
+  - GEOSITE,google,自动选择
+
+  # 绕过局域网IP
+  - GEOIP,private,DIRECT
+
+  # 绕过局域网域名
+  - GEOSITE,private,DIRECT
+
+  # 绕过中国公共DNS IP
+  - IP-CIDR,223.5.5.5/32,DIRECT
+  - IP-CIDR,223.6.6.6/32,DIRECT
+  - IP-CIDR,2400:3200::1/128,DIRECT
+  - IP-CIDR,2400:3200:baba::1/128,DIRECT
+  - IP-CIDR,119.29.29.29/32,DIRECT
+  - IP-CIDR,1.12.12.12/32,DIRECT
+  - IP-CIDR,120.53.53.53/32,DIRECT
+  - IP-CIDR,2402:4e00::/64,DIRECT
+  - IP-CIDR,2402:4e00:1::/64,DIRECT
+  - IP-CIDR,180.76.76.76/32,DIRECT
+  - IP-CIDR,2400:da00::6666/128,DIRECT
+  - IP-CIDR,114.114.114.114/32,DIRECT
+  - IP-CIDR,114.114.115.115/32,DIRECT
+  - IP-CIDR,114.114.114.119/32,DIRECT
+  - IP-CIDR,114.114.115.119/32,DIRECT
+  - IP-CIDR,114.114.114.110/32,DIRECT
+  - IP-CIDR,114.114.115.110/32,DIRECT
+  - IP-CIDR,180.184.1.1/32,DIRECT
+  - IP-CIDR,180.184.2.2/32,DIRECT
+  - IP-CIDR,101.226.4.6/32,DIRECT
+  - IP-CIDR,218.30.118.6/32,DIRECT
+  - IP-CIDR,123.125.81.6/32,DIRECT
+  - IP-CIDR,140.207.198.6/32,DIRECT
+  - IP-CIDR,1.2.4.8/32,DIRECT
+  - IP-CIDR,210.2.4.8/32,DIRECT
+  - IP-CIDR,52.80.66.66/32,DIRECT
+  - IP-CIDR,117.50.22.22/32,DIRECT
+  - IP-CIDR,2400:7fc0:849e:200::4/128,DIRECT
+  - IP-CIDR,2404:c2c0:85d8:901::4/128,DIRECT
+  - IP-CIDR,117.50.10.10/32,DIRECT
+  - IP-CIDR,52.80.52.52/32,DIRECT
+  - IP-CIDR,2400:7fc0:849e:200::8/128,DIRECT
+  - IP-CIDR,2404:c2c0:85d8:901::8/128,DIRECT
+  - IP-CIDR,117.50.60.30/32,DIRECT
+  - IP-CIDR,52.80.60.30/32,DIRECT
+
+  # 绕过中国公共DNS域名
+  - DOMAIN,alidns.com,DIRECT
+  - DOMAIN,doh.pub,DIRECT
+  - DOMAIN,dot.pub,DIRECT
+  - DOMAIN,360.cn,DIRECT
+  - DOMAIN,onedns.net,DIRECT
+
+  # 币安相关域名 - 使用自动选择组
+  - DOMAIN-SUFFIX,binance.com,自动选择
+  - DOMAIN-SUFFIX,binance.org,自动选择
+  - DOMAIN-SUFFIX,binance.us,自动选择
+
+  # 加密货币相关 - 使用自动选择组
+  - DOMAIN-SUFFIX,coincap.io,自动选择
+  - DOMAIN-SUFFIX,cointelegraph.com,自动选择
+  - DOMAIN-SUFFIX,coinmarketcap.com,自动选择
+  - DOMAIN-SUFFIX,coinbase.com,自动选择
+  - DOMAIN-SUFFIX,kraken.com,自动选择
+
+  # 搜索引擎（bing需要单独配置，因为不在geosite:google中）
+  - DOMAIN-SUFFIX,bing.com,自动选择
+
+  # 社交媒体
+  - DOMAIN-SUFFIX,facebook.com,自动选择
+  - DOMAIN-SUFFIX,twitter.com,自动选择
+  - DOMAIN-SUFFIX,youtube.com,自动选择
+  - DOMAIN-SUFFIX,reddit.com,自动选择
+
+  # 其他全部走代理
+  - MATCH,自动选择

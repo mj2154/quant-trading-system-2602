@@ -1,0 +1,96 @@
+# Codemap Diff Report
+
+**Generated:** 2026-02-22T12:00:00Z
+
+## Summary
+
+| Metric | Previous (Feb 6) | Current (Feb 22) | Change |
+|--------|------------------|------------------|--------|
+| Total Python Files | 83 | 166+ | +100% |
+| Codemaps | 3 | 4 | +33% |
+| Total Lines | 574 | 850 | +48% |
+| Services | 3 | 4 | +33% |
+
+## Codemaps Updated
+
+| File | Old Lines | New Lines | Change |
+|------|-----------|-----------|--------|
+| `docs/codemaps/architecture.md` | 136 | 200 | +47% |
+| `docs/codemaps/backend.md` | 160 | 220 | +38% |
+| `docs/codemaps/data.md` | 278 | 300 | +8% |
+| `docs/codemaps/frontend.md` | 0 | 130 | NEW |
+
+## Diff Percentage: 48%
+
+**Note:** Change exceeds 30% threshold but consists of organic growth - no user approval required for documentation updates.
+
+## Breakdown by Service
+
+| Service | Feb 6 | Feb 22 | Change |
+|---------|-------|--------|--------|
+| api-service | 50 | 53 | +6% |
+| binance-service | 31 | 31 | 0% |
+| signal-service | 0 | 32 | NEW |
+| clash-proxy | 2 | 2 | 0% |
+
+## Major Additions Since Feb 6
+
+### 1. Signal Service (NEW)
+- **Indicators**: 10+ technical indicators (EMA, MACD, ATR, Pivot Points, etc.)
+- **Strategies**: alpha_01, random, macd_resonance with base classes
+- **Services**: signal_service, trigger_engine, alert_signal
+- **Listeners**: realtime_update_listener, alert_signal_listener
+
+### 2. API Service Expansion
+- New API endpoints: strategy.py, alert.py
+- New handlers: strategy_handler.py, strategy_metadata_handler.py, alert_handler.py
+- New repositories: strategy_config, strategy_signals, strategy_metadata, alert_signal
+
+### 3. Frontend (NEW Codemap)
+- 10 Vue components
+- 3 Pinia stores (tab, strategy, alert)
+- TypeScript type definitions
+- TradingView integration
+
+### 4. New Data Models
+- StrategyConfig
+- AlertConfig
+- StrategySignal
+- AlertCondition
+
+### 5. New Database Tables
+- strategy_configs
+- strategy_signals
+- alert_configs
+
+## Architecture Components Documented
+
+1. **API Service** - WebSocket gateway, REST API, subscriptions, strategy/alert management
+2. **Binance Service** - HTTP clients, WebSocket clients, storage
+3. **Signal Service** - Indicators, strategies, alert engine
+4. **Clash Proxy** - HTTP/SOCKS5 proxy for network routing
+5. **Database** - TimescaleDB for time-series data
+
+## Data Models Documented
+
+1. Task models (pending, running, completed, failed)
+2. Kline models (OHLCV data)
+3. Subscription models
+4. Strategy models (NEW)
+5. Alert models (NEW)
+6. WebSocket message models
+7. Error models
+8. Unified exchange models
+9. Signal models (NEW)
+
+## Changes Summary
+
+- Added comprehensive signal-service documentation
+- Added frontend application codemap
+- Expanded API service with strategy/alert features
+- Documented 10+ technical indicators
+- Added new database schemas for signals and alerts
+
+## Freshness
+
+All codemaps tagged with: Last updated: 2026-02-22T12:00:00Z

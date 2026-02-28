@@ -1,0 +1,195 @@
+# =============================================================================
+# 数据库触发器测试 GitHub Actions 工作流
+# =============================================================================
+# 在每次推送和PR时自动运行数据库触发器测试
+# =============================================================================
+
+name: Database Trigger Tests
+
+on:
+  push:
+    branches: [ master, develop ]
+    paths:
+      - 'database/**'
+      - 'shared/schemas/**'
+  pull_request:
+    branches: [ master, develop ]
+    paths:
+      - 'database/**'
+      - 'shared/schemas/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: timescale/timescaledb:2.14.1-pg18
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trading_system
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "PostgreSQL is ready"
+
+      - name: Validate environment
+        run: |
+          cd database/tests
+          chmod +x validate_environment.sh
+          ./validate_environment.sh
+
+      - name: Setup test environment
+        run: |
+          cd database/tests
+          chmod +x run_tests.sh
+          make setup
+
+      - name: Run unit tests
+        run: |
+          cd database/tests
+          ./run_tests.sh -t unit
+
+      - name: Run integration tests
+        run: |
+          cd database/tests
+          ./run_tests.sh -t integration
+
+      - name: Run performance tests
+        run: |
+          cd database/tests
+          ./run_tests.sh -t performance
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-logs
+          path: database/tests/*.log
+
+  # PostgreSQL compatibility test
+  compatibility-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - pg_version: '18'
+            timescale_version: '2.14.1'
+          - pg_version: '17'
+            timescale_version: '2.14.1'
+
+    services:
+      postgres:
+        image: timescale/timescaledb:${{ matrix.timescale_version }}-pg${{ matrix.pg_version }}
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trading_system
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "PostgreSQL is ready"
+
+      - name: Verify PostgreSQL version
+        run: |
+          psql -h localhost -U postgres -d trading_system -c "SELECT version();"
+
+      - name: Verify TimescaleDB version
+        run: |
+          psql -h localhost -U postgres -d trading_system -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';"
+
+      - name: Run quick validation
+        run: |
+          cd database/tests
+          chmod +x validate_environment.sh
+          chmod +x run_tests.sh
+          ./validate_environment.sh
+          make quick-check
+
+  # Security scan
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'database/schemas/'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Code quality check
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Check for TODO comments
+        run: |
+          # Check if there are TODO comments in SQL files
+          TODO_COUNT=$(grep -r "TODO" database/schemas/ | wc -l)
+          if [ "$TODO_COUNT" -gt 0 ]; then
+            echo "Found $TODO_COUNT TODO comments in database schemas"
+            grep -r "TODO" database/schemas/
+            exit 1
+          fi
+          echo "No TODO comments found in database schemas"
+
+      - name: Check SQL file encoding
+        run: |
+          # Check if all SQL files use UTF-8 encoding
+          find database/schemas -name "*.sql" -exec file {} \; | grep -v "UTF-8" | head -n 5 || echo "All SQL files use UTF-8 encoding"
