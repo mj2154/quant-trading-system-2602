@@ -1,0 +1,21 @@
+# Docker 构建忽略
+.git
+.gitignore
+.github
+docs
+*.md
+README*
+LICENSE
+tests/e2e
+.dockerignore
+Dockerfile*
+docker-compose*
+.env
+.pytest_cache
+__pycache__
+*.pyc
+.pyo
+.ruff_cache
+.venv
+venv
+node_modules
