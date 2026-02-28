@@ -46,7 +46,11 @@ report = ["text", "json", "html"]
 [dependency-groups]
 dev = [
     "bandit>=1.9.3",
+    "black>=26.1.0",
+    "isort>=8.0.1",
+    "mypy>=1.19.1",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    "ruff>=0.15.4",
 ]

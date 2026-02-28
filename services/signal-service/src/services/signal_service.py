@@ -31,11 +31,7 @@ from .constants import REQUIRED_KLINES, TV_INTERVAL_TO_MS
 from .kline_cache import _init_kline_cache, _update_kline_cache
 from .kline_utils import (
     _build_ohlcv_for_trigger_type,
-    _convert_binance_kline_to_standard,
-    _convert_klines_to_dataframe,
     _format_kline_time,
-    _get_interval_ms,
-    _get_previous_period_time,
 )
 from .kline_validator import _check_kline_data_validity
 from .subscription_utils import _build_subscription_key
@@ -44,7 +40,6 @@ from .trigger_engine import (
     TriggerType,
     get_trigger_engine,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -782,8 +777,10 @@ class SignalService:
                     data = json.loads(payload)
                     if data.get("id") == task_id:
                         completed_event.set()
-                except Exception:
-                    pass
+                except json.JSONDecodeError as e:
+                    logger.warning("Failed to parse task.completed payload: %s", e)
+                except Exception as e:
+                    logger.error("Unexpected error in task.completed handler: %s", e)
 
             async def handle_failed(
                 connection: Any, pid: int, channel: str, payload: str
@@ -793,8 +790,10 @@ class SignalService:
                     data = json.loads(payload)
                     if data.get("id") == task_id:
                         failed_event.set()
-                except Exception:
-                    pass
+                except json.JSONDecodeError as e:
+                    logger.warning("Failed to parse task.failed payload: %s", e)
+                except Exception as e:
+                    logger.error("Unexpected error in task.failed handler: %s", e)
 
             # Register listeners
             await conn.add_listener("task.completed", handle_completed)
@@ -882,8 +881,10 @@ class SignalService:
                 data = json.loads(payload)
                 if data.get("id") == task_id:
                     completed_event.set()
-            except Exception:
-                pass
+            except json.JSONDecodeError as e:
+                logger.warning("Failed to parse task.completed payload: %s", e)
+            except Exception as e:
+                logger.error("Unexpected error in task.completed handler: %s", e)
 
         async def handle_failed(
             connection: Any, pid: int, channel: str, payload: str
@@ -893,8 +894,10 @@ class SignalService:
                 data = json.loads(payload)
                 if data.get("id") == task_id:
                     failed_event.set()
-            except Exception:
-                pass
+            except json.JSONDecodeError as e:
+                logger.warning("Failed to parse task.failed payload: %s", e)
+            except Exception as e:
+                logger.error("Unexpected error in task.failed handler: %s", e)
 
         # Register listeners on the provided connection
         await conn.add_listener("task.completed", handle_completed)

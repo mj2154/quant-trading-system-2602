@@ -7,8 +7,8 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Literal
-from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Optional
+from pydantic import BaseModel, Field, field_validator
 
 
 class PriceFilter(BaseModel):
@@ -117,9 +117,15 @@ class ExchangeInfoSymbol(BaseModel):
     # 精度信息（基于币安API字段）
     base_asset_precision: int = Field(default=8, ge=0, description="baseAssetPrecision")
     quote_precision: int = Field(default=8, ge=0, description="quotePrecision")
-    quote_asset_precision: int = Field(default=8, ge=0, description="quoteAssetPrecision")
-    base_commission_precision: int = Field(default=8, ge=0, description="baseCommissionPrecision")
-    quote_commission_precision: int = Field(default=8, ge=0, description="quoteCommissionPrecision")
+    quote_asset_precision: int = Field(
+        default=8, ge=0, description="quoteAssetPrecision"
+    )
+    base_commission_precision: int = Field(
+        default=8, ge=0, description="baseCommissionPrecision"
+    )
+    quote_commission_precision: int = Field(
+        default=8, ge=0, description="quoteCommissionPrecision"
+    )
 
     # 交易选项
     order_types: list[str] = Field(default_factory=list, description="orderTypes")
@@ -133,22 +139,38 @@ class ExchangeInfoSymbol(BaseModel):
     oco_allowed: bool = Field(default=False, description="ocoAllowed")
     oto_allowed: bool = Field(default=False, description="otoAllowed")
     opo_allowed: bool = Field(default=False, description="opoAllowed")
-    quote_order_qty_market_allowed: bool = Field(default=False, description="quoteOrderQtyMarketAllowed")
+    quote_order_qty_market_allowed: bool = Field(
+        default=False, description="quoteOrderQtyMarketAllowed"
+    )
     allow_trailing_stop: bool = Field(default=False, description="allowTrailingStop")
-    cancel_replace_allowed: bool = Field(default=False, description="cancelReplaceAllowed")
+    cancel_replace_allowed: bool = Field(
+        default=False, description="cancelReplaceAllowed"
+    )
     amend_allowed: bool = Field(default=False, description="amendAllowed")
-    peg_instructions_allowed: bool = Field(default=False, description="pegInstructionsAllowed")
+    peg_instructions_allowed: bool = Field(
+        default=False, description="pegInstructionsAllowed"
+    )
 
     # 交易权限（基于币安API字段）
-    is_spot_trading_allowed: bool = Field(default=True, description="isSpotTradingAllowed")
-    is_margin_trading_allowed: bool = Field(default=False, description="isMarginTradingAllowed")
+    is_spot_trading_allowed: bool = Field(
+        default=True, description="isSpotTradingAllowed"
+    )
+    is_margin_trading_allowed: bool = Field(
+        default=False, description="isMarginTradingAllowed"
+    )
 
     # 权限管理（基于币安API字段）
-    permission_sets: list[list[str]] = Field(default_factory=list, description="permissionSets")
+    permission_sets: list[list[str]] = Field(
+        default_factory=list, description="permissionSets"
+    )
 
     # 自成交防护（基于币安API字段）
-    default_self_trade_prevention_mode: str = Field(default="NONE", description="defaultSelfTradePreventionMode")
-    allowed_self_trade_prevention_modes: list[str] = Field(default_factory=list, description="allowedSelfTradePreventionModes")
+    default_self_trade_prevention_mode: str = Field(
+        default="NONE", description="defaultSelfTradePreventionMode"
+    )
+    allowed_self_trade_prevention_modes: list[str] = Field(
+        default_factory=list, description="allowedSelfTradePreventionModes"
+    )
 
     # 期货特有字段（可选）
     contract_type: Optional[str] = Field(None, description="contractType")
@@ -157,13 +179,21 @@ class ExchangeInfoSymbol(BaseModel):
     delivery_time: Optional[int] = Field(None, description="deliveryTime")
     onboard_date: Optional[int] = Field(None, description="onboardDate")
     maint_margin_percent: Optional[str] = Field(None, description="maintMarginPercent")
-    required_margin_percent: Optional[str] = Field(None, description="requiredMarginPercent")
+    required_margin_percent: Optional[str] = Field(
+        None, description="requiredMarginPercent"
+    )
     price_tick_scale: Optional[int] = Field(None, description="priceTickScale")
     quantity_step_scale: Optional[int] = Field(None, description="quantityStepScale")
     max_move_order_limit: Optional[int] = Field(None, description="maxMoveOrderLimit")
 
-    @field_validator("base_asset_precision", "quote_precision", "quote_asset_precision",
-                    "base_commission_precision", "quote_commission_precision", mode="before")
+    @field_validator(
+        "base_asset_precision",
+        "quote_precision",
+        "quote_asset_precision",
+        "base_commission_precision",
+        "quote_commission_precision",
+        mode="before",
+    )
     @classmethod
     def validate_precision(cls, v):
         """验证并转换精度字段"""
@@ -244,7 +274,9 @@ class ExchangeInfoResponse(BaseModel):
 
     timezone: str = Field(default="UTC", description="服务器时区")
     server_time: int = Field(default=0, description="服务器时间戳（毫秒）")
-    symbols: list[ExchangeInfoSymbol] = Field(default_factory=list, description="交易对信息列表")
+    symbols: list[ExchangeInfoSymbol] = Field(
+        default_factory=list, description="交易对信息列表"
+    )
 
     @field_validator("server_time", mode="before")
     @classmethod
@@ -271,11 +303,19 @@ class ExchangeInfo(BaseModel):
     status: str = Field(default="TRADING", description="status")
 
     # 精度信息（基于币安API字段）
-    base_asset_precision: int = Field(default=8, ge=0, description="base_asset_precision")
+    base_asset_precision: int = Field(
+        default=8, ge=0, description="base_asset_precision"
+    )
     quote_precision: int = Field(default=8, ge=0, description="quote_precision")
-    quote_asset_precision: int = Field(default=8, ge=0, description="quote_asset_precision")
-    base_commission_precision: int = Field(default=8, ge=0, description="base_commission_precision")
-    quote_commission_precision: int = Field(default=8, ge=0, description="quote_commission_precision")
+    quote_asset_precision: int = Field(
+        default=8, ge=0, description="quote_asset_precision"
+    )
+    base_commission_precision: int = Field(
+        default=8, ge=0, description="base_commission_precision"
+    )
+    quote_commission_precision: int = Field(
+        default=8, ge=0, description="quote_commission_precision"
+    )
 
     # 交易规则过滤器
     filters: dict = Field(default_factory=dict, description="filters")
@@ -289,25 +329,43 @@ class ExchangeInfo(BaseModel):
     oco_allowed: bool = Field(default=False, description="oco_allowed")
     oto_allowed: bool = Field(default=False, description="oto_allowed")
     opo_allowed: bool = Field(default=False, description="opo_allowed")
-    quote_order_qty_market_allowed: bool = Field(default=False, description="quote_order_qty_market_allowed")
+    quote_order_qty_market_allowed: bool = Field(
+        default=False, description="quote_order_qty_market_allowed"
+    )
     allow_trailing_stop: bool = Field(default=False, description="allow_trailing_stop")
-    cancel_replace_allowed: bool = Field(default=False, description="cancel_replace_allowed")
+    cancel_replace_allowed: bool = Field(
+        default=False, description="cancel_replace_allowed"
+    )
     amend_allowed: bool = Field(default=False, description="amend_allowed")
-    peg_instructions_allowed: bool = Field(default=False, description="peg_instructions_allowed")
+    peg_instructions_allowed: bool = Field(
+        default=False, description="peg_instructions_allowed"
+    )
 
     # 交易权限（基于币安API字段）
-    is_spot_trading_allowed: bool = Field(default=True, description="is_spot_trading_allowed")
-    is_margin_trading_allowed: bool = Field(default=False, description="is_margin_trading_allowed")
+    is_spot_trading_allowed: bool = Field(
+        default=True, description="is_spot_trading_allowed"
+    )
+    is_margin_trading_allowed: bool = Field(
+        default=False, description="is_margin_trading_allowed"
+    )
 
     # 权限管理（基于币安API字段）
-    permission_sets: list[list[str]] = Field(default_factory=list, description="permission_sets")
+    permission_sets: list[list[str]] = Field(
+        default_factory=list, description="permission_sets"
+    )
 
     # 自成交防护（基于币安API字段）
-    default_self_trade_prevention_mode: str = Field(default="NONE", description="default_self_trade_prevention_mode")
-    allowed_self_trade_prevention_modes: list[str] = Field(default_factory=list, description="allowed_self_trade_prevention_modes")
+    default_self_trade_prevention_mode: str = Field(
+        default="NONE", description="default_self_trade_prevention_mode"
+    )
+    allowed_self_trade_prevention_modes: list[str] = Field(
+        default_factory=list, description="allowed_self_trade_prevention_modes"
+    )
 
     # 更新时间
-    last_updated: datetime = Field(default_factory=datetime.utcnow, description="last_updated")
+    last_updated: datetime = Field(
+        default_factory=datetime.utcnow, description="last_updated"
+    )
 
     @property
     def full_symbol(self) -> str:

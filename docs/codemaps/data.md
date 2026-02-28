@@ -1,13 +1,13 @@
 # Data Models Codemap
 
-> Last updated: 2026-02-22T12:00:00Z
+> Last updated: 2026-03-01T04:42:00Z
 > Overview of data models, schemas, and type definitions.
 
 ## Model Categories
 
 ### 1. Task Models
 
-**Location:** `services/*/src/models/task.py`
+**Location:** `services/*/src/db/tasks_repository.py`
 
 ```python
 class TaskStatus(Enum):
@@ -19,8 +19,8 @@ class TaskStatus(Enum):
 class TaskType(Enum):
     SPOT_KLINE = "spot_kline"
     FUTURES_KLINE = "futures_kline"
-    SPOT_DEPTH = "spot_depth"
-    FUTURES_DEPTH = "futures_depth"
+    SPOT_ACCOUNT = "spot_account"
+    FUTURES_ACCOUNT = "futures_account"
     EXCHANGE_INFO = "exchange_info"
 
 class Task:
@@ -36,7 +36,7 @@ class Task:
 
 ### 2. Kline Models
 
-**Location:** `services/binance-service/src/models/binance_kline.py`
+**Location:** `services/binance-service/src/models/kline_models.py`
 
 ```python
 class Kline:
@@ -55,7 +55,7 @@ class Kline:
 
 ### 3. Subscription Models
 
-**Location:** `services/api-service/src/models/subscription_models.py`
+**Location:** `services/api-service/src/models/db/subscription_models.py`
 
 ```python
 class SubscriptionType(Enum):
@@ -75,7 +75,7 @@ class Subscription:
 
 ### 4. Strategy Models
 
-**Location:** `services/api-service/src/models/strategy_models.py`
+**Location:** `services/api-service/src/models/db/signal_models.py`
 
 ```python
 class StrategyType(Enum):
@@ -97,7 +97,7 @@ class StrategyConfig:
 
 ### 5. Alert Models
 
-**Location:** `services/api-service/src/models/alert_models.py`
+**Location:** `services/api-service/src/models/db/alert_config_models.py`
 
 ```python
 class AlertType(Enum):
@@ -115,43 +115,49 @@ class AlertConfig:
     created_at: datetime
 ```
 
-### 6. Binance API Models
+### 6. Account Models
 
-**Location:** `services/api-service/src/models/binance_api.py`
+**Location:** `services/binance-service/src/models/spot_account.py`
 
-#### Spot Kline Response
 ```python
-class SpotKlineResponse:
-    symbol: str
-    interval: str
-    start_time: int
-    end_time: int
-    data: List[SpotKline]
+class SpotAccount:
+    makerCommission: int
+    takerCommission: int
+    buyerCommission: int
+    sellerCommission: int
+    canTrade: bool
+    canWithdraw: bool
+    canDeposit: bool
+    balances: List[Balance]
+
+class Balance:
+    asset: str
+    free: str
+    locked: str
 ```
 
-#### Exchange Info
-```python
-class ExchangeInfo:
-    timezone: str
-    server_time: int
-    symbols: List[Symbol]
-    filters: List[dict]
-```
+**Location:** `services/binance-service/src/models/futures_account.py`
 
-#### Symbol
 ```python
-class Symbol:
+class FuturesAccount:
+    totalAssetInBtc: str
+    totalAssetInUsdt: str
+    totalWalletBalanceInUsdt: str
+    totalUnrealProfitInUsdt: str
+    positions: List[Position]
+
+class Position:
     symbol: str
-    status: str
-    base_asset: str
-    quote_asset: str
-    base_precision: int
-    quote_precision: int
+    positionSide: str
+    positionAmt: str
+    entryPrice: str
+    markPrice: str
+    unrealProfit: str
 ```
 
 ### 7. WebSocket Models
 
-**Location:** `services/api-service/src/models/websocket.py`
+**Location:** `services/api-service/src/models/protocol/ws_message.py`
 
 ```python
 class WSMessageType(Enum):
@@ -185,24 +191,7 @@ class APIError:
     details: dict
 ```
 
-### 9. Unified Models
-
-**Location:** `services/api-service/src/models/unified_models.py`
-
-```python
-class UnifiedKline:
-    symbol: str
-    exchange: str  # "binance_spot" | "binance_futures"
-    interval: str
-    timestamp: datetime
-    open: Decimal
-    high: Decimal
-    low: Decimal
-    close: Decimal
-    volume: Decimal
-```
-
-### 10. Signal Models (Signal Service)
+### 9. Signal Models (Signal Service)
 
 **Location:** `services/signal-service/src/db/strategy_signals_repository.py`
 
@@ -315,13 +304,25 @@ CREATE TABLE alert_configs (
 );
 ```
 
+### Account Info Table (NEW)
+```sql
+CREATE TABLE account_info (
+    id SERIAL PRIMARY KEY,
+    exchange VARCHAR(32) NOT NULL,
+    account_type VARCHAR(16) NOT NULL,
+    data JSONB NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(exchange, account_type)
+);
+```
+
 ## Model Statistics
 
 | Category | Files | Primary Models |
 |----------|-------|----------------|
-| API Service Models | 10 | Task, Kline, Subscription, WebSocket, Error, Strategy, Alert |
-| Binance Service Models | 5 | Kline, Exchange Info, Task, Ticker, Unified |
-| Signal Service Models | 4 | Signal, Config, Alert |
+| API Service Models | 20+ | Task, Kline, Subscription, WebSocket, Error, Strategy, Alert |
+| Binance Service Models | 10+ | Kline, Exchange Info, Task, Ticker, SpotAccount, FuturesAccount |
+| Signal Service Models | 5+ | Signal, Config, Alert |
 | Constants | 2 | Binance, Currency |
 
 ## Type Hints Usage
@@ -360,3 +361,12 @@ class Kline(BaseModel):
         assert len(v) <= 16, 'symbol too long'
         return v.upper()
 ```
+
+## Recent Updates (Since Feb 22)
+
+1. Added `SpotAccount` model for spot account balance queries
+2. Added `FuturesAccount` model for futures account with positions
+3. Added `Balance` model for asset balances
+4. Added `Position` model for futures positions
+5. Added `account_info` database table
+6. Added private API signature support (RSA, ED25519)

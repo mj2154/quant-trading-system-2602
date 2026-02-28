@@ -14,6 +14,7 @@ class BinanceFuturesWSClient(BaseWSClient):
     - 订阅格式：ws://fstream.binance.com/ws/<streamName>
     - 示例：wss://fstream.binance.com/ws/btcusdt@kline_1m
     """
+
     # 使用 fstream.binance.com 端点（正确的期货市场数据端点）
     WS_URI = "wss://fstream.binance.com/ws"
     CLIENT_ID = "binance-futures-ws-001"

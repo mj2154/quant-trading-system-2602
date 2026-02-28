@@ -42,24 +42,44 @@ class SpotAccountInfo(BaseModel):
     """
 
     # 手续费相关 (alias 用于解析 API 返回数据)
-    maker_commission: Optional[int | str] = Field(None, alias="makerCommission", description="挂单手续费率")
-    taker_commission: Optional[int | str] = Field(None, alias="takerCommission", description="吃单手续费率")
-    buyer_commission: Optional[int | str] = Field(None, alias="buyerCommission", description="买入手续费率")
-    seller_commission: Optional[int | str] = Field(None, alias="sellerCommission", description="卖出手续费率")
-    commission_rates: Optional[CommissionRates] = Field(None, alias="commissionRates", description="手续费率详情")
+    maker_commission: Optional[int | str] = Field(
+        None, alias="makerCommission", description="挂单手续费率"
+    )
+    taker_commission: Optional[int | str] = Field(
+        None, alias="takerCommission", description="吃单手续费率"
+    )
+    buyer_commission: Optional[int | str] = Field(
+        None, alias="buyerCommission", description="买入手续费率"
+    )
+    seller_commission: Optional[int | str] = Field(
+        None, alias="sellerCommission", description="卖出手续费率"
+    )
+    commission_rates: Optional[CommissionRates] = Field(
+        None, alias="commissionRates", description="手续费率详情"
+    )
 
     # 交易权限
     can_trade: Optional[bool] = Field(None, alias="canTrade", description="是否可交易")
-    can_withdraw: Optional[bool] = Field(None, alias="canWithdraw", description="是否可提现")
-    can_deposit: Optional[bool] = Field(None, alias="canDeposit", description="是否可充值")
+    can_withdraw: Optional[bool] = Field(
+        None, alias="canWithdraw", description="是否可提现"
+    )
+    can_deposit: Optional[bool] = Field(
+        None, alias="canDeposit", description="是否可充值"
+    )
 
     # 账户属性
     brokered: Optional[bool] = Field(None, description="是否经纪商")
-    require_self_trade_prevention: Optional[bool] = Field(None, alias="requireSelfTradePrevention", description="是否需要自成交预防")
-    prevent_sor: Optional[bool] = Field(None, alias="preventSor", description="是否阻止SOR订单")
+    require_self_trade_prevention: Optional[bool] = Field(
+        None, alias="requireSelfTradePrevention", description="是否需要自成交预防"
+    )
+    prevent_sor: Optional[bool] = Field(
+        None, alias="preventSor", description="是否阻止SOR订单"
+    )
 
     # 时间与类型
-    update_time: Optional[int] = Field(None, alias="updateTime", description="最后更新时间戳")
+    update_time: Optional[int] = Field(
+        None, alias="updateTime", description="最后更新时间戳"
+    )
     account_type: str = Field(..., alias="accountType", description="账户类型")
 
     # 余额与权限

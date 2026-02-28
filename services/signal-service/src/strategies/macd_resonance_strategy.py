@@ -1,4 +1,7 @@
 # strategy/macd_resonance_strategy.py
+import logging
+import time
+
 import numpy as np
 import pandas as pd
 from vectorbt.utils.params import create_param_product
@@ -9,6 +12,8 @@ from ..indicators import (
 )
 from .backtest_base import BaseStrategy, StrategyParam, StrategySignals
 from .registry import StrategyMetadata, StrategyRegistry
+
+logger = logging.getLogger(__name__)
 
 """
 MACD共振交易策略 V5
@@ -165,7 +170,6 @@ class MACDResonanceStrategyV5(BaseStrategy):
         bearish_pure_and_cross_below = 空头纯粹状态.shift(1) & price_cross_below_ema16
 
         # 批量计算信号
-        import time
 
         loop_start_time = time.time()
         for i in range(param_count):
@@ -268,7 +272,7 @@ class MACDResonanceStrategyV5(BaseStrategy):
         # 打印整个循环的处理时间
         loop_end_time = time.time()
         loop_time_cost = loop_end_time - loop_start_time
-        print(f"策略信号生成循环耗时: {loop_time_cost:.4f} 秒")
+        logger.debug("策略信号生成循环耗时: %.4f 秒", loop_time_cost)
 
         # 创建多重索引列名
         # 重新构造参数组合的元组列表

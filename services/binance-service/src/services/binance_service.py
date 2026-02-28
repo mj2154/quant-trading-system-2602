@@ -43,20 +43,17 @@ from clients import (
     BinanceSpotPrivateHTTPClient,
     BinanceFuturesPrivateHTTPClient,
 )
-from clients.base_ws_client import WSDataPackage
 from storage import ExchangeInfoRepository
 from db.tasks_repository import TasksRepository
 from db.realtime_data_repository import RealtimeDataRepository
 from events import TaskListener, TaskPayload
 from events.exchange_info_handler import ExchangeInfoHandler
 from ws_subscription_manager import WSSubscriptionManager
-from models import KlineResponse, KlineWebSocket, Ticker24hrSpot, Ticker24hrFutures
+from models import KlineCreate, KlineResponse, Ticker24hrSpot
 from services.account_subscription_service import AccountSubscriptionService
+from utils import resolution_to_interval
 
 logger = logging.getLogger(__name__)
-
-
-from utils import resolution_to_interval
 
 
 class BinanceService:
@@ -104,11 +101,15 @@ class BinanceService:
         self._futures_ws: Optional[BinanceFuturesWSClient] = None
         self._exchange_repo: Optional[ExchangeInfoRepository] = None
         self._tasks_repo: Optional[TasksRepository] = None  # Tasks表仓储
-        self._realtime_repo: Optional[RealtimeDataRepository] = None  # RealtimeData表仓储
+        self._realtime_repo: Optional[RealtimeDataRepository] = (
+            None  # RealtimeData表仓储
+        )
         self._task_listener: Optional[TaskListener] = None
         self._exchange_handler: Optional[ExchangeInfoHandler] = None
         self._ws_manager: Optional[WSSubscriptionManager] = None
-        self._account_subscription: Optional[AccountSubscriptionService] = None  # 账户订阅服务
+        self._account_subscription: Optional[AccountSubscriptionService] = (
+            None  # 账户订阅服务
+        )
 
         self._running = False
 
@@ -138,7 +139,9 @@ class BinanceService:
 
         # 读取私钥文件
         private_key_pem: bytes = b""
-        private_key_path = os.environ.get("BINANCE_PRIVATE_KEY_PATH", "/app/keys/private_key.pem")
+        private_key_path = os.environ.get(
+            "BINANCE_PRIVATE_KEY_PATH", "/app/keys/private_key.pem"
+        )
         try:
             private_key_pem = Path(private_key_path).read_bytes()
         except FileNotFoundError:
@@ -159,11 +162,15 @@ class BinanceService:
 
         # 初始化期货私有客户端
         futures_api_key = os.environ.get("BINANCE_FUTURES_API_KEY", api_key)
-        futures_private_key_path = os.environ.get("BINANCE_FUTURES_PRIVATE_KEY_PATH", private_key_path)
+        futures_private_key_path = os.environ.get(
+            "BINANCE_FUTURES_PRIVATE_KEY_PATH", private_key_path
+        )
         try:
             private_key_pem = Path(futures_private_key_path).read_bytes()
         except FileNotFoundError:
-            logger.warning(f"期货私钥文件不存在: {futures_private_key_path}, 期货账户信息功能将不可用")
+            logger.warning(
+                f"期货私钥文件不存在: {futures_private_key_path}, 期货账户信息功能将不可用"
+            )
 
         if futures_api_key and private_key_pem:
             self._futures_private_http = BinanceFuturesPrivateHTTPClient(
@@ -174,7 +181,9 @@ class BinanceService:
             )
             logger.info("期货私有客户端已初始化")
         else:
-            logger.warning("BINANCE_FUTURES_API_KEY 或私钥未配置，期货账户信息功能不可用")
+            logger.warning(
+                "BINANCE_FUTURES_API_KEY 或私钥未配置，期货账户信息功能不可用"
+            )
             self._futures_private_http = None
 
         # 初始化WebSocket客户端
@@ -206,10 +215,14 @@ class BinanceService:
         self._task_listener.register("get_server_time", self._handle_get_server_time)
         self._task_listener.register("get_quotes", self._handle_get_quotes)
         # 账户信息任务
-        self._task_listener.register("get_futures_account", self._handle_get_futures_account)
+        self._task_listener.register(
+            "get_futures_account", self._handle_get_futures_account
+        )
         self._task_listener.register("get_spot_account", self._handle_get_spot_account)
         # 系统管理任务
-        self._task_listener.register("system.fetch_exchange_info", self._handle_sync_exchange_info)
+        self._task_listener.register(
+            "system.fetch_exchange_info", self._handle_sync_exchange_info
+        )
 
         # 启动任务监听
         await self._task_listener.start()
@@ -310,20 +323,22 @@ class BinanceService:
             KlineCreate 实例
         """
         # 使用 KlineResponse 进行数据验证
-        kline_response = KlineResponse.model_validate({
-            "0": raw_kline[0],
-            "1": raw_kline[1],
-            "2": raw_kline[2],
-            "3": raw_kline[3],
-            "4": raw_kline[4],
-            "5": raw_kline[5],
-            "6": raw_kline[6],
-            "7": raw_kline[7],
-            "8": raw_kline[8],
-            "9": raw_kline[9],
-            "10": raw_kline[10],
-            "11": raw_kline[11],
-        })
+        kline_response = KlineResponse.model_validate(
+            {
+                "0": raw_kline[0],
+                "1": raw_kline[1],
+                "2": raw_kline[2],
+                "3": raw_kline[3],
+                "4": raw_kline[4],
+                "5": raw_kline[5],
+                "6": raw_kline[6],
+                "7": raw_kline[7],
+                "8": raw_kline[8],
+                "9": raw_kline[9],
+                "10": raw_kline[10],
+                "11": raw_kline[11],
+            }
+        )
 
         return KlineCreate(
             symbol=symbol,
@@ -363,10 +378,15 @@ class BinanceService:
 
         # 解析参数
         import json as json_module
+
         params = {}
         if payload.payload:
             try:
-                params = json_module.loads(payload.payload) if isinstance(payload.payload, str) else payload.payload
+                params = (
+                    json_module.loads(payload.payload)
+                    if isinstance(payload.payload, str)
+                    else payload.payload
+                )
             except json_module.JSONDecodeError:
                 pass
 
@@ -419,11 +439,15 @@ class BinanceService:
         # 解析参数
         params = self._parse_task_params(payload)
         symbol = params.get("symbol", "")
-        interval = params.get("interval", "60")  # 使用 interval，与数据库和API网关保持一致
+        interval = params.get(
+            "interval", "60"
+        )  # 使用 interval，与数据库和API网关保持一致
         from_time = params.get("from_time")
         to_time = params.get("to_time")
 
-        logger.info(f"获取K线历史数据: {symbol} {interval} {from_time}-{to_time} (task_id={task_id})")
+        logger.info(
+            f"获取K线历史数据: {symbol} {interval} {from_time}-{to_time} (task_id={task_id})"
+        )
 
         # 标记任务为处理中
         await self._tasks_repo.set_processing(task_id)
@@ -439,6 +463,12 @@ class BinanceService:
             else:
                 pair = clean_symbol.upper()
                 http_client = self._spot_http
+
+            # 检查 HTTP 客户端是否初始化
+            if http_client is None:
+                logger.error(f"HTTP客户端未初始化: {symbol}")
+                await self._tasks_repo.set_failed(task_id, "HTTP客户端未初始化")
+                return
 
             # 转换间隔格式
             interval_str = resolution_to_interval(interval)
@@ -495,7 +525,7 @@ class BinanceService:
 
             # 直接写入 klines_history 表（使用 TradingView 格式）
             if self._pool:
-                inserted_count = await self._insert_klines_to_history(symbol, interval, all_raw_klines)
+                await self._insert_klines_to_history(symbol, interval, all_raw_klines)
             else:
                 logger.warning(f"pool 未初始化，跳过写入: {symbol} {interval}")
 
@@ -522,6 +552,12 @@ class BinanceService:
 
         logger.info(f"获取服务器时间 (task_id={task_id})")
 
+        # 检查 HTTP 客户端是否初始化
+        if self._spot_http is None:
+            logger.error("现货HTTP客户端未初始化")
+            await self._tasks_repo.set_failed(task_id, "HTTP客户端未初始化")
+            return
+
         # 标记任务为处理中
         await self._tasks_repo.set_processing(task_id)
 
@@ -532,7 +568,9 @@ class BinanceService:
             # 写入任务结果
             result = {
                 "server_time": server_time,
-                "iso_time": datetime.fromtimestamp(server_time / 1000, tz=timezone.utc).isoformat(),
+                "iso_time": datetime.fromtimestamp(
+                    server_time / 1000, tz=timezone.utc
+                ).isoformat(),
             }
             await self._tasks_repo.complete(task_id, result)
 
@@ -592,8 +630,14 @@ class BinanceService:
 
             # 现货：使用批量API（一次请求）
             if spot_symbols:
+                if self._spot_http is None:
+                    logger.error("现货HTTP客户端未初始化")
+                    await self._tasks_repo.set_failed(task_id, "HTTP客户端未初始化")
+                    return
                 logger.info(f"批量获取现货ticker: {spot_symbols}")
-                spot_tickers = await self._spot_http.get_24hr_ticker(symbols=spot_symbols)
+                spot_tickers = await self._spot_http.get_24hr_ticker(
+                    symbols=spot_symbols
+                )
                 # spot_tickers 可能是单个dict（1个symbol）或list（多个symbol）
                 if isinstance(spot_tickers, list):
                     raw_tickers.extend(spot_tickers)
@@ -602,8 +646,14 @@ class BinanceService:
 
             # 期货：使用并发请求（期货API不支持批量symbols参数）
             if futures_symbols:
+                if self._futures_http is None:
+                    logger.error("期货HTTP客户端未初始化")
+                    await self._tasks_repo.set_failed(task_id, "HTTP客户端未初始化")
+                    return
                 logger.info(f"并发获取期货ticker: {futures_symbols}")
-                futures_tickers = await self._futures_http.get_24hr_ticker(symbols=futures_symbols)
+                futures_tickers = await self._futures_http.get_24hr_ticker(
+                    symbols=futures_symbols
+                )
                 # futures_tickers 已经是list
                 if isinstance(futures_tickers, list):
                     raw_tickers.extend(futures_tickers)
@@ -622,7 +672,9 @@ class BinanceService:
             for raw_ticker in raw_tickers:
                 # 获取交易对名称
                 ticker_symbol = raw_ticker.get("symbol", "")
-                original_symbol = symbol_mapping.get(ticker_symbol, f"BINANCE:{ticker_symbol}")
+                original_symbol = symbol_mapping.get(
+                    ticker_symbol, f"BINANCE:{ticker_symbol}"
+                )
 
                 # 使用模型验证数据
                 ticker = Ticker24hrSpot.model_validate(raw_ticker)
@@ -675,7 +727,9 @@ class BinanceService:
 
         # 检查期货私有客户端是否已初始化
         if not self._futures_private_http:
-            logger.error("期货私有客户端未初始化，请配置 BINANCE_FUTURES_API_KEY 和私钥")
+            logger.error(
+                "期货私有客户端未初始化，请配置 BINANCE_FUTURES_API_KEY 和私钥"
+            )
             await self._tasks_repo.fail(task_id, "期货账户功能未配置，请联系管理员")
             return
 
@@ -708,7 +762,7 @@ class BinanceService:
             # 更新任务状态为 completed（result 为 None，通过 account_info 表传递数据）
             await self._tasks_repo.complete(task_id, None)
 
-            logger.info(f"期货账户信息获取完成，已写入 account_info 表")
+            logger.info("期货账户信息获取完成，已写入 account_info 表")
 
         except Exception as e:
             logger.error(f"获取期货账户信息失败: {e}")
@@ -761,7 +815,7 @@ class BinanceService:
             # 更新任务状态为 completed（result 为 None，通过 account_info 表传递数据）
             await self._tasks_repo.complete(task_id, None)
 
-            logger.info(f"现货账户信息获取完成，已写入 account_info 表")
+            logger.info("现货账户信息获取完成，已写入 account_info 表")
 
         except Exception as e:
             logger.error(f"获取现货账户信息失败: {e}")
@@ -782,10 +836,15 @@ class BinanceService:
         if payload.payload:
             try:
                 import json as json_module
-                params = json_module.loads(payload.payload) if isinstance(payload.payload, str) else payload.payload
+
+                params = (
+                    json_module.loads(payload.payload)
+                    if isinstance(payload.payload, str)
+                    else payload.payload
+                )
                 return params if isinstance(params, dict) else {}
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"解析payload失败: {e}")
         return {}
 
     def _parse_symbol(self, symbol: str) -> str:
@@ -801,7 +860,9 @@ class BinanceService:
             return symbol.replace("BINANCE:", "")
         return symbol
 
-    def _convert_kline_to_dict(self, raw_kline: list, symbol: str, interval: str) -> dict:
+    def _convert_kline_to_dict(
+        self, raw_kline: list, symbol: str, interval: str
+    ) -> dict:
         """将原始K线数据转换为字典格式
 
         Args:
@@ -876,8 +937,12 @@ class BinanceService:
                         query,
                         symbol,
                         interval,
-                        datetime.fromtimestamp(int(float(raw_kline[0])) / 1000, tz=timezone.utc),
-                        datetime.fromtimestamp(int(float(raw_kline[6])) / 1000, tz=timezone.utc),
+                        datetime.fromtimestamp(
+                            int(float(raw_kline[0])) / 1000, tz=timezone.utc
+                        ),
+                        datetime.fromtimestamp(
+                            int(float(raw_kline[6])) / 1000, tz=timezone.utc
+                        ),
                         raw_kline[1],
                         raw_kline[2],
                         raw_kline[3],
@@ -891,9 +956,13 @@ class BinanceService:
                     inserted_count += 1
                 except Exception as e:
                     error_count += 1
-                    logger.error(f"写入第 {i} 条K线失败: {symbol} {interval} open_time={raw_kline[0]}, error={e}")
+                    logger.error(
+                        f"写入第 {i} 条K线失败: {symbol} {interval} open_time={raw_kline[0]}, error={e}"
+                    )
 
-        logger.debug(f"已写入 {inserted_count}/{len(raw_klines)} 条K线到 klines_history: {symbol} {interval} (errors={error_count})")
+        logger.debug(
+            f"已写入 {inserted_count}/{len(raw_klines)} 条K线到 klines_history: {symbol} {interval} (errors={error_count})"
+        )
         return inserted_count
 
     async def _write_realtime_data(

@@ -32,6 +32,7 @@ class WSDataPackage:
     - data: 原始数据（币安WS返回什么就返回什么）
     - timestamp: 时间戳（毫秒）
     """
+
     client_id: str
     data: dict
     timestamp: int
@@ -39,6 +40,7 @@ class WSDataPackage:
 
 class WSConnectionState:
     """WebSocket连接状态"""
+
     connected: bool = False
 
 
@@ -75,7 +77,9 @@ class BaseWSClient:
         """设置断线重连回调"""
         self._reconnect_callback = callback
 
-    def set_data_callback(self, callback: Callable[[WSDataPackage], Awaitable[None]]) -> None:
+    def set_data_callback(
+        self, callback: Callable[[WSDataPackage], Awaitable[None]]
+    ) -> None:
         """设置数据回调（币安服务接收数据用）"""
         self._data_callback = callback
 
@@ -176,7 +180,9 @@ class BaseWSClient:
                 logger.debug(f"[{self.CLIENT_ID}] 收到原始消息")
                 try:
                     data = json.loads(message)
-                    logger.debug(f"[{self.CLIENT_ID}] 收到数据: {data.get('e', 'unknown')}")
+                    logger.debug(
+                        f"[{self.CLIENT_ID}] 收到数据: {data.get('e', 'unknown')}"
+                    )
                     await self._handle_message(data)
                 except json.JSONDecodeError:
                     logger.warning(f"[{self.CLIENT_ID}] 无效的JSON消息")
@@ -285,7 +291,9 @@ class BaseWSClient:
         """
         # 识别币安ACK确认消息 {"result": null, "id": xxx}
         if "result" in message and "id" in message:
-            logger.debug(f"[{self.CLIENT_ID}] 收到ACK确认: result={message.get('result')}, id={message['id']}")
+            logger.debug(
+                f"[{self.CLIENT_ID}] 收到ACK确认: result={message.get('result')}, id={message['id']}"
+            )
             return
 
         logger.debug(f"[{self.CLIENT_ID}] 处理消息: {message.get('e', 'unknown')}")

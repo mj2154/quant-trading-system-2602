@@ -54,11 +54,7 @@ class BinanceFuturesHTTPClient(BinanceHTTPClient):
         """
         if symbols:
             # 期货不支持批量查询，使用并发查询
-            tasks = [
-                self.get_24hr_ticker(symbol=s)
-                for s in symbols
-                if s
-            ]
+            tasks = [self.get_24hr_ticker(symbol=s) for s in symbols if s]
             return await asyncio.gather(*tasks)
         elif symbol:
             params = {"symbol": symbol.upper()}

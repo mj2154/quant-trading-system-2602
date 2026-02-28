@@ -10,8 +10,6 @@ import time
 from typing import Optional
 from urllib.parse import urlencode
 
-import httpx
-
 from .base_http_client import BinanceHTTPClient
 from models.futures_account import FuturesAccountInfo
 from utils.ed25519_signer import Ed25519Signer
@@ -103,7 +101,7 @@ class BinanceFuturesPrivateHTTPClient(BinanceHTTPClient):
             URL编码后的query string
         """
         # 按原始顺序（不排序），与官方示例一致
-        return urlencode(params, encoding='UTF-8')
+        return urlencode(params, encoding="UTF-8")
 
     def _build_signed_params(
         self, params: Optional[dict] = None, recv_window: Optional[int] = None
@@ -183,7 +181,9 @@ class BinanceFuturesPrivateHTTPClient(BinanceHTTPClient):
         response.raise_for_status()
         return response.json()
 
-    async def get_account_info(self, recv_window: Optional[int] = None) -> FuturesAccountInfo:
+    async def get_account_info(
+        self, recv_window: Optional[int] = None
+    ) -> FuturesAccountInfo:
         """获取期货账户信息
 
         调用 GET /fapi/v3/account 获取账户详情。

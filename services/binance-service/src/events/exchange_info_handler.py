@@ -77,7 +77,9 @@ class ExchangeInfoHandler:
                 elif suffix.lower() in ["futures", "perp", "perpetual"]:
                     market_type = "FUTURES"
 
-        logger.info(f"获取交易所信息: action={action}, resource={resource}, mode={market_type}")
+        logger.info(
+            f"获取交易所信息: action={action}, resource={resource}, mode={market_type}"
+        )
 
         try:
             # 获取现货交易所信息

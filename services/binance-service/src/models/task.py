@@ -69,11 +69,13 @@ class UnifiedTaskPayload:
         Returns:
             JSON 格式字符串
         """
-        return json.dumps({
-            "action": self.action,
-            "resource": self.resource,
-            "params": self.params,
-        })
+        return json.dumps(
+            {
+                "action": self.action,
+                "resource": self.resource,
+                "params": self.params,
+            }
+        )
 
     @property
     def task_type(self) -> str:

@@ -110,11 +110,16 @@ class Ticker24hrSpot(SnakeCaseModel):
     # ========== 验证器 ==========
 
     @field_validator(
-        "price_change", "price_change_percent", "weighted_avg_price",
+        "price_change",
+        "price_change_percent",
+        "weighted_avg_price",
         "last_price",
-        "open_price", "high_price", "low_price",
-        "volume", "quote_volume",
-        mode="before"
+        "open_price",
+        "high_price",
+        "low_price",
+        "volume",
+        "quote_volume",
+        mode="before",
     )
     @classmethod
     def validate_required_decimal(cls, v):
@@ -128,9 +133,13 @@ class Ticker24hrSpot(SnakeCaseModel):
         return v
 
     @field_validator(
-        "prev_close_price", "last_qty",
-        "bid_price", "bid_qty", "ask_price", "ask_qty",
-        mode="before"
+        "prev_close_price",
+        "last_qty",
+        "bid_price",
+        "bid_qty",
+        "ask_price",
+        "ask_qty",
+        mode="before",
     )
     @classmethod
     def validate_optional_decimal(cls, v):
@@ -143,7 +152,9 @@ class Ticker24hrSpot(SnakeCaseModel):
             return Decimal(v)
         return v
 
-    @field_validator("open_time", "close_time", "first_id", "last_id", "count", mode="before")
+    @field_validator(
+        "open_time", "close_time", "first_id", "last_id", "count", mode="before"
+    )
     @classmethod
     def validate_required_int(cls, v):
         """验证并转换为int类型（必需字段）"""
@@ -219,14 +230,18 @@ class Ticker24hrFutures(BaseModel):
 
     # 价格变动（单字符字段名）
     price_change: Decimal = Field(..., alias="p", description="24小时内价格变化")
-    price_change_percent: Decimal = Field(..., alias="P", description="24小时内价格变化百分比")
+    price_change_percent: Decimal = Field(
+        ..., alias="P", description="24小时内价格变化百分比"
+    )
 
     # 加权平均价格
     weighted_avg_price: Decimal = Field(..., alias="w", description="平均价格")
 
     # 最近成交（单字符字段名）
     last_price: Decimal = Field(..., alias="c", description="最新成交价格")
-    last_qty: Optional[Decimal] = Field(None, alias="Q", description="最新成交价格上的成交量")
+    last_qty: Optional[Decimal] = Field(
+        None, alias="Q", description="最新成交价格上的成交量"
+    )
 
     # OHLC价格（单字符字段名）
     open_price: Decimal = Field(..., alias="o", description="24小时内第一笔成交的价格")
@@ -242,18 +257,28 @@ class Ticker24hrFutures(BaseModel):
     close_time: int = Field(..., alias="C", description="统计关闭时间(毫秒)")
 
     # 成交ID统计（单字符字段名）
-    first_id: Optional[int] = Field(None, alias="F", description="24小时内第一笔成交交易ID")
-    last_id: Optional[int] = Field(None, alias="L", description="24小时内最后一笔成交交易ID")
+    first_id: Optional[int] = Field(
+        None, alias="F", description="24小时内第一笔成交交易ID"
+    )
+    last_id: Optional[int] = Field(
+        None, alias="L", description="24小时内最后一笔成交交易ID"
+    )
     count: int = Field(..., alias="n", description="24小时内成交数")
 
     # ========== 验证器 ==========
 
     @field_validator(
-        "price_change", "price_change_percent", "weighted_avg_price",
-        "last_price", "last_qty",
-        "open_price", "high_price", "low_price",
-        "volume", "quote_volume",
-        mode="before"
+        "price_change",
+        "price_change_percent",
+        "weighted_avg_price",
+        "last_price",
+        "last_qty",
+        "open_price",
+        "high_price",
+        "low_price",
+        "volume",
+        "quote_volume",
+        mode="before",
     )
     @classmethod
     def validate_decimal(cls, v):
@@ -313,6 +338,7 @@ class Ticker24hrFutures(BaseModel):
 
     class Config:
         """Pydantic配置"""
+
         populate_by_name = True
 
 
@@ -363,13 +389,17 @@ class WebSocketTickerSpot(BaseModel):
 
     # 价格变动
     price_change: Decimal = Field(..., alias="p", description="24小时价格变化")
-    price_change_percent: Decimal = Field(..., alias="P", description="24小时价格变化百分比")
+    price_change_percent: Decimal = Field(
+        ..., alias="P", description="24小时价格变化百分比"
+    )
 
     # 加权平均价格
     weighted_avg_price: Decimal = Field(..., alias="w", description="平均价格")
 
     # 上一收盘价（WS推送特有）
-    prev_price: Decimal = Field(..., alias="x", description="整整24小时之前的最后一次成交价格")
+    prev_price: Decimal = Field(
+        ..., alias="x", description="整整24小时之前的最后一次成交价格"
+    )
 
     # 最近成交
     last_price: Decimal = Field(..., alias="c", description="最新成交价格")
@@ -388,7 +418,9 @@ class WebSocketTickerSpot(BaseModel):
 
     # 成交量
     volume: Decimal = Field(..., alias="v", description="24小时内成交量(基础资产)")
-    quote_volume: Decimal = Field(..., alias="q", description="24小时内成交额(报价资产)")
+    quote_volume: Decimal = Field(
+        ..., alias="q", description="24小时内成交额(报价资产)"
+    )
 
     # 时间信息
     open_time: int = Field(..., alias="O", description="统计开始时间(毫秒)")
@@ -402,12 +434,22 @@ class WebSocketTickerSpot(BaseModel):
     # ========== 验证器 ==========
 
     @field_validator(
-        "price_change", "price_change_percent", "weighted_avg_price",
-        "prev_price", "last_price", "last_qty",
-        "bid_price", "bid_qty", "ask_price", "ask_qty",
-        "open_price", "high_price", "low_price",
-        "volume", "quote_volume",
-        mode="before"
+        "price_change",
+        "price_change_percent",
+        "weighted_avg_price",
+        "prev_price",
+        "last_price",
+        "last_qty",
+        "bid_price",
+        "bid_qty",
+        "ask_price",
+        "ask_qty",
+        "open_price",
+        "high_price",
+        "low_price",
+        "volume",
+        "quote_volume",
+        mode="before",
     )
     @classmethod
     def validate_decimal(cls, v):
@@ -421,9 +463,13 @@ class WebSocketTickerSpot(BaseModel):
         return v
 
     @field_validator(
-        "event_time", "open_time", "close_time",
-        "first_id", "last_id", "count",
-        mode="before"
+        "event_time",
+        "open_time",
+        "close_time",
+        "first_id",
+        "last_id",
+        "count",
+        mode="before",
     )
     @classmethod
     def validate_int(cls, v):
@@ -463,6 +509,7 @@ class WebSocketTickerSpot(BaseModel):
 
     class Config:
         """Pydantic配置"""
+
         populate_by_name = True
 
 
@@ -508,7 +555,9 @@ class WebSocketTickerFutures(BaseModel):
 
     # 价格变动
     price_change: Decimal = Field(..., alias="p", description="24小时价格变化")
-    price_change_percent: Decimal = Field(..., alias="P", description="24小时价格变化百分比")
+    price_change_percent: Decimal = Field(
+        ..., alias="P", description="24小时价格变化百分比"
+    )
 
     # 加权平均价格
     weighted_avg_price: Decimal = Field(..., alias="w", description="平均价格")
@@ -524,7 +573,9 @@ class WebSocketTickerFutures(BaseModel):
 
     # 成交量
     volume: Decimal = Field(..., alias="v", description="24小时内成交量(基础资产)")
-    quote_volume: Decimal = Field(..., alias="q", description="24小时内成交额(报价资产)")
+    quote_volume: Decimal = Field(
+        ..., alias="q", description="24小时内成交额(报价资产)"
+    )
 
     # 时间信息
     open_time: int = Field(..., alias="O", description="统计开始时间(毫秒)")
@@ -538,11 +589,17 @@ class WebSocketTickerFutures(BaseModel):
     # ========== 验证器 ==========
 
     @field_validator(
-        "price_change", "price_change_percent", "weighted_avg_price",
-        "last_price", "last_qty",
-        "open_price", "high_price", "low_price",
-        "volume", "quote_volume",
-        mode="before"
+        "price_change",
+        "price_change_percent",
+        "weighted_avg_price",
+        "last_price",
+        "last_qty",
+        "open_price",
+        "high_price",
+        "low_price",
+        "volume",
+        "quote_volume",
+        mode="before",
     )
     @classmethod
     def validate_decimal(cls, v):
@@ -556,9 +613,13 @@ class WebSocketTickerFutures(BaseModel):
         return v
 
     @field_validator(
-        "event_time", "open_time", "close_time",
-        "first_id", "last_id", "count",
-        mode="before"
+        "event_time",
+        "open_time",
+        "close_time",
+        "first_id",
+        "last_id",
+        "count",
+        mode="before",
     )
     @classmethod
     def validate_int(cls, v):
@@ -598,6 +659,7 @@ class WebSocketTickerFutures(BaseModel):
 
     class Config:
         """Pydantic配置"""
+
         populate_by_name = True
 
 
@@ -632,7 +694,9 @@ class Ticker24hrMini(BaseModel):
     last_price: Decimal = Field(..., alias="lastPrice", description="最近一次成交价")
 
     volume: Decimal = Field(..., description="24小时成交量(基础资产)")
-    quote_volume: Decimal = Field(..., alias="quoteVolume", description="24小时成交额(报价资产)")
+    quote_volume: Decimal = Field(
+        ..., alias="quoteVolume", description="24小时成交额(报价资产)"
+    )
 
     open_time: int = Field(..., alias="openTime", description="开始时间戳")
     close_time: int = Field(..., alias="closeTime", description="结束时间戳")
@@ -642,9 +706,13 @@ class Ticker24hrMini(BaseModel):
     count: int = Field(..., description="成交笔数")
 
     @field_validator(
-        "open_price", "high_price", "low_price", "last_price",
-        "volume", "quote_volume",
-        mode="before"
+        "open_price",
+        "high_price",
+        "low_price",
+        "last_price",
+        "volume",
+        "quote_volume",
+        mode="before",
     )
     @classmethod
     def validate_decimal(cls, v):
@@ -657,7 +725,9 @@ class Ticker24hrMini(BaseModel):
             return Decimal(v)
         return v
 
-    @field_validator("open_time", "close_time", "first_id", "last_id", "count", mode="before")
+    @field_validator(
+        "open_time", "close_time", "first_id", "last_id", "count", mode="before"
+    )
     @classmethod
     def validate_int(cls, v):
         """验证并转换为int类型"""
@@ -676,4 +746,5 @@ class Ticker24hrMini(BaseModel):
 
     class Config:
         """Pydantic配置"""
+
         populate_by_name = True

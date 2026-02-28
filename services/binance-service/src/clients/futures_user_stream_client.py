@@ -290,8 +290,8 @@ class FuturesUserStreamClient:
         if self._ws_connection:
             try:
                 await self._ws_connection.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"关闭WebSocket连接失败: {e}")
             self._ws_connection = None
 
         # 等待后重试
@@ -349,7 +349,9 @@ class FuturesUserStreamClient:
             params = {"listenKey": self._listen_key}
 
             async with httpx.AsyncClient(proxy=self._proxy_url) as client:
-                response = await client.put(url, headers=headers, params=params, timeout=10.0)
+                response = await client.put(
+                    url, headers=headers, params=params, timeout=10.0
+                )
                 response.raise_for_status()
                 return True
 
@@ -370,7 +372,9 @@ class FuturesUserStreamClient:
             params = {"listenKey": listen_key}
 
             async with httpx.AsyncClient(proxy=self._proxy_url) as client:
-                response = await client.delete(url, headers=headers, params=params, timeout=10.0)
+                response = await client.delete(
+                    url, headers=headers, params=params, timeout=10.0
+                )
                 response.raise_for_status()
                 logger.info(f"期货 listenKey 已关闭: {listen_key[:10]}...")
 

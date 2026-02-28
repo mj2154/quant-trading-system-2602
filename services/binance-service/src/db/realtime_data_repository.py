@@ -55,7 +55,9 @@ class RealtimeDataRepository:
         """
         self._pool = pool
 
-    async def update_data(self, subscription_key: str, data: Any, event_time: Optional[str] = None) -> None:
+    async def update_data(
+        self, subscription_key: str, data: Any, event_time: Optional[str] = None
+    ) -> None:
         """更新实时数据
 
         触发 realtime_update 通知，通知API网关数据已更新。
@@ -65,7 +67,6 @@ class RealtimeDataRepository:
             data: 实时数据（JSON格式）
             event_time: 事件时间（可选，默认为当前时间）
         """
-        import json
         from datetime import datetime
 
         def json_serializer(obj):
@@ -80,7 +81,11 @@ class RealtimeDataRepository:
             WHERE subscription_key = $3
         """
         async with self._pool.acquire() as conn:
-            data_json = data if isinstance(data, str) else json.dumps(data, default=json_serializer)
+            data_json = (
+                data
+                if isinstance(data, str)
+                else json.dumps(data, default=json_serializer)
+            )
             await conn.execute(
                 query,
                 data_json,
@@ -200,7 +205,9 @@ class RealtimeDataRepository:
 
         return result
 
-    def subscription_key_to_binance_stream(self, subscription_key: str) -> tuple[str, bool]:
+    def subscription_key_to_binance_stream(
+        self, subscription_key: str
+    ) -> tuple[str, bool]:
         """将订阅键转换为币安WS流名称
 
         Args:

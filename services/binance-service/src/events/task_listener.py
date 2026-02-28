@@ -27,12 +27,12 @@
 import asyncio
 import json
 import logging
-from typing import Callable, Awaitable, Union
+from typing import Callable, Awaitable
 from dataclasses import dataclass
 
 import asyncpg
 
-from .notification import EventType, TaskPayload
+from .notification import TaskPayload
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +94,12 @@ class TaskListener:
         """
         if task_type not in self._callbacks:
             self._callbacks[task_type] = []
-        self._callbacks[task_type].append(TaskCallback(
-            callback=callback,
-            task_type=task_type,
-        ))
+        self._callbacks[task_type].append(
+            TaskCallback(
+                callback=callback,
+                task_type=task_type,
+            )
+        )
         logger.info(f"已注册任务处理器: {task_type}")
 
     async def start(self) -> None:
@@ -177,7 +179,9 @@ class TaskListener:
                 task_id = data.get("id")
                 task_type = data.get("type")
                 task_payload = data.get("payload", {})
-                logger.debug(f"收到任务通知（包装格式）: {task_type} (task_id={task_id})")
+                logger.debug(
+                    f"收到任务通知（包装格式）: {task_type} (task_id={task_id})"
+                )
             else:
                 # 直接格式（向后兼容）
                 if "id" not in obj or "type" not in obj or "payload" not in obj:
@@ -186,7 +190,9 @@ class TaskListener:
                 task_id = obj.get("id")
                 task_type = obj.get("type")
                 task_payload = obj.get("payload", {})
-                logger.debug(f"收到任务通知（直接格式）: {task_type} (task_id={task_id})")
+                logger.debug(
+                    f"收到任务通知（直接格式）: {task_type} (task_id={task_id})"
+                )
 
             # 查找对应的处理器
             callbacks = self._callbacks.get(task_type, [])
