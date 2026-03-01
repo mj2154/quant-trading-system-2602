@@ -291,27 +291,54 @@ function handleUpdate(data) {
     // 处理 QUOTES 数据推送
     else if (dataType === DataType.QUOTES) {
         const fullSymbol = subscriptionKey.replace('@QUOTES', '');
+        const isPERP = subscriptionKey.includes('PERP');
+
+        if (isPERP) {
+            console.log('[PERP-DEBUG] 📥 收到QUOTES推送:', subscriptionKey);
+        }
 
         // content 可能是单个对象或数组（支持批量推送）
         const quoteDataArray = Array.isArray(content) ? content : [content];
 
-        quotesSubscriptions.forEach((subscription) => {
+        if (isPERP) {
+            console.log('[PERP-DEBUG] 📊 推送数据内容:', JSON.stringify(quoteDataArray[0]));
+        }
+
+        quotesSubscriptions.forEach((subscription, guid) => {
             if (subscription.symbols) {
                 let symbolMatch = false;
+                let matchType = '';
 
                 // 尝试完整格式匹配
                 if (subscription.symbols.includes(fullSymbol)) {
                     symbolMatch = true;
+                    matchType = 'full';
                 } else {
                     // 尝试简化格式匹配（不带交易所前缀）
                     const simplifiedSymbol = fullSymbol.includes(':') ? fullSymbol.split(':')[1] : fullSymbol;
                     if (subscription.symbols.includes(simplifiedSymbol)) {
                         symbolMatch = true;
+                        matchType = 'simplified';
                     }
                 }
 
+                if (isPERP) {
+                    console.log('[PERP-DEBUG] 🔍 匹配调试:', {
+                        subscriptionKey,
+                        fullSymbol,
+                        storedSymbols: subscription.symbols,
+                        simplifiedSymbol: fullSymbol.includes(':') ? fullSymbol.split(':')[1] : fullSymbol,
+                        matchFound: symbolMatch,
+                        matchType,
+                        // 打印推送内容中的 symbol
+                        pushSymbol: quoteDataArray[0]?.n || quoteDataArray[0]?.symbol || 'N/A'
+                    });
+                }
+
                 if (symbolMatch) {
-                    // 传递数组格式以匹配 watchlist 期望
+                    if (isPERP) {
+                        console.log('[PERP-DEBUG] ✅ 触发回调:', { guid, fullSymbol, matchType });
+                    }
                     subscription.onRealtimeCallback(quoteDataArray);
                 }
             }
@@ -1092,22 +1119,17 @@ export default {
      * @param {string} listenerGUID - 唯一标识符
      */
     unsubscribeQuotes: (listenerGUID) => {
-        console.log('🔥 unsubscribeQuotes 被调用:', {
-            listenerGUID,
-            timestamp: new Date().toISOString(),
-            stack: new Error().stack
-        });
-
         const subscriptionInfo = quotesSubscriptions.get(listenerGUID);
         if (!subscriptionInfo) {
-            console.log('⚠️  unsubscribeQuotes: 未找到 listenerGUID 对应的订阅信息');
             return;
         }
 
-        console.log('📊 unsubscribeQuotes 订阅信息:', {
-            symbols: subscriptionInfo.symbols,
-            activeListeners: Array.from(quotesSubscriptions.keys())
-        });
+        // 只有 PERP 符号才输出调试日志
+        const isPERP = subscriptionInfo.symbols.some(s => s.includes('PERP'));
+
+        if (isPERP) {
+            console.log('[PERP-DEBUG] 🔥 unsubscribeQuotes:', { listenerGUID, symbols: subscriptionInfo.symbols });
+        }
 
         // 🔧 修复：检查引用计数，只在最后一个引用时才取消 WebSocket 订阅
         const subscriptionsToRemove = [];
@@ -1126,22 +1148,22 @@ export default {
                 if (count > 1) {
                     // 还有其他引用，只递减计数，不发送取消订阅
                     subscribedQuotes.set(subscriptionKey, count - 1);
-                    console.log('🔁 引用计数递减:', subscriptionKey, count, '->', count - 1);
+                    if (isPERP) {
+                        console.log('[PERP-DEBUG] 🔁 引用计数递减:', subscriptionKey, count, '->', count - 1);
+                    }
                 } else {
                     // 最后一个引用，需要发送取消订阅消息
                     subscriptionsToRemove.push(subscriptionKey);
                     subscribedQuotes.delete(subscriptionKey);
-                    console.log('🗑️  准备真正取消订阅:', subscriptionKey);
+                    if (isPERP) {
+                        console.log('[PERP-DEBUG] 🗑️ 取消订阅:', subscriptionKey);
+                    }
                 }
             }
         });
 
-        console.log('📊 subscribedQuotes 状态:', Object.fromEntries(subscribedQuotes));
-
         // 只有当需要真正取消时才发送WebSocket消息
         if (subscriptionsToRemove.length > 0) {
-            console.log('🗑️  准备发送取消订阅:', subscriptionsToRemove);
-
             if (ws && ws.readyState === WebSocket.OPEN) {
                 const unsubscribeMessage = {
                     protocolVersion: "2.0",
@@ -1152,13 +1174,13 @@ export default {
                         subscriptions: subscriptionsToRemove
                     }
                 };
-                console.log('📤 发送取消订阅WebSocket消息:', unsubscribeMessage);
+
+                if (isPERP) {
+                    console.log('[PERP-DEBUG] 📤 取消订阅包:', JSON.stringify(unsubscribeMessage.data.subscriptions));
+                }
+
                 ws.send(JSON.stringify(unsubscribeMessage));
-            } else {
-                console.log('⚠️  WebSocket未连接，跳过取消订阅消息发送');
             }
-        } else {
-            console.log('✨ 还有其他listener使用这些订阅，不发送取消消息');
         }
 
         // 清理订阅记录
@@ -1174,30 +1196,42 @@ export default {
      * @param {string} listenerGUID - 唯一标识符
      */
     subscribeQuotes: (symbols, fastSymbols, onRealtimeCallback, listenerGUID) => {
-        console.log('📈 subscribeQuotes 被调用:', {
-            listenerGUID,
-            symbols,
-            fastSymbols,
-            timestamp: new Date().toISOString(),
-            stack: new Error().stack
-        });
-
         // 合并 symbols 和 fastSymbols，并去重
         const allSymbols = [...new Set([...symbols, ...fastSymbols])];
-        console.log('📊 合并后的所有symbols:', allSymbols);
+
+        // 只有 PERP 符号才输出调试日志
+        const isPERP = allSymbols.some(s => s.includes('PERP'));
+
+        if (isPERP) {
+            console.log('[PERP-DEBUG] 📥 subscribeQuotes 调用:', { listenerGUID, symbols, fastSymbols });
+        }
 
         // 如果已存在相同 listenerGUID，先取消旧订阅（避免重复）
         if (quotesSubscriptions.has(listenerGUID)) {
-            console.log('🔄 检测到重复订阅，先取消旧订阅');
+            if (isPERP) {
+                console.log('[PERP-DEBUG] 🔄 检测到重复订阅');
+            }
             this.unsubscribeQuotes(listenerGUID);
         }
 
-        // 存储订阅信息
+        // 存储订阅信息 - 使用构建后的订阅键格式以便匹配后端推送
+        const storedSymbols = allSymbols.map(s => {
+            const formattedSymbol = formatSymbol(s);
+            return buildSubscriptionKey(
+                formattedSymbol.split(':')[0],
+                formattedSymbol.split(':')[1],
+                DataType.QUOTES
+            ).replace('@QUOTES', '');  // 去掉 @QUOTES 后缀
+        });
         quotesSubscriptions.set(listenerGUID, {
-            symbols: allSymbols,
+            symbols: storedSymbols,
+            originalSymbols: allSymbols,  // 保存原始值用于调试
             onRealtimeCallback
         });
-        console.log('💾 存储订阅信息完成，当前listener数量:', quotesSubscriptions.size);
+
+        if (isPERP) {
+            console.log('[PERP-DEBUG] 📥 subscribeQuotes 调用:', { allSymbols, listenerGUID });
+        }
 
         // 🔧 修复：更新引用计数并找出真正需要发送的新订阅
         const newSubscriptions = [];
@@ -1215,17 +1249,22 @@ export default {
                 // 新的订阅，需要发送
                 newSubscriptions.push(subscriptionKey);
                 subscribedQuotes.set(subscriptionKey, 1);
-                console.log('➕ 新增订阅:', subscriptionKey);
+
+                // 只记录 PERP 订阅
+                if (isPERP || subscriptionKey.includes('PERP')) {
+                    console.log('[PERP-DEBUG] 📤 发送订阅请求:', subscriptionKey);
+                }
             } else {
                 // 已存在，增加引用计数
                 const newCount = subscribedQuotes.get(subscriptionKey) + 1;
                 subscribedQuotes.set(subscriptionKey, newCount);
-                console.log('🔁 引用计数递增:', subscriptionKey, '->', newCount);
             }
         });
 
-        console.log('🆕 需要发送的新订阅:', newSubscriptions);
-        console.log('📊 subscribedQuotes 状态:', Object.fromEntries(subscribedQuotes));
+        // 只有 PERP 相关才输出
+        if (isPERP) {
+            console.log('[PERP-DEBUG] 🆕 需要发送的新订阅:', newSubscriptions);
+        }
 
         // 只有当有新订阅时才发送WebSocket消息
         if (newSubscriptions.length > 0) {
@@ -1242,14 +1281,14 @@ export default {
                             }
                         };
 
-                        console.log('📤 发送订阅WebSocket消息:', subscribeMessage);
+                        // 只输出 PERP 相关
+                        if (isPERP || newSubscriptions.some(s => s.includes('PERP'))) {
+                            console.log('[PERP-DEBUG] 📤 WebSocket订阅包:', JSON.stringify(subscribeMessage.data.subscriptions));
+                        }
+
                         ws.send(JSON.stringify(subscribeMessage));
-                    } else {
-                        console.log('⚠️  WebSocket未连接，跳过订阅消息发送');
                     }
                 });
-        } else {
-            console.log('✨ 没有新订阅需要发送');
         }
     },
 

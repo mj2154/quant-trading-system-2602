@@ -684,6 +684,14 @@ class DataProcessor:
             # 将币安格式转换为TV格式
             tv_content = convert_binance_to_tv(data_type, realtime_data)
 
+            # 修复 QUOTES 的 symbol 问题：从 subscription_key 提取正确格式覆盖 n 字段
+            # 因为 convert_quotes 使用的是币安原始数据中的 symbol（缺少 .PERP 后缀）
+            if data_type == "QUOTES" and subscription_key and "n" in tv_content:
+                from ..converters.subscription import SubscriptionKeyParser
+                parsed = SubscriptionKeyParser.parse(subscription_key)
+                if parsed and parsed.symbol:
+                    tv_content["n"] = f"BINANCE:{parsed.symbol}"
+
             message = {
                 "protocolVersion": "2.0",
                 "type": "UPDATE",  # 遵循07-websocket-protocol.md规范

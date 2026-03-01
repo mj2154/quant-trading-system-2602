@@ -1,14 +1,17 @@
 """
-订阅键转换模块
+订阅键解析模块
 
-负责解析订阅键和流名称的相互转换：
-- 订阅键 -> 交易所流名称
-- 交易所流名称 -> 订阅键
+负责解析订阅键和流名称：
+- 订阅键 -> 解析为组件（exchange, symbol, data_type, params）
+- 流名称 -> 订阅键
+
+注意：根据设计文档，订阅键到币安流名称的转换由币安服务负责，
+API服务只负责解析订阅键和将流名称转换回订阅键。
 
 支持多个交易所：BINANCE, OKX, BYBIT, HUOBI
 
 作者: Claude Code
-版本: v1.0.0
+版本: v2.0.0
 """
 
 import logging
@@ -37,122 +40,6 @@ DATA_TYPE_MAPPING = {
 
 # 流名称解析正则
 STREAM_NAME_PATTERN = r"^([a-zA-Z0-9_]+)@([a-zA-Z]+)(?:_([0-9a-zA-Z]+))?$"
-
-# 币安间隔映射（TradingView分辨率/interval -> 币安间隔格式）
-BINANCE_INTERVAL_MAP = {
-    # 数字格式 (分钟)
-    "1": "1m",
-    "3": "3m",
-    "5": "5m",
-    "15": "15m",
-    "30": "30m",
-    "60": "1h",
-    "120": "2h",
-    "240": "4h",
-    "360": "6h",
-    "720": "12h",
-    "1440": "1d",
-    "4320": "3d",
-    "10080": "1w",
-    "43200": "1M",
-    # TradingView 字母格式
-    "D": "1d",
-    "W": "1w",
-    "M": "1M",
-}
-
-# OKX间隔映射
-OKX_INTERVAL_MAP = {
-    "1": "1m",
-    "3": "3m",
-    "5": "5m",
-    "15": "15m",
-    "30": "30m",
-    "60": "1H",
-    "180": "3H",
-    "360": "6H",
-    "720": "12H",
-    "1440": "1D",
-    "4320": "3D",
-    "10080": "1W",
-    "43200": "1M",
-}
-
-# Bybit间隔映射
-BYBIT_INTERVAL_MAP = {
-    "1": "1",
-    "3": "3",
-    "5": "5",
-    "15": "15",
-    "30": "30",
-    "60": "60",
-    "120": "120",
-    "240": "240",
-    "360": "360",
-    "720": "720",
-    "1440": "D",
-    "10080": "W",
-    "43200": "M",
-}
-
-# 火币间隔映射
-HUOBI_INTERVAL_MAP = {
-    "1": "1min",
-    "3": "3min",
-    "5": "5min",
-    "15": "15min",
-    "30": "30min",
-    "60": "60min",
-    "240": "4hour",
-    "1440": "1day",
-}
-
-
-# ==================== 共享转换函数 ====================
-
-
-@lru_cache(maxsize=512)
-def resolution_to_interval(resolution: str) -> str:
-    """将 TradingView 分辨率转换为币安间隔格式
-
-    支持的格式：
-    - 数字格式: "1", "5", "60", "1440" -> "1m", "5m", "1h", "1d"
-    - TradingView字母格式: "D", "W", "M" -> "1d", "1w", "1M"
-    - 币安格式: "1m", "1h", "1d" -> 直接返回
-
-    Args:
-        resolution: TradingView 分辨率或币安间隔
-
-    Returns:
-        币安间隔格式字符串
-    """
-    # TradingView 字母格式 -> 币安格式
-    if resolution == "D":
-        return "1d"
-    if resolution == "W":
-        return "1w"
-    if resolution == "M":
-        return "1M"
-
-    # 使用映射表
-    if resolution in BINANCE_INTERVAL_MAP:
-        return BINANCE_INTERVAL_MAP[resolution]
-
-    # 已经是币安格式（包含 m, h, d, w, M 后缀）
-    if resolution.endswith(("m", "h", "d", "w", "M")):
-        return resolution
-
-    # 兜底：数字格式转换为分钟
-    try:
-        minutes = int(resolution)
-        if minutes < 60:
-            return f"{minutes}m"
-        elif minutes < 1440:
-            return f"{minutes // 60}h"
-        else:
-            return f"{minutes // 1440}d"
-    except ValueError:
-        return "1m"
 
 
 # ==================== 数据模型 ====================
@@ -277,86 +164,6 @@ class SubscriptionKeyParser:
         return data_type, params
 
     @staticmethod
-    def to_stream_name(parsed: ParsedSubscription) -> str | None:
-        """转换为交易所流名称"""
-        try:
-            if parsed.exchange == "BINANCE":
-                return SubscriptionKeyParser._binance_to_stream_name(parsed)
-            elif parsed.exchange == "OKX":
-                return SubscriptionKeyParser._okx_to_stream_name(parsed)
-            elif parsed.exchange == "BYBIT":
-                return SubscriptionKeyParser._bybit_to_stream_name(parsed)
-            elif parsed.exchange == "HUOBI":
-                return SubscriptionKeyParser._huobi_to_stream_name(parsed)
-            else:
-                logger.warning(f"不支持的交易所: {parsed.exchange}")
-                return None
-        except Exception as e:
-            logger.error(f"转换流名称失败: {parsed}, 错误: {e}")
-            return None
-
-    @staticmethod
-    def _binance_to_stream_name(parsed: ParsedSubscription) -> str | None:
-        """转换为币安流名称"""
-        symbol_lower = parsed.symbol.lower()
-
-        if parsed.data_type == "KLINE":
-            interval = parsed.params.get("interval", "1")
-            binance_interval = BINANCE_INTERVAL_MAP.get(interval, f"{interval}m")
-            return f"{symbol_lower}@kline_{binance_interval}"
-        elif parsed.data_type == "TRADE":
-            return f"{symbol_lower}@trade"
-        elif parsed.data_type == "TICKER":
-            return f"{symbol_lower}@ticker"
-        elif parsed.data_type == "QUOTES":
-            return f"{symbol_lower}@ticker"
-        elif parsed.data_type == "DEPTH":
-            depth = parsed.params.get("depth", "20")
-            return f"{symbol_lower}@depth{depth}"
-        else:
-            logger.warning(f"币安不支持的数据类型: {parsed.data_type}")
-            return None
-
-    @staticmethod
-    def _okx_to_stream_name(parsed: ParsedSubscription) -> str | None:
-        """转换为OKX流名称"""
-        symbol_upper = parsed.symbol.upper()
-
-        if parsed.data_type == "KLINE":
-            interval = parsed.params.get("interval", "1")
-            okx_interval = OKX_INTERVAL_MAP.get(interval, f"{interval}m")
-            return f"{symbol_upper}/USDT@index/candle{okx_interval}"
-        else:
-            logger.warning(f"OKX暂不支持数据类型: {parsed.data_type}")
-            return None
-
-    @staticmethod
-    def _bybit_to_stream_name(parsed: ParsedSubscription) -> str | None:
-        """转换为Bybit流名称"""
-        symbol_lower = parsed.symbol.lower()
-
-        if parsed.data_type == "KLINE":
-            interval = parsed.params.get("interval", "1")
-            bybit_interval = BYBIT_INTERVAL_MAP.get(interval, "1")
-            return f"{symbol_lower}@kline.{bybit_interval}"
-        else:
-            logger.warning(f"Bybit暂不支持数据类型: {parsed.data_type}")
-            return None
-
-    @staticmethod
-    def _huobi_to_stream_name(parsed: ParsedSubscription) -> str | None:
-        """转换为火币流名称"""
-        symbol_lower = parsed.symbol.lower()
-
-        if parsed.data_type == "KLINE":
-            interval = parsed.params.get("interval", "1")
-            huobi_interval = HUOBI_INTERVAL_MAP.get(interval, "1min")
-            return f"{symbol_lower}.{huobi_interval}"
-        else:
-            logger.warning(f"火币暂不支持数据类型: {parsed.data_type}")
-            return None
-
-    @staticmethod
     def batch_parse(sub_keys: list[str]) -> dict[str, ParsedSubscription]:
         """批量解析订阅键"""
         results = {}
@@ -366,20 +173,6 @@ class SubscriptionKeyParser:
                 results[sub_key] = parsed
             else:
                 logger.warning(f"解析失败: {sub_key}")
-        return results
-
-    @staticmethod
-    def batch_to_stream_names(
-        parsed_subs: dict[str, ParsedSubscription]
-    ) -> dict[str, str]:
-        """批量转换为流名称"""
-        results = {}
-        for sub_key, parsed in parsed_subs.items():
-            stream_name = SubscriptionKeyParser.to_stream_name(parsed)
-            if stream_name:
-                results[sub_key] = stream_name
-            else:
-                logger.warning(f"流名称转换失败: {sub_key}")
         return results
 
     @staticmethod
@@ -558,14 +351,6 @@ def parse_subscription_key(sub_key: str) -> ParsedSubscription | None:
     return SubscriptionKeyParser.parse(sub_key)
 
 
-def subscription_key_to_stream(sub_key: str) -> str | None:
-    """便捷函数：订阅键转流名称"""
-    parsed = SubscriptionKeyParser.parse(sub_key)
-    if parsed:
-        return SubscriptionKeyParser.to_stream_name(parsed)
-    return None
-
-
 def stream_to_subscription_key(stream_name: str, exchange: str = "BINANCE") -> str | None:
     """便捷函数：流名称转订阅键"""
     return StreamParser.to_subscription_key(stream_name, exchange)
@@ -582,7 +367,6 @@ __all__ = [
     "SubscriptionKeyParser",
     "StreamParser",
     "parse_subscription_key",
-    "subscription_key_to_stream",
     "stream_to_subscription_key",
     "parse_stream_name",
 ]
