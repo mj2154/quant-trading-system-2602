@@ -6,6 +6,10 @@
 
 本系统不仅为 TradingView 图表库提供数据服务，还支持账户实时订阅、告警管理、信号查询等多种功能。
 
+**v2.3 核心改进** (2026-03-02):
+- 🚀 **交易功能支持** - 新增交易消息类型 (CREATE_ORDER, GET_ORDER, LIST_ORDERS, CANCEL_ORDER, GET_OPEN_ORDERS)
+- 🚀 **订单数据推送** - 新增 ORDER_UPDATE 订阅类型，支持订单状态实时推送
+
 **v2.2 核心改进** (2026-02-27):
 - 🚀 **账户订阅支持** - 新增 ACCOUNT 订阅类型 (BINANCE:ACCOUNT@SPOT, BINANCE:ACCOUNT@FUTURES)
 - 🚀 **增量数据推送** - 账户订阅采用"GET 完整 + 订阅增量"策略，前端需先 GET 初始化再订阅增量
@@ -556,6 +560,12 @@ const subscribeRequest = {
 | | `LIST_SIGNALS` | 查询历史信号 |
 | | `GET_STRATEGY_METADATA` | 获取策略元数据列表 |
 | | `GET_STRATEGY_METADATA_BY_TYPE` | 获取指定策略元数据 |
+| **交易类型** | | |
+| | `CREATE_ORDER` | 创建订单 |
+| | `GET_ORDER` | 查询单个订单 |
+| | `LIST_ORDERS` | 查询订单列表 |
+| | `CANCEL_ORDER` | 撤销订单 |
+| | `GET_OPEN_ORDERS` | 查询当前挂单 |
 | **响应类型** | | |
 | | `ACK` | 请求确认（第一阶段） |
 | | `ERROR` | 错误响应 |
@@ -572,6 +582,9 @@ const subscribeRequest = {
 | | `ALERT_CONFIG_DATA` | 告警配置数据 |
 | | `SIGNAL_DATA` | 信号数据 |
 | | `STRATEGY_METADATA_DATA` | 策略元数据数据 |
+| | `ORDER_DATA` | 订单数据 |
+| | `ORDER_LIST_DATA` | 订单列表数据 |
+| | `ORDER_UPDATE` | 订单更新推送 |
 
 > **重要说明**: 最终 SUCCESS 响应的 `type` 字段值为**数据类型**（如 `KLINES_DATA`），而非 `SUCCESS`。`SUCCESS` 仅用于表示响应分类概念，实际类型使用具体的数据类型。
 
@@ -745,6 +758,17 @@ const subscribeRequest = {
 | `GET_SPOT_ACCOUNT` | 获取现货账户信息 | 查询现货账户余额、手续费率等 |
 
 > **透传模式说明**: 账户信息采用"透传"模式，不同于其他类型由 api-service 处理。账户信息由 binance-service 直接从 Binance API 获取原始数据，存储到 `account_info` 表，api-service 直接从数据库读取并透传给前端，前端负责解析完整字段。这种方式避免了大数据量在服务间传递，减少延迟。
+
+**交易类型**（binance-service）:
+| type | 响应类型 | 说明 |
+|------|---------|------|
+| `CREATE_ORDER` | `ORDER_DATA` | 创建订单 |
+| `GET_ORDER` | `ORDER_DATA` | 查询单个订单 |
+| `LIST_ORDERS` | `ORDER_LIST_DATA` | 查询订单列表 |
+| `CANCEL_ORDER` | `ORDER_DATA` | 撤销订单 |
+| `GET_OPEN_ORDERS` | `ORDER_LIST_DATA` | 查询当前挂单 |
+
+> **交易功能说明**: 交易功能通过trading_orders表实现。API服务接收WebSocket请求后写入trading_orders表，触发notify_order_new()通知binance-service执行实际下单操作。订单状态更新通过binance-service监听WebSocket用户数据流实现，详见 [04-trading-orders.md](./04-trading-orders.md)。
 
 **告警配置类型**（signal-service）:
 | type | 说明 | 用途 |

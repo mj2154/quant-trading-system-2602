@@ -1281,6 +1281,676 @@ async function init() {
 }
 ```
 
+## 8.10 交易功能设计
+
+### 8.10.1 设计概述
+
+交易功能通过私有API实现期货和现货的下单、撤单、查询等操作。采用Demo网进行测试验证。
+
+**支持的交易功能**：
+| 功能 | 期货API | 现货API |
+|------|---------|---------|
+| 下单 | POST /fapi/v1/order | POST /api/v3/order |
+| 测试下单 | POST /fapi/v1/order/test | POST /api/v3/order/test |
+| 撤销订单 | DELETE /fapi/v1/order | DELETE /api/v3/order |
+| 查询订单 | GET /fapi/v1/order | GET /api/v3/order |
+| 查询所有订单 | GET /fapi/v1/allOrders | GET /api/v3/allOrders |
+| 查询挂单 | GET /fapi/v1/openOrders | GET /api/v3/openOrders |
+
+**Demo网vs生产环境**：
+| 对比项 | Demo网 | 生产环境 |
+|--------|--------|----------|
+| 期货BASE_URL | `https://demo-fapi.binance.com` | `https://fapi.binance.com` |
+| 现货BASE_URL | `https://demo-api.binance.com` | `https://api.binance.com` |
+| 最小下单金额 | 100 USDT (期货) | 视交易对而定 |
+| 价格限制 | 限价单价格不能超过市价约5% | 正常市价波动范围 |
+| 资金 | 虚拟资金，无实际风险 | 真实资金 |
+
+### 8.10.2 订单执行流程
+
+binance-service 监听 `trading_orders` 表的变更事件，执行实际的下单、撤单操作。
+
+#### 8.10.2.1 订单创建流程
+
+```
+1. 前端发送 CREATE_ORDER 请求 → API服务
+2. API服务写入 trading_orders 表 (status=NEW)
+3. INSERT 触发 notify_order_new() → binance-service
+4. binance-service 读取 trading_orders 表
+5. binance-service 调用币安API下单
+6. binance-service 更新 trading_orders 表:
+   - binance_order_id = 币安返回的orderId
+   - data = 币安返回的完整响应
+   - status = 币安返回的状态
+7. UPDATE 触发 notify_order_update() → API服务
+8. API服务推送 ORDER_UPDATE 给前端
+```
+
+#### 8.10.2.2 订单状态更新流程
+
+```
+1. 用户通过 WebSocket 连接到币安用户数据流
+2. 币安 WebSocket 推送 ORDER_TRADE_UPDATE 事件
+3. binance-service 监听并更新 trading_orders 表:
+   - data = 最新订单数据
+   - status = 最新状态
+4. UPDATE 触发 notify_order_update() → API服务
+5. API服务推送 ORDER_UPDATE 给前端
+```
+
+#### 8.10.2.3 撤销订单流程
+
+```
+1. 前端发送 CANCEL_ORDER 请求 → API服务
+2. API服务更新 trading_orders 表 (标记为取消)
+3. UPDATE 触发 notify_order_cancel() → binance-service
+4. binance-service 调用币安API撤单
+5. binance-service 更新 trading_orders 表
+```
+
+#### 8.10.2.4 监听频道
+
+binance-service 需要监听以下数据库通知频道：
+
+| 频道 | 触发条件 | 处理动作 |
+|------|---------|----------|
+| `order.new` | INSERT trading_orders | 读取订单，调用币安API下单 |
+| `order.cancel` | UPDATE status=CANCELED | 调用币安API撤单 |
+| WebSocket用户数据流 | ORDER_TRADE_UPDATE | 更新订单状态 |
+
+#### 8.10.2.5 订单状态映射
+
+| trading_orders.status | 币安状态 | 说明 |
+|----------------------|---------|------|
+| NEW | NEW | 订单已创建，等待成交 |
+| PARTIALLY_FILLED | PARTIALLY_FILLED | 部分成交 |
+| FILLED | FILLED | 完全成交 |
+| CANCELED | CANCELED | 用户撤销 |
+| REJECTED | REJECTED | 订单被拒绝 |
+| EXPIRED | EXPIRED | 订单过期 |
+
+### 8.10.3 期货交易接口
+
+#### 8.10.2.1 创建订单 POST /fapi/v1/order
+
+**HTTP请求**：`POST /fapi/v1/order`
+
+**请求参数**：
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| symbol | STRING | 是 | 交易对，如 BTCUSDT |
+| side | ENUM | 是 | 订单方向：BUY, SELL |
+| type | ENUM | 是 | 订单类型：LIMIT, MARKET, STOP, TAKE_PROFIT等 |
+| positionSide | ENUM | 否 | 持仓方向：BOTH(默认), LONG, SHORT（对冲模式必需） |
+| quantity | DECIMAL | 条件必需 | 订单数量 |
+| price | DECIMAL | 条件必需 | 订单价格（限价单必需） |
+| timeInForce | ENUM | 条件必需 | 时间策略：GTC, IOC, FOK, GTD |
+| reduceOnly | STRING | 否 | 是否仅减仓："true"或"false"，默认"false" |
+| stopPrice | DECIMAL | 条件必需 | 止损/止盈价格（条件单必需） |
+| newClientOrderId | STRING | 否 | 客户端订单ID，默认自动生成 |
+| newOrderRespType | ENUM | 否 | 响应类型：ACK, RESULT, FULL，默认ACK |
+| priceMatch | ENUM | 否 | 价格匹配模式：OPPONENT/OPPONENT_5/OPPONENT_10等 |
+| selfTradePreventionMode | ENUM | 否 | 自成交防止模式：EXPIRE_TAKER, EXPIRE_MAKER, EXPIRE_BOTH |
+| goodTillDate | LONG | 条件必需 | GTD订单过期时间（timeInForce=GTD时必需） |
+| recvWindow | LONG | 否 | 接收窗口时间 |
+| timestamp | LONG | 是 | 时间戳（毫秒） |
+
+**各订单类型必需参数**：
+
+| 订单类型 | 必需参数 |
+|----------|----------|
+| LIMIT | timeInForce, quantity, price |
+| MARKET | quantity |
+| STOP | quantity, stopPrice |
+| TAKE_PROFIT | quantity, stopPrice |
+
+**响应示例**（RESULT类型）：
+```json
+{
+    "orderId": 22542179,
+    "clientOrderId": "testOrder",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "positionSide": "BOTH",
+    "type": "LIMIT",
+    "origQty": "10",
+    "price": "50000",
+    "avgPrice": "0.00000",
+    "stopPrice": "0",
+    "executedQty": "0",
+    "cumQty": "0",
+    "cumQuote": "0",
+    "status": "NEW",
+    "timeInForce": "GTC",
+    "reduceOnly": false,
+    "closePosition": false,
+    "workingType": "CONTRACT_PRICE",
+    "priceProtect": false,
+    "newOrderRespType": "RESULT",
+    "updateTime": 1566818724722
+}
+```
+
+#### 8.10.2.2 测试订单 POST /fapi/v1/order/test
+
+用于测试订单参数是否正确，不会真正下单。
+
+**HTTP请求**：`POST /fapi/v1/order/test`
+
+**参数**：与创建订单相同
+
+#### 8.10.2.3 撤销订单 DELETE /fapi/v1/order
+
+**HTTP请求**：`DELETE /fapi/v1/order`
+
+**请求参数**：
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| symbol | STRING | 是 | 交易对 |
+| orderId | LONG | 条件必需 | 订单ID（与clientOrderId二选一） |
+| clientOrderId | STRING | 条件必需 | 客户端订单ID |
+| recvWindow | LONG | 否 | 接收窗口时间 |
+| timestamp | LONG | 是 | 时间戳 |
+
+#### 8.10.2.4 查询订单 GET /fapi/v1/order
+
+**HTTP请求**：`GET /fapi/v1/order`
+
+**请求参数**：
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| symbol | STRING | 是 | 交易对 |
+| orderId | LONG | 条件必需 | 订单ID |
+| clientOrderId | STRING | 条件必需 | 客户端订单ID |
+| recvWindow | LONG | 否 | 接收窗口时间 |
+| timestamp | LONG | 是 | 时间戳 |
+
+### 8.10.3 现货交易接口
+
+#### 8.10.3.1 创建订单 POST /api/v3/order
+
+**HTTP请求**：`POST /api/v3/order`
+
+**请求参数**：
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| symbol | STRING | 是 | 交易对，如 BTCUSDT |
+| side | ENUM | 是 | 订单方向：BUY, SELL |
+| type | ENUM | 是 | 订单类型 |
+| quantity | DECIMAL | 条件必需 | 订单数量 |
+| quoteOrderQty | DECIMAL | 条件必需 | 市价买单金额（如100表示使用100 USDT买入） |
+| price | DECIMAL | 条件必需 | 订单价格（限价单必需） |
+| timeInForce | ENUM | 条件必需 | 时间策略：GTC, IOC, FOK |
+| stopPrice | DECIMAL | 条件必需 | 止损价格 |
+| icebergQty | DECIMAL | 否 | 冰山订单数量 |
+| newClientOrderId | STRING | 否 | 客户端订单ID |
+| newOrderRespType | ENUM | 否 | 响应类型：ACK, RESULT, FULL |
+| selfTradePreventionMode | ENUM | 否 | 自成交防止模式 |
+| recvWindow | DECIMAL | 否 | 接收窗口时间（最大60000） |
+| timestamp | LONG | 是 | 时间戳 |
+
+**现货市价单特殊说明**：
+- 使用 `quantity` 指定要买入/卖出的基础资产数量
+- 使用 `quoteOrderQty` 指定要花费/获得的报价资产金额
+- 例如：BUY + quoteOrderQty=100 表示使用100 USDT买入BTC
+
+**各订单类型必需参数**：
+
+| 订单类型 | 必需参数 |
+|----------|----------|
+| LIMIT | timeInForce, quantity, price |
+| MARKET | quantity 或 quoteOrderQty（二选一） |
+| STOP_LOSS | quantity, stopPrice 或 trailingDelta |
+| STOP_LOSS_LIMIT | timeInForce, quantity, price, stopPrice |
+| TAKE_PROFIT | quantity, stopPrice 或 trailingDelta |
+| TAKE_PROFIT_LIMIT | timeInForce, quantity, price, stopPrice |
+| LIMIT_MAKER | quantity, price |
+
+#### 8.10.3.2 撤销订单 DELETE /api/v3/order
+
+**HTTP请求**：`DELETE /api/v3/order`
+
+**请求参数**：
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| symbol | STRING | 是 | 交易对 |
+| orderId | LONG | 条件必需 | 订单ID |
+| clientOrderId | STRING | 条件必需 | 客户端订单ID |
+| recvWindow | LONG | 否 | 接收窗口时间 |
+| timestamp | LONG | 是 | 时间戳 |
+
+### 8.10.4 订单参数详解
+
+#### 8.10.4.1 订单类型 (type)
+
+| 类型 | 说明 | 期货 | 现货 |
+|------|------|------|------|
+| LIMIT | 限价单 | 支持 | 支持 |
+| MARKET | 市价单 | 支持 | 支持 |
+| STOP | 止损单 | 支持 | 支持 |
+| STOP_LOSS | 止损单 | 支持 | 支持 |
+| STOP_LOSS_LIMIT | 止损限价单 | 支持 | 支持 |
+| TAKE_PROFIT | 止盈单 | 支持 | 支持 |
+| TAKE_PROFIT_LIMIT | 止盈限价单 | 支持 | 支持 |
+| LIMIT_MAKER | 被动限价单 | 支持 | 支持 |
+| TRAILING_STOP_MARKET | 追踪止损 | 支持 | 不支持 |
+
+#### 8.10.4.2 时间策略 (timeInForce)
+
+| 值 | 说明 | 适用订单类型 |
+|----|------|-------------|
+| GTC | Good Till Cancel - 成交为止 | LIMIT, STOP_LOSS_LIMIT, TAKE_PROFIT_LIMIT |
+| IOC | Immediate or Cancel - 立即成交，否则取消 | LIMIT, MARKET |
+| FOK | Fill or Kill - 全部成交，否则取消 | LIMIT, MARKET |
+| GTD | Good Till Date - 指定日期前有效 | 期货专用 |
+
+#### 8.10.4.3 持仓方向 (positionSide)
+
+| 值 | 说明 | 适用场景 |
+|----|------|----------|
+| BOTH | 单向持仓模式 | 默认模式 |
+| LONG | 多头持仓 | 对冲模式 |
+| SHORT | 空头持仓 | 对冲模式 |
+
+**重要**：
+- 单向持仓模式（BOTH）：默认模式，一个交易对只能有一个持仓
+- 对冲模式（HEDGE）：需要先调用API设置对冲模式，可同时持有多头和空头
+
+#### 8.10.4.4 响应类型 (newOrderRespType)
+
+| 值 | 说明 | 响应内容 |
+|----|------|----------|
+| ACK | 仅确认 | 仅返回订单确认信息（orderId, clientOrderId） |
+| RESULT | 执行结果 | 返回订单执行结果（含价格、数量等） |
+| FULL | 完整信息 | 返回完整信息 + fills数组（包含每笔成交明细） |
+
+### 8.10.5 响应模型
+
+#### 8.10.5.1 期货订单响应 (FuturesOrderResponse)
+
+```python
+class FuturesOrderResponse(BaseModel):
+    """期货订单响应"""
+    # 订单标识
+    order_id: int = Field(..., alias="orderId")
+    client_order_id: str = Field(..., alias="clientOrderId")
+    symbol: str
+
+    # 订单方向和类型
+    side: str  # BUY/SELL
+    position_side: Optional[str] = Field(None, alias="positionSide")
+    order_type: str = Field(..., alias="type")
+    orig_type: Optional[str] = Field(None, alias="origType")
+
+    # 数量和价格
+    orig_qty: str = Field(..., alias="origQty")
+    price: str
+    avg_price: str = Field(..., alias="avgPrice")
+    stop_price: Optional[str] = Field(None, alias="stopPrice")
+
+    # 成交情况
+    executed_qty: str = Field(..., alias="executedQty")
+    cum_qty: str = Field(..., alias="cumQty")
+    cum_quote: str = Field(..., alias="cumQuote")
+
+    # 订单状态
+    status: str  # NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED/EXPIRED
+
+    # 时间策略
+    time_in_force: Optional[str] = Field(None, alias="timeInForce")
+
+    # 其他标志
+    reduce_only: bool = Field(..., alias="reduceOnly")
+    close_position: bool = Field(..., alias="closePosition")
+    working_type: str = Field(..., alias="workingType")
+    price_protect: bool = Field(..., alias="priceProtect")
+    price_match: Optional[str] = Field(None, alias="priceMatch")
+    self_trade_prevention_mode: Optional[str] = Field(None, alias="selfTradePreventionMode")
+    good_till_date: Optional[int] = Field(None, alias="goodTillDate")
+
+    # 时间戳
+    update_time: int = Field(..., alias="updateTime")
+```
+
+#### 8.10.5.2 现货订单响应 (SpotOrderResponse)
+
+```python
+class SpotOrderResponse(BaseModel):
+    """现货订单响应"""
+    # 订单标识
+    order_id: int = Field(..., alias="orderId")
+    client_order_id: str = Field(..., alias="clientOrderId")
+    symbol: str
+    transaction_time: int = Field(..., alias="transactionTime")
+
+    # 订单方向和类型
+    side: str
+    order_type: str = Field(..., alias="type")
+
+    # 数量和价格
+    orig_qty: str = Field(..., alias="origQty")
+    price: str
+    executed_qty: str = Field(..., alias="executedQty")
+    cummulative_quote_qty: str = Field(..., alias="cummulativeQuoteQty")
+
+    # 订单状态
+    status: str
+
+    # 时间策略
+    time_in_force: str = Field(..., alias="timeInForce")
+
+    # 冰山订单
+    iceberg_qty: Optional[str] = Field(None, alias="icebergQty")
+
+    # 时间戳
+    update_time: int = Field(..., alias="updateTime")
+    is_working: bool = Field(..., alias="isWorking")
+```
+
+#### 8.10.5.3 撤销订单响应 (CancelOrderResponse)
+
+```python
+class CancelOrderResponse(BaseModel):
+    """撤销订单响应"""
+    order_id: int = Field(..., alias="orderId")
+    client_order_id: str = Field(..., alias="clientOrderId")
+    symbol: str
+    side: str
+    order_type: str = Field(..., alias="type")
+    orig_qty: str = Field(..., alias="origQty")
+    executed_qty: str = Field(..., alias="executedQty")
+    price: str
+    status: str  # CANCELED
+    update_time: int = Field(..., alias="updateTime")
+```
+
+### 8.10.6 Demo网限制说明
+
+基于实际测试结果：
+
+| 限制项 | 期货 | 现货 |
+|--------|------|------|
+| 最小下单金额 | 100 USDT | 无明确限制 |
+| 价格限制 | 限价单价格不能超过当前价格约5% | 正常波动范围 |
+| 订单有效期 | GTC订单会一直存在 | GTC订单会一直存在 |
+| 测试资金 | 虚拟资金池 | 虚拟资金池 |
+
+**实测下单示例**（期货）：
+```python
+# 市价买入 100 USDT
+await client.create_order(
+    symbol="BTCUSDT",
+    side="BUY",
+    order_type="MARKET",
+    quantity=0.002,  # 约100 USDT (当前价格约50000)
+    new_order_resp_type="RESULT",
+)
+
+# 限价单（需注意价格限制）
+await client.create_order(
+    symbol="BTCUSDT",
+    side="BUY",
+    order_type="LIMIT",
+    quantity=0.002,
+    price=50000.0,  # 不能超过市价太多
+    time_in_force="GTC",
+    new_order_resp_type="RESULT",
+)
+```
+
+### 8.10.7 实现组件
+
+#### 8.10.7.1 订单数据模型
+
+位于 `src/models/trading_order.py`：
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
+from pydantic import BaseModel, Field
+
+class OrderType(str, Enum):
+    """订单类型"""
+    LIMIT = "LIMIT"
+    MARKET = "MARKET"
+    STOP_LOSS = "STOP_LOSS"
+    STOP_LOSS_LIMIT = "STOP_LOSS_LIMIT"
+    TAKE_PROFIT = "TAKE_PROFIT"
+    TAKE_PROFIT_LIMIT = "TAKE_PROFIT_LIMIT"
+    LIMIT_MAKER = "LIMIT_MAKER"
+    TRAILING_STOP_MARKET = "TRAILING_STOP_MARKET"
+
+class OrderSide(str, Enum):
+    """订单方向"""
+    BUY = "BUY"
+    SELL = "SELL"
+
+class PositionSide(str, Enum):
+    """持仓方向（对冲模式）"""
+    LONG = "LONG"
+    SHORT = "SHORT"
+    BOTH = "BOTH"
+
+class TimeInForce(str, Enum):
+    """时间策略"""
+    GTC = "GTC"
+    IOC = "IOC"
+    FOK = "FOK"
+    GTD = "GTD"
+
+class OrderResponseType(str, Enum):
+    """订单响应类型"""
+    ACK = "ACK"
+    RESULT = "RESULT"
+    FULL = "FULL"
+
+class OrderStatus(str, Enum):
+    """订单状态"""
+    NEW = "NEW"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    FILLED = "FILLED"
+    CANCELED = "CANCELED"
+    PENDING_CANCEL = "PENDING_CANCEL"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+```
+
+#### 8.10.7.2 期货私有HTTP客户端
+
+位于 `src/clients/futures_private_http_client.py`：
+
+```python
+class BinanceFuturesPrivateHTTPClient:
+    """期货私有API客户端"""
+
+    async def create_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        time_in_force: Optional[str] = None,
+        stop_price: Optional[float] = None,
+        reduce_only: bool = False,
+        position_side: Optional[str] = None,
+        new_client_order_id: Optional[str] = None,
+        new_order_resp_type: str = "ACK",
+        recv_window: Optional[int] = None,
+    ) -> dict:
+        """创建新订单"""
+
+    async def cancel_order(
+        self,
+        symbol: str,
+        order_id: Optional[str] = None,
+        client_order_id: Optional[str] = None,
+        recv_window: Optional[int] = None,
+    ) -> dict:
+        """撤销订单"""
+
+    async def get_order(
+        self,
+        symbol: str,
+        order_id: Optional[str] = None,
+        client_order_id: Optional[str] = None,
+        recv_window: Optional[int] = None,
+    ) -> dict:
+        """查询订单"""
+
+    async def get_open_orders(
+        self,
+        symbol: Optional[str] = None,
+        recv_window: Optional[int] = None,
+    ) -> list[dict]:
+        """查询当前挂单"""
+```
+
+#### 8.10.7.3 现货私有HTTP客户端
+
+位于 `src/clients/spot_private_http_client.py`：
+
+```python
+class BinanceSpotPrivateHTTPClient:
+    """现货私有API客户端"""
+
+    async def create_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: Optional[float] = None,
+        quote_order_qty: Optional[float] = None,
+        price: Optional[float] = None,
+        time_in_force: Optional[str] = None,
+        stop_price: Optional[float] = None,
+        iceberg_qty: Optional[float] = None,
+        new_client_order_id: Optional[str] = None,
+        new_order_resp_type: str = "ACK",
+        recv_window: Optional[int] = None,
+    ) -> dict:
+        """创建新订单"""
+        # 现货市价单可使用 quote_order_qty 指定金额
+
+    async def cancel_order(
+        self,
+        symbol: str,
+        order_id: Optional[str] = None,
+        client_order_id: Optional[str] = None,
+        recv_window: Optional[int] = None,
+    ) -> dict:
+        """撤销订单"""
+
+    async def get_order(
+        self,
+        symbol: str,
+        order_id: Optional[str] = None,
+        client_order_id: Optional[str] = None,
+        recv_window: Optional[int] = None,
+    ) -> dict:
+        """查询订单"""
+
+    async def get_open_orders(
+        self,
+        symbol: Optional[str] = None,
+        recv_window: Optional[int] = None,
+    ) -> list[dict]:
+        """查询当前挂单"""
+```
+
+### 8.10.8 错误处理
+
+交易API错误响应格式：
+
+```json
+{
+    "code": -1013,
+    "msg": "Invalid quantity."
+}
+```
+
+常见错误码：
+
+| 错误码 | 说明 |
+|--------|------|
+| -1013 | 无效数量 |
+| -1111 | 无效 priceMatch 参数 |
+| -2011 | 订单类型不存在 |
+| -2015 | 无效 clientOrderId 格式 |
+| -4028 | 无效 positionSide 参数 |
+| -4046 | 数量小于最小值 |
+
+### 8.10.9 测试用例
+
+#### 8.10.9.1 期货交易测试
+
+位于 `test_trading_futures.py`：
+
+```python
+async def test_market_buy():
+    """测试市价买入 - 100 USDT"""
+    client = create_client()
+
+    result = await client.create_order(
+        symbol="BTCUSDT",
+        side="BUY",
+        order_type="MARKET",
+        quantity=0.002,  # 约100 USDT
+        new_order_resp_type="RESULT",
+    )
+    print(f"订单ID: {result.get('orderId')}")
+    print(f"状态: {result.get('status')}")
+
+async def test_cancel_order():
+    """测试撤销订单"""
+    client = create_client()
+
+    # 下限价单
+    order_result = await client.create_order(
+        symbol="BTCUSDT",
+        side="BUY",
+        order_type="LIMIT",
+        quantity=0.002,
+        price=50000.0,
+        time_in_force="GTC",
+    )
+
+    # 撤销订单
+    cancel_result = await client.cancel_order(
+        symbol="BTCUSDT",
+        order_id=str(order_result.get("orderId")),
+    )
+    print(f"撤销成功: {cancel_result.get('status')}")
+```
+
+#### 8.10.9.2 现货交易测试
+
+位于 `test_trading_spot.py`：
+
+```python
+async def test_market_buy():
+    """测试市价买入 - 100 USDT"""
+    client = create_client()
+
+    # 使用 quoteOrderQty 指定USDT金额
+    result = await client.create_order(
+        symbol="BTCUSDT",
+        side="BUY",
+        order_type="MARKET",
+        quantity=None,
+        quote_order_qty=100.0,  # 100 USDT
+        new_order_resp_type="FULL",
+    )
+    print(f"订单ID: {result.get('orderId')}")
+    print(f"成交数量: {result.get('executedQty')}")
+```
+
 ## 相关文档
 
 - [QUANT_TRADING_SYSTEM_ARCHITECTURE.md](./QUANT_TRADING_SYSTEM_ARCHITECTURE.md) - 完整实施文档
@@ -1290,5 +1960,5 @@ async function init() {
 
 ---
 
-**版本**：v2.2
-**更新**：2026-02-27 - 添加账户订阅服务设计
+**版本**：v2.3
+**更新**：2026-03-02 - 添加交易功能设计（8.10节）

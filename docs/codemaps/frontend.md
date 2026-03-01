@@ -32,22 +32,30 @@ frontend/trading-panel/
 │   │       ├── AlertConfigForm.vue    # Alert configuration form
 │   │       ├── AlertConfigList.vue    # Alert list display
 │   │       └── RealtimeAlerts.vue    # Real-time alerts
+│   │   └── trading/
+│   │       ├── OrderForm.vue        # Order creation form
+│   │       ├── OrderList.vue         # Order history list
+│   │       ├── OrderDetail.vue       # Order detail view
+│   │       └── OrderStatus.vue       # Order status badge
 │   ├── views/
 │   │   ├── ModuleA.vue
 │   │   ├── ModuleB.vue
 │   │   ├── ModuleC.vue
 │   │   ├── AlertDashboard.vue
 │   │   ├── AlertTest.vue
-│   │   └── AccountDashboard.vue
+│   │   ├── AccountDashboard.vue
+│   │   └── TradingDashboard.vue    # Trading panel
 │   ├── stores/                # Pinia stores
 │   │   ├── tab-store.ts       # Tab navigation state
 │   │   ├── strategy-store.ts  # Strategy state management
 │   │   ├── alert-store.ts     # Alert state management
-│   │   └── account-store.ts   # Account balance state
+│   │   ├── account-store.ts    # Account balance state
+│   │   └── trading-store.ts    # Trading order state
 │   ├── types/                 # TypeScript type definitions
 │   │   ├── tradingview-data-models.ts
 │   │   ├── alert-types.ts
-│   │   └── account-types.ts
+│   │   ├── account-types.ts
+│   │   └── trading-types.ts    # Trading order types
 │   ├── composables/
 │   │   └── useAlertSettings.ts
 │   ├── theme/
@@ -68,7 +76,11 @@ App
 │   ├── ModuleA / ModuleB / ModuleC
 │   ├── SignalList / RealtimeSignals
 │   ├── AlertDashboard / AlertTest
-│   └── AccountDashboard
+│   ├── AccountDashboard
+│   └── TradingDashboard
+│       ├── OrderForm
+│       ├── OrderList
+│       └── OrderDetail
 ├── AppFooter
 └── GlobalAlertHandler
 ```
@@ -177,6 +189,75 @@ interface AccountInfo {
 }
 ```
 
+### Trading Types (`trading-types.ts`)
+
+```typescript
+// 市场类型
+type MarketType = 'FUTURES' | 'SPOT';
+
+// 订单方向
+type OrderSide = 'BUY' | 'SELL';
+
+// 订单类型
+type OrderType = 'LIMIT' | 'MARKET' | 'STOP' | 'STOP_LOSS' | 'STOP_LOSS_LIMIT' | 'TAKE_PROFIT' | 'TAKE_PROFIT_LIMIT' | 'LIMIT_MAKER';
+
+// 持仓方向
+type PositionSide = 'BOTH' | 'LONG' | 'SHORT';
+
+// 时间策略
+type TimeInForce = 'GTC' | 'IOC' | 'FOK' | 'GTD';
+
+// 订单状态
+type OrderStatus = 'NEW' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELED' | 'PENDING_CANCEL' | 'REJECTED' | 'EXPIRED';
+
+// 创建订单请求
+interface CreateOrderParams {
+  marketType: MarketType;
+  symbol: string;
+  side: OrderSide;
+  orderType: OrderType;
+  quantity: number;
+  price?: number;
+  timeInForce?: TimeInForce;
+  stopPrice?: number;
+  reduceOnly?: boolean;
+  positionSide?: PositionSide;
+}
+
+// 订单数据
+interface Order {
+  clientOrderId: string;
+  binanceOrderId?: number;
+  marketType: MarketType;
+  symbol: string;
+  side: OrderSide;
+  orderType: OrderType;
+  status: OrderStatus;
+  data: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// 订单列表响应
+interface OrderListResponse {
+  orders: Order[];
+  count: number;
+}
+
+// 订单更新推送
+interface OrderUpdate {
+  clientOrderId: string;
+  binanceOrderId?: number;
+  marketType: MarketType;
+  symbol: string;
+  side: OrderSide;
+  orderType: OrderType;
+  status: OrderStatus;
+  data: Record<string, unknown>;
+  updatedAt: string;
+}
+```
+
 ## Key Features
 
 | Feature | Component | Description |
@@ -190,6 +271,105 @@ interface AccountInfo {
 | Alert Dashboard | `AlertDashboard.vue` | Overview of all alerts |
 | Alert Testing | `AlertTest.vue` | Test alert sounds |
 | Account Overview | `AccountDashboard.vue` | View balances and positions |
+| Trading Panel | `TradingPanel.vue` | Trading order management |
+| Order Form | `OrderForm.vue` | Create/place trading orders |
+| Order List | `OrderList.vue` | View order history |
+| Order Detail | `OrderDetail.vue` | View order details |
+
+## Trading Feature
+
+### WebSocket 消息类型
+
+交易功能通过 WebSocket 与 API 服务通信，消息类型定义在 `07-websocket-protocol.md`：
+
+| 请求类型 | 响应类型 | 说明 |
+|---------|---------|------|
+| `CREATE_ORDER` | `ORDER_DATA` | 创建订单 |
+| `GET_ORDER` | `ORDER_DATA` | 查询单个订单 |
+| `LIST_ORDERS` | `ORDER_LIST_DATA` | 查询订单列表 |
+| `CANCEL_ORDER` | `ORDER_DATA` | 撤销订单 |
+| `GET_OPEN_ORDERS` | `ORDER_LIST_DATA` | 查询当前挂单 |
+
+### 订单类型定义
+
+```typescript
+// 订单请求
+interface CreateOrderRequest {
+  marketType: 'FUTURES' | 'SPOT';
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  orderType: 'LIMIT' | 'MARKET' | 'STOP' | 'TAKE_PROFIT';
+  quantity: number;
+  price?: number;
+  timeInForce?: 'GTC' | 'IOC' | 'FOK';
+  stopPrice?: number;
+  reduceOnly?: boolean;
+  positionSide?: 'BOTH' | 'LONG' | 'SHORT';
+}
+
+// 订单数据
+interface OrderData {
+  clientOrderId: string;
+  binanceOrderId?: number;
+  marketType: 'FUTURES' | 'SPOT';
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  orderType: string;
+  status: 'NEW' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELED' | 'REJECTED' | 'EXPIRED';
+  data: Record<string, unknown>;  // 币安API完整响应
+  createdAt: string;
+  updatedAt: string;
+}
+
+// 订单列表
+interface OrderListData {
+  orders: OrderData[];
+  count: number;
+}
+
+// 订单更新推送
+interface OrderUpdate {
+  clientOrderId: string;
+  binanceOrderId?: number;
+  marketType: 'FUTURES' | 'SPOT';
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  orderType: string;
+  status: string;
+  data: Record<string, unknown>;
+  updatedAt: string;
+}
+```
+
+### Trading Store (`trading-store.ts`)
+
+管理交易订单状态：
+
+```typescript
+interface TradingState {
+  orders: OrderData[];
+  openOrders: OrderData[];
+  currentOrder: OrderData | null;
+  isLoading: boolean;
+  lastUpdate: Date;
+}
+```
+
+### Trading Panel 功能
+
+| 功能 | 说明 |
+|------|------|
+| 市场选择 | 期货(FUTURES) / 现货(SPOT) 切换 |
+| 交易对选择 | 选择交易对如 BTCUSDT |
+| 订单类型 | LIMIT / MARKET / STOP / TAKE_PROFIT |
+| 买入/卖出 | 选择 BUY 或 SELL |
+| 价格设置 | 限价单设置价格 |
+| 数量设置 | 设置下单数量 |
+| 持仓方向 | 期货选择 LONG / SHORT / BOTH |
+| 订单列表 | 查看历史订单和当前挂单 |
+| 订单详情 | 查看订单详细信息和状态 |
+| 撤销订单 | 撤销当前挂单 |
+| 实时更新 | WebSocket 推送订单状态更新 |
 
 ## Technology Stack
 
@@ -211,14 +391,15 @@ The frontend connects to the API service via WebSocket for real-time updates:
 - Signal generation events
 - Alert notifications
 - Account balance updates
+- Order status updates (order creation, fills, cancellation)
 
 ## File Statistics
 
 | Category | Count |
 |----------|-------|
-| Vue Components | 16 |
-| TypeScript Stores | 4 |
-| Type Definition Files | 3 |
+| Vue Components | 22 |
+| TypeScript Stores | 5 |
+| Type Definition Files | 4 |
 | Theme Files | 1 |
 | Composable Functions | 1 |
 
@@ -230,3 +411,7 @@ The frontend connects to the API service via WebSocket for real-time updates:
 4. Added `GlobalAlertHandler.vue` for global alert handling
 5. Added `AlertTest.vue` for testing alert sounds
 6. Added `AlertDashboard.vue` for alert overview
+7. Added `trading-store.ts` for trading order state management
+8. Added `trading-types.ts` with Order and trading types
+9. Added `TradingDashboard.vue` for trading panel
+10. Added trading components: OrderForm, OrderList, OrderDetail

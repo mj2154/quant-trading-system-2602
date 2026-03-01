@@ -15,9 +15,9 @@
 
 ## 版本信息
 
-**本文档版本**: v1.0
-**最后更新**: 2026-02-28
-**更新内容**: 整合 WebSocket 协议设计与数据模型实现
+**本文档版本**: v1.1
+**最后更新**: 2026-03-02
+**更新内容**: 新增交易功能架构说明
 
 ---
 
@@ -39,6 +39,15 @@
 - [db/ 数据库模型](./08-api-models.md#db-数据库表对应模型)
 - [protocol/ 协议层模型](./08-api-models.md#protocol-websocket-协议层模型)
 - [error_models.py 错误模型](./08-api-models.md#error_modelspy-错误模型)
+
+### 交易功能
+
+- [交易订单表设计](./04-trading-orders.md) - trading_orders表结构
+- [WebSocket协议-交易类型](./07-websocket-protocol.md#交易类型binance-service) - 交易消息类型定义
+
+### API服务内部组件
+
+- [DataProcessor](./04-dataprocessor.md) - 统一数据处理中心，监听数据库通知并推送数据
 
 ---
 
@@ -79,3 +88,5 @@
 
 - [DATABASE_COORDINATED_ARCHITECTURE.md](./DATABASE_COORDINATED_ARCHITECTURE.md) - 数据库协调架构
 - [QUANT_TRADING_SYSTEM_ARCHITECTURE.md](./QUANT_TRADING_SYSTEM_ARCHITECTURE.md) - 系统架构详细设计
+- [04-trading-orders.md](./04-trading-orders.md) - 交易订单表设计
+- [04-dataprocessor.md](./04-dataprocessor.md) - DataProcessor统一数据处理中心

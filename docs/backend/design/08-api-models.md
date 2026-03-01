@@ -20,6 +20,7 @@ models/
 │   ├── exchange_models.py       # 交易所信息
 │   ├── alert_config_models.py   # 告警配置
 │   └── signal_models.py         # 信号模型（仅启用/禁用响应）
+│   └── order_models.py          # 交易订单模型
 │
 ├── protocol/              # WebSocket 协议层模型
 │   ├── ws_message.py             # 消息协议
@@ -355,6 +356,20 @@ models/
 | `EnableDisableResponse` | 启用/禁用响应 | `id`, `name`, `is_enabled`, `message` |
 
 **说明**：API 服务只负责接收信号通知（通过 WebSocket），不存储或管理信号。信号由 signal-service 处理。
+
+### order_models.py - 交易订单模型
+
+| 模型名称 | 用途 | 主要字段 |
+|---------|------|---------|
+| `CreateOrderRequest` | 创建订单请求 | `market_type`, `symbol`, `side`, `order_type`, `quantity` |
+| `GetOrderRequest` | 查询订单请求 | `client_order_id` 或 `binance_order_id` |
+| `ListOrdersRequest` | 查询订单列表请求 | `market_type`, `symbol`, `status`, `limit` |
+| `CancelOrderRequest` | 撤销订单请求 | `client_order_id` 或 `binance_order_id` |
+| `OrderData` | 订单数据 | `client_order_id`, `binance_order_id`, `market_type`, `symbol`, `status`, `data` |
+| `OrderListData` | 订单列表数据 | `orders[]`, `count` |
+| `OrderUpdateData` | 订单更新推送数据 | 继承 OrderData，额外包含 `updated_at` |
+
+**说明**：交易订单模型与 trading_orders 表和 04-trading-orders.md 设计保持一致。data 字段存储币安 API 返回的完整 JSON 数据。
 
 ---
 

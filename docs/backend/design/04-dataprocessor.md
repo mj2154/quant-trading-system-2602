@@ -23,6 +23,12 @@ DataProcessor 是 API 服务内部的数据处理中枢，负责：
 | `signal.new` | strategy_signals 插入新记录 | 广播给订阅对应 SIGNAL:{alert_id} 的客户端 |
 | `config.new/update/delete` | strategy_config 变更 | 广播给订阅 strategy:* 的客户端 |
 | `alert_config.new/update/delete` | alert_configs 变更 | 仅记录日志，前端通过 CRUD 响应更新状态 |
+| `order.new` | trading_orders 新增记录 | 记录日志（binance-service执行下单） |
+| `order.update` | trading_orders 数据更新 | 推送给订阅订单的客户端 |
+| `order.filled` | 订单完全成交 | 推送FILLED状态给客户端 |
+| `order.canceled` | 订单撤销 | 推送CANCELED状态给客户端 |
+| `order.rejected` | 订单拒绝 | 推送REJECTED状态给客户端 |
+| `order.expired` | 订单过期 | 推送EXPIRED状态给客户端 |
 
 > **重要说明**：`subscription.add/remove/clean` 频道由币安服务监听，API 服务不需要监听这些频道。
 
@@ -34,6 +40,7 @@ DataProcessor
 ├── _on_task_notification()    # 任务事件处理 (task.completed, task.failed)
 ├── _on_subscription_notification()  # 订阅变更处理 (记录日志)
 ├── _on_realtime_notification() # 实时数据处理 (realtime.update)
+├── _on_order_notification()   # 订单事件处理 (order.new, order.update, order.filled 等)
 └── _client_manager           # 客户端管理，用于推送数据
 ```
 
@@ -86,7 +93,54 @@ async def _on_realtime_notification(self, payload: dict) -> None:
     })
 ```
 
-## 8. 信号处理
+## 8. 订单处理
+
+```
+订单通知 (order.update / order.filled / order.canceled 等)
+    │
+    ▼
+DataProcessor._on_order_notification()
+    │
+    ├── 解析通知：client_order_id, binance_order_id, status, data
+    │
+    ├── 推送给订阅订单的客户端：
+    │   ├── 订阅键: TRADING:ORDER (所有订单更新)
+    │   └── 订阅键: TRADING:ORDER:{client_order_id} (特定订单)
+    │
+    └── 构造 ORDER_UPDATE 消息推送给客户端
+```
+
+```python
+async def _on_order_notification(self, event_type: str, payload: dict) -> None:
+    """处理订单事件通知
+
+    Args:
+        event_type: 事件类型 (order.new, order.update, order.filled 等)
+        payload: 订单数据
+    """
+    order_data = payload.get("data", {})
+
+    # 推送给所有订阅订单的客户端
+    await self._client_manager.broadcast_by_key("TRADING:ORDER", {
+        "type": "ORDER_UPDATE",
+        "data": order_data
+    })
+
+    # 推送给订阅特定订单的客户端
+    client_order_id = order_data.get("client_order_id")
+    if client_order_id:
+        await self._client_manager.broadcast_by_key(
+            f"TRADING:ORDER:{client_order_id}",
+            {
+                "type": "ORDER_UPDATE",
+                "data": order_data
+            }
+        )
+```
+
+> **注意**: `order.new` 事件仅记录日志，因为订单创建后由 binance-service 执行实际下单操作。
+
+## 9. 与其他组件的关系
 
 ```python
 async def _on_signal_notification(self, payload: dict) -> None:

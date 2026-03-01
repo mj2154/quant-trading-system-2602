@@ -31,6 +31,7 @@ DROP TABLE IF EXISTS strategy_signals CASCADE;
 DROP TABLE IF EXISTS alert_configs CASCADE;
 DROP TABLE IF EXISTS subscription_keys CASCADE;
 DROP TABLE IF EXISTS task_results CASCADE;
+DROP TABLE IF EXISTS trading_orders CASCADE;
 
 -- =============================================================================
 -- 第三部分: 创建表
@@ -235,7 +236,56 @@ CREATE INDEX IF NOT EXISTS idx_exchange_info_symbol ON exchange_info (symbol);
 CREATE INDEX IF NOT EXISTS idx_exchange_info_market ON exchange_info (market_type);
 
 -- -----------------------------------------------------------------------------
--- 3.5 alert_configs 告警配置表
+-- 3.5 trading_orders 交易订单表
+-- 设计: 存储交易订单完整数据，INSERT触发order.new通知
+-- 极简JSONB方案: 核心字段列存储，完整数据JSONB存储
+-- 参考文档: docs/backend/design/04-trading-orders.md
+-- -----------------------------------------------------------------------------
+CREATE TABLE trading_orders (
+    id BIGSERIAL PRIMARY KEY,
+
+    -- 唯一标识（用于查询）
+    client_order_id VARCHAR(36) NOT NULL UNIQUE,
+
+    -- 币安订单ID（订单在交易所的唯一标识）
+    binance_order_id BIGINT,
+
+    -- 区分市场类型（用于路由查询）
+    market_type VARCHAR(10) NOT NULL,  -- SPOT / FUTURES
+
+    -- 交易对（如 BTCUSDT）
+    symbol VARCHAR(20) NOT NULL,
+
+    -- 核心状态（常用查询）
+    status VARCHAR(20) NOT NULL DEFAULT 'NEW',  -- NEW / PARTIALLY_FILLED / FILLED / CANCELED / REJECTED / EXPIRED
+    side VARCHAR(10) NOT NULL,                   -- BUY / SELL
+    order_type VARCHAR(20) NOT NULL,              -- LIMIT / MARKET / STOP / TAKE_PROFIT 等
+
+    -- 全部数据用JSONB存储（完美适配币安格式）
+    data JSONB NOT NULL,
+
+    -- 时间戳
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_trading_orders_client_id ON trading_orders (client_order_id);
+CREATE INDEX IF NOT EXISTS idx_trading_orders_binance_id ON trading_orders (binance_order_id);
+CREATE INDEX IF NOT EXISTS idx_trading_orders_market_status ON trading_orders (market_type, status);
+CREATE INDEX IF NOT EXISTS idx_trading_orders_symbol ON trading_orders (symbol);
+CREATE INDEX IF NOT EXISTS idx_trading_orders_side ON trading_orders (side);
+CREATE INDEX IF NOT EXISTS idx_trading_orders_created ON trading_orders (created_at DESC);
+
+-- 复合索引：常用查询
+CREATE INDEX IF NOT EXISTS idx_trading_orders_symbol_status ON trading_orders (symbol, status);
+CREATE INDEX IF NOT EXISTS idx_trading_orders_market_created ON trading_orders (market_type, created_at DESC);
+
+-- 转换为 Hypertable（时间分区）
+SELECT create_hypertable('trading_orders', 'created_at');
+
+-- -----------------------------------------------------------------------------
+-- 3.6 alert_configs 告警配置表
 -- 设计: 存储告警规则配置，INSERT/UPDATE/DELETE触发配置变更通知
 -- 用于MACD共振策略等多策略系统的配置管理，支持按用户/策略/参数索引查询
 -- 注意: id 由前端生成 UUIDv4，所有字段都可重复
@@ -584,6 +634,75 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- -----------------------------------------------------------------------------
+-- 交易订单通知函数（使用 trading_orders 表）
+-- -----------------------------------------------------------------------------
+
+-- 订单创建通知：INSERT trading_orders 时触发
+CREATE OR REPLACE FUNCTION notify_order_new()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_notify('order.new', jsonb_build_object(
+        'event_id', uuidv7()::TEXT,
+        'event_type', 'order.new',
+        'timestamp', NOW()::TEXT,
+        'data', jsonb_build_object(
+            'id', NEW.id,
+            'client_order_id', NEW.client_order_id,
+            'binance_order_id', NEW.binance_order_id,
+            'market_type', NEW.market_type,
+            'symbol', NEW.symbol,
+            'status', NEW.status,
+            'side', NEW.side,
+            'order_type', NEW.order_type,
+            'data', NEW.data,
+            'created_at', NEW.created_at::TEXT
+        )
+    )::TEXT);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 订单状态/数据更新通知：UPDATE trading_orders 时触发
+CREATE OR REPLACE FUNCTION notify_order_update()
+RETURNS TRIGGER AS $$
+DECLARE
+    event_type TEXT;
+BEGIN
+    -- 确定事件类型
+    IF NEW.status = 'FILLED' THEN
+        event_type := 'order.filled';
+    ELSIF NEW.status = 'CANCELED' THEN
+        event_type := 'order.canceled';
+    ELSIF NEW.status = 'REJECTED' THEN
+        event_type := 'order.rejected';
+    ELSIF NEW.status = 'EXPIRED' THEN
+        event_type := 'order.expired';
+    ELSE
+        event_type := 'order.update';
+    END IF;
+
+    PERFORM pg_notify(event_type, jsonb_build_object(
+        'event_id', uuidv7()::TEXT,
+        'event_type', event_type,
+        'timestamp', NOW()::TEXT,
+        'data', jsonb_build_object(
+            'id', NEW.id,
+            'client_order_id', NEW.client_order_id,
+            'binance_order_id', NEW.binance_order_id,
+            'market_type', NEW.market_type,
+            'symbol', NEW.symbol,
+            'status', NEW.status,
+            'side', NEW.side,
+            'order_type', NEW.order_type,
+            'data', NEW.data,
+            'updated_at', NEW.updated_at::TEXT
+        )
+    )::TEXT);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- -----------------------------------------------------------------------------
 -- 告警配置通知函数（使用 alert_configs 表）
 -- -----------------------------------------------------------------------------
 
@@ -740,6 +859,22 @@ CREATE TRIGGER trigger_alert_config_delete
     FOR EACH ROW
     EXECUTE FUNCTION notify_alert_config_delete();
 
+-- trading_orders 触发器
+-- 订单创建通知
+DROP TRIGGER IF EXISTS trigger_order_new ON trading_orders;
+CREATE TRIGGER trigger_order_new
+    AFTER INSERT ON trading_orders
+    FOR EACH ROW
+    EXECUTE FUNCTION notify_order_new();
+
+-- 订单状态/数据更新通知
+DROP TRIGGER IF EXISTS trigger_order_update ON trading_orders;
+CREATE TRIGGER trigger_order_update
+    AFTER UPDATE ON trading_orders
+    FOR EACH ROW
+    WHEN (OLD.data IS DISTINCT FROM NEW.data OR OLD.status IS DISTINCT FROM NEW.status)
+    EXECUTE FUNCTION notify_order_update();
+
 -- =============================================================================
 -- 第六部分: 数据保留策略
 -- =============================================================================
@@ -757,6 +892,8 @@ PERFORM add_retention_policy('realtime_data', drop_after => INTERVAL '1 day');
 
 -- strategy_signals: 保留30天（策略信号需要长期跟踪）
 PERFORM add_retention_policy('strategy_signals', drop_after => INTERVAL '30 days');
+
+-- trading_orders: 永久保留（交易记录需要长期保存）
 
 -- =============================================================================
 -- 第七部分: upsert_exchange_info 存储过程
@@ -878,6 +1015,10 @@ $$ LANGUAGE plpgsql;
 -- | alert_config.new      | INSERT alert_configs        | 数据库  | 信号服务       | 新建告警配置通知       |
 -- | alert_config.update   | UPDATE alert_configs        | 数据库  | 信号服务       | 更新告警配置通知       |
 -- | alert_config.delete   | DELETE alert_configs        | 数据库  | 信号服务       | 删除告警配置通知       |
+-- | order.new             | INSERT trading_orders       | 数据库  | API/交易服务   | 新订单创建通知         |
+-- | order.update          | UPDATE trading_orders       | 数据库  | API/交易服务   | 订单数据更新通知       |
+-- | order.filled          | UPDATE status=FILLED       | 数据库  | API/交易服务   | 订单完全成交通知       |
+-- | order.canceled        | UPDATE status=CANCELED      | 数据库  | API/交易服务   | 订单撤销通知           |
 --
 -- =============================================================================
 -- 策略元数据表（由 signal-service 自动维护）
@@ -901,9 +1042,9 @@ BEGIN
     RAISE NOTICE '========================================';
     RAISE NOTICE '数据库初始化完成！';
     RAISE NOTICE '========================================';
-    RAISE NOTICE '表: realtime_data, tasks, klines_history, exchange_info, alert_configs, strategy_signals';
-    RAISE NOTICE 'Hypertable: 4个表已转换为TimescaleDB Hypertable';
-    RAISE NOTICE '触发器: 11个触发器已创建';
+    RAISE NOTICE '表: realtime_data, tasks, klines_history, exchange_info, alert_configs, strategy_signals, trading_orders';
+    RAISE NOTICE 'Hypertable: 5个表已转换为TimescaleDB Hypertable';
+    RAISE NOTICE '触发器: 11个触发器已创建（trading_orders触发器待添加）';
     RAISE NOTICE '保留策略: tasks(7天), realtime_data(1天), strategy_signals(30天)';
     RAISE NOTICE '通知频道: task.new, task.completed, subscription.add, subscription.remove, subscription.clean, realtime.update, signal.new, alert_config.new, alert_config.update, alert_config.delete';
     RAISE NOTICE '========================================';
