@@ -9,6 +9,7 @@
 | 文档 | 说明 |
 |------|------|
 | [架构设计](design/ARCHITECTURE.md) | 前端技术栈、进程架构、核心组件结构 |
+| [交易功能设计](design/TRADING.md) | 交易功能设计、WebSocket通信、组件结构 |
 
 ### 指南
 
