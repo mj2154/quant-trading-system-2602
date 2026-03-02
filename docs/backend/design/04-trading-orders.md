@@ -1,162 +1,176 @@
-# 交易订单表设计
+# 订单任务表设计
 
 ## 1. 设计目标
 
-- 完美适配币安交易所交易数据格式
-- 支持期货(U本位)、现货多市场
-- 跨服务共享：binance-service(订单创建)、api-service(订单查询)、trading-service(交易执行)
-- 极简JSONB方案，平衡灵活性与性能
+- **权威数据源**：订单状态以交易所为准，本地不维护"当前状态"
+- **任务驱动**：订单操作通过任务表执行，复用现有 `tasks` 表结构
+- **状态获取**：通过 WebSocket 订阅或任务查询获取最新状态
+- **简化逻辑**：任务表只记录操作，不维护订单状态，避免状态不一致
+- **数据保留**：订单记录永久保留，用于分析和追溯
 
 ## 2. 设计理念
 
-### 2.1 极简JSONB方案
+### 2.1 为什么不再存储"当前状态"
 
-采用"核心字段列存储 + 完整数据JSONB"的混合方案：
+| 问题 | 说明 |
+|------|------|
+| 状态不一致 | 网络问题会导致本地状态与交易所实际状态不统一 |
+| 缺乏权威 | 交易所才是订单状态的唯一权威来源 |
+| 维护复杂 | 需要处理各种边界情况（超时、重试等） |
+| 生产风险 | 状态同步失败难以追溯真实状态 |
 
-| 存储方式 | 字段 | 原因 |
-|---------|------|------|
-| 列存储 | client_order_id, binance_order_id, market_type, symbol, status, side, order_type | 高频查询，需索引 |
-| JSONB存储 | data | 完整保留币安原始数据，灵活适配多市场 |
+### 2.2 订单状态获取方式
 
-### 2.2 为什么可行
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 订单状态获取流程                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  方式A：WebSocket订阅（主推）                                    │
+│    币安WS → ORDER_TRADE_UPDATE → 实时推送 → 前端               │
+│                                                                 │
+│  方式B：任务查询（兜底）                                         │
+│    前端请求 → order_tasks 查询 → binance-service API查询       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-- 个人开发环境，数据量小(<10万)
-- 核心查询走索引，无性能问题
-- JSONB内字段查询可后续按需添加GIN索引
+**核心原则**：始终以交易所返回的状态为准，本地仅缓存用于展示。
+
+### 2.3 复用 tasks 表结构
+
+采用与 `tasks` 表相同的结构，复用代码逻辑：
+- 仅 `type` 改为 `order.create`、`order.cancel`、`order.query`
+- 独立表可设置不同的保留策略（订单永久保留）
+- 其他字段完全兼容
 
 ## 3. 表结构
 
+> **重要**: order_tasks 是 tasks 表的完全复制，仅表名和保留策略不同。
+
 ```sql
 -- -----------------------------------------------------------------------------
--- trading_orders 交易订单表
--- 设计: 存储交易订单完整数据，INSERT触发order.new通知
--- 极简JSONB方案: 核心字段列存储，完整数据JSONB存储
+-- order_tasks 订单任务表
+-- 设计: 存储订单操作任务，完全复用 tasks 表结构
+-- INSERT 触发 order_task_new 通知
+-- 数据保留: 永久保留（用于分析和追溯）
+-- 参考文档: docs/backend/design/04-trading-orders.md
 -- -----------------------------------------------------------------------------
-CREATE TABLE trading_orders (
-    id BIGSERIAL PRIMARY KEY,
+CREATE TABLE order_tasks (
+    id BIGSERIAL,
 
-    -- 唯一标识（用于查询）
-    client_order_id VARCHAR(36) NOT NULL UNIQUE,
+    -- 任务类型
+    type VARCHAR(50) NOT NULL,
+    -- order.create - 创建订单
+    -- order.cancel - 取消订单
+    -- order.query  - 查询订单状态
 
-    -- 币安订单ID（订单在交易所的唯一标识）
-    binance_order_id BIGINT,
+    -- 任务参数（JSON格式）
+    -- order.create: {symbol, side, type, quantity, price, timeInForce, clientOrderId, marketType, ...}
+    -- order.cancel: {symbol, orderId, clientOrderId}
+    -- order.query:  {symbol, orderId, clientOrderId}
+    payload JSONB NOT NULL DEFAULT '{}',
 
-    -- 区分市场类型（用于路由查询）
-    market_type VARCHAR(10) NOT NULL,  -- SPOT / FUTURES
+    -- 任务结果（API响应或错误信息）
+    -- 成功: {orderId, status, ...}
+    -- 失败: {code: -1013, msg: "Invalid quantity."}
+    result JSONB,
 
-    -- 交易对（如 BTCUSDT）
-    symbol VARCHAR(20) NOT NULL,
+    -- 任务状态
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    -- pending    - 等待处理
+    -- processing - 处理中
+    -- completed  - 已完成
+    -- failed    - 失败
 
-    -- 核心状态（常用查询）
-    status VARCHAR(20) NOT NULL DEFAULT 'NEW',  -- NEW / PARTIALLY_FILLED / FILLED / CANCELED / REJECTED / EXPIRED
-    side VARCHAR(10) NOT NULL,                   -- BUY / SELL
-    order_type VARCHAR(20) NOT NULL,              -- LIMIT / MARKET / STOP / TAKE_PROFIT 等
-
-    -- 全部数据用JSONB存储（完美适配币安格式）
-    data JSONB NOT NULL,
-
-    -- 时间戳
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- 时间戳（必须是 NOT NULL 才能转换为 Hypertable）
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 转换为 Hypertable（必须在添加主键之前执行）
+SELECT create_hypertable('order_tasks', 'created_at');
+
+-- 添加复合主键（与 tasks 表一致，包含 created_at）
+ALTER TABLE order_tasks ADD PRIMARY KEY (id, created_at);
+
 -- 索引
-CREATE INDEX IF NOT EXISTS idx_trading_orders_client_id ON trading_orders (client_order_id);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_binance_id ON trading_orders (binance_order_id);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_market_status ON trading_orders (market_type, status);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_symbol ON trading_orders (symbol);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_side ON trading_orders (side);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_created ON trading_orders (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_order_tasks_status ON order_tasks (status);
+CREATE INDEX IF NOT EXISTS idx_order_tasks_type ON order_tasks (type);
 
--- 复合索引：常用查询
-CREATE INDEX IF NOT EXISTS idx_trading_orders_symbol_status ON trading_orders (symbol, status);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_market_created ON trading_orders (market_type, created_at DESC);
-
--- GIN索引（可选，用于JSON内字段查询）
--- CREATE INDEX IF NOT EXISTS idx_trading_orders_data ON trading_orders USING gin (data);
+-- 复合索引
+CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, status);
 
 -- 转换为 Hypertable（时间分区）
-SELECT create_hypertable('trading_orders', 'created_at');
+SELECT create_hypertable('order_tasks', 'created_at');
 ```
 
-## 4. 数据字段说明
+## 4. 字段说明
 
-### 4.1 核心列字段
+### 4.1 type 任务类型
+
+| 类型 | 说明 | 触发方式 |
+|------|------|----------|
+| `order.create` | 创建订单 | 前端请求 |
+| `order.cancel` | 取消订单 | 前端请求 |
+| `order.query` | 查询订单状态 | 前端请求 / 定时任务 |
+
+### 4.2 payload 参数格式
+
+> **重要**：所有 payload 必须包含 `requestId` 字段，用于前端关联请求和响应。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| client_order_id | VARCHAR(36) | 客户端订单ID（系统生成UUID） |
-| binance_order_id | BIGINT | 币安订单ID |
-| market_type | VARCHAR(10) | 市场类型：SPOT / FUTURES |
-| symbol | VARCHAR(20) | 交易对 |
-| status | VARCHAR(20) | 订单状态 |
-| side | VARCHAR(10) | 买卖方向 |
-| order_type | VARCHAR(20) | 订单类型 |
-| data | JSONB | 完整订单数据 |
+| `requestId` | string | 请求ID（前端生成，用于关联 ack/response） |
 
-### 4.2 JSONB data 字段内容
+#### order.create 参数
 
-#### 期货订单 (market_type = FUTURES)
+#### order.create 参数
 
 ```json
 {
-    "clientOrderId": "testOrder",
-    "orderId": 22542179,
     "symbol": "BTCUSDT",
     "side": "BUY",
-    "positionSide": "SHORT",
     "type": "LIMIT",
-    "origType": "TRAILING_STOP_MARKET",
-    "origQty": "10",
-    "price": "50000",
-    "avgPrice": "0.00000",
-    "stopPrice": "9300",
-    "executedQty": "0",
-    "cumQty": "0",
-    "cumQuote": "0",
-    "status": "NEW",
+    "quantity": 0.002,
+    "price": 50000.0,
     "timeInForce": "GTC",
-    "reduceOnly": false,
-    "closePosition": false,
-    "workingType": "CONTRACT_PRICE",
-    "priceProtect": false,
-    "priceMatch": "NONE",
-    "selfTradePreventionMode": "NONE",
-    "goodTillDate": 1693207680000,
-    "updateTime": 1566818724722
+    "positionSide": "BOTH",
+    "reduceOnly": false
 }
 ```
 
-#### 现货订单 (market_type = SPOT)
+#### order.cancel 参数
 
 ```json
 {
     "symbol": "BTCUSDT",
-    "orderId": 28,
-    "orderListId": -1,
-    "clientOrderId": "6gCrw2kRUAF9CvJDGP16IP",
-    "transactTime": 1507725176595,
-    "price": "0.00000000",
-    "origQty": "10.00000000",
-    "executedQty": "10.00000000",
-    "origQuoteOrderQty": "0.000000",
-    "cummulativeQuoteQty": "10.00000000",
-    "status": "FILLED",
-    "timeInForce": "GTC",
-    "type": "MARKET",
-    "side": "SELL",
-    "workingTime": 1507725176595,
-    "selfTradePreventionMode": "NONE",
-    "fills": [
-        {
-            "price": "4000.00000000",
-            "qty": "1.00000000",
-            "commission": "4.00000000",
-            "commissionAsset": "USDT",
-            "tradeId": 56
-        }
-    ]
+    "orderId": 22542179,
+    "clientOrderId": "testOrder"
 }
+```
+
+#### order.query 参数
+
+```json
+{
+    "symbol": "BTCUSDT",
+    "orderId": 22542179,
+    "clientOrderId": "testOrder"
+}
+```
+
+### 4.3 status 状态流转
+
+```
+pending → processing → completed (成功)
+         → failed     (失败)
+
+前端显示：
+- pending:    等待处理
+- processing: 处理中（已发送到交易所）
+- completed:  成功（result 包含订单信息）
+- failed:     失败（result 包含错误信息）
 ```
 
 ## 5. 数据流设计
@@ -164,125 +178,183 @@ SELECT create_hypertable('trading_orders', 'created_at');
 ### 5.1 订单创建流程
 
 ```
-前端/交易服务
-    ↓ POST /api/v3/order 或 /fapi/v1/order
-binance-service
-    ↓ 调用币安API下单
-    ↓ INSERT trading_orders (status=NEW)
-数据库
-    ↓ INSERT 触发 notify_order_new()
-trading_order.new 通知
-    ↓
-api-service → WebSocket推送 → 前端
-trading-service → 交易决策处理
+1. 前端 → API 写入 order_tasks (type=order.create, status=pending)
+2. INSERT 触发 notify_order_task_new()
+3. binance-service 监听并处理:
+   - 读取 order_tasks 获取下单参数
+   - 调用币安 API 下单
+   - 成功: UPDATE result=API响应, binance_order_id=xxx, status=completed
+   - 失败: UPDATE result=错误信息, status=failed
+4. 触发 order_task_completed / order_task_failed 通知
+5. API-service 推送结果给前端
 ```
 
-### 5.2 订单状态更新流程
+### 5.2 订单取消流程
 
 ```
-币安 WebSocket 用户数据流
-    ↓ ORDER_TRADE_UPDATE 事件
-binance-service
-    ↓ UPDATE trading_orders SET data=..., status=...
-    ↓ UPDATE 触发 notify_order_update()
-数据库
-    ↓
-trading_order.update 通知
-    ↓
-api-service → WebSocket推送 → 前端
+1. 前端 → API 写入 order_tasks (type=order.cancel, status=pending)
+2. INSERT 触发 notify_order_task_new()
+3. binance-service 监听并处理:
+   - 读取 order_tasks 获取取消参数
+   - 调用币安 API 撤单
+   - 成功/失败处理同上
 ```
 
-### 5.3 通知频道
+### 5.3 订单状态查询流程
+
+```
+方式A: WebSocket订阅 (推荐)
+  1. 前端连接 WebSocket
+  2. 订阅订单更新频道
+  3. 币安 WS 推送 ORDER_TRADE_UPDATE
+  4. 前端实时更新订单状态
+
+方式B: 任务查询 (兜底)
+  1. 前端 → API 写入 order_tasks (type=order.query)
+  2. binance-service 调用 API 查询订单状态
+  3. 返回当前状态给前端
+```
+
+### 5.4 通知频道
 
 | 频道 | 触发条件 | 发送者 | 接收者 |
 |------|---------|--------|--------|
-| order.new | INSERT trading_orders | 数据库 | api-service, trading-service |
-| order.update | UPDATE data/status | 数据库 | api-service, trading-service |
-| order.cancel | UPDATE status=CANCELED | 数据库 | api-service, trading-service |
+| `order_task_new` | INSERT order_tasks | 数据库 | binance-service |
+| `order_task_completed` | UPDATE status=completed | 数据库 | api-service |
+| `order_task_failed` | UPDATE status=failed | 数据库 | api-service |
 
-## 6. 使用示例
+## 6. 订单状态获取架构
 
-### 6.1 创建订单
+### 6.1 权威数据源
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 订单状态权威架构                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌──────────────┐      WebSocket       ┌──────────────┐       │
+│   │   币安交易所  │ ──────────────────→  │  binance-svc │       │
+│   └──────────────┘    ORDER_TRADE_UPDATE └──────┬───────┘       │
+│                                                    │              │
+│                                                    ▼              │
+│   ┌──────────────┐      推送更新           ┌──────────────┐       │
+│   │    前端      │ ←────────────────────── │ api-service  │       │
+│   └──────────────┘                         └──────────────┘       │
+│                                                                 │
+│   核心原则: 始终以币安返回的状态为准                             │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 兜底机制
+
+如果 WebSocket 断开或未连接，前端可以：
+
+1. **主动查询**：写入 `order.query` 任务，获取最新状态
+2. **定时轮询**：定期查询活跃订单状态（可选优化）
+
+## 7. 与旧设计对比
+
+| 特性 | 旧设计 (trading_orders) | 新设计 (order_tasks) |
+|------|------------------------|---------------------|
+| 存储内容 | 订单状态 + 订单数据 | 订单操作任务 |
+| 状态维护 | 本地维护，可不一致 | 以交易所为准 |
+| 状态获取 | 查询本地表 | WebSocket 推送 |
+| 错误处理 | 状态可能卡在 NEW | 明确标记 failed |
+| 数据一致性 | 难以保证 | 权威数据源 |
+| 表结构 | 专用设计 | 复用 tasks 表 |
+| 数据保留 | 未明确 | 永久保留 |
+
+## 8. 使用示例
+
+### 8.1 创建订单任务
 
 ```python
-# binance-service 创建订单
-client_order_id = str(uuid.uuid4())
+# 前端或 API 创建订单任务
+request_id = f"req_{uuid.uuid4().hex[:12]}"
 
-# 调用币安API
-result = await binance_client.create_order(...)
-
-# 写入数据库
+# 写入数据库（type 字段区分任务类型，参数放入 payload）
 await pool.execute("""
-    INSERT INTO trading_orders (
-        client_order_id, binance_order_id, market_type, symbol,
-        status, side, order_type, data
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    INSERT INTO order_tasks (
+        type, payload, status
+    ) VALUES ($1, $2, $3)
 """,
-    client_order_id,
-    result["orderId"],
-    "FUTURES",
-    result["symbol"],
-    result["status"],
-    result["side"],
-    result["type"],
-    result  # 完整JSON
+    "order.create",
+    {
+        "requestId": request_id,
+        "clientOrderId": "my_order_001",
+        "marketType": "FUTURES",
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "type": "LIMIT",
+        "quantity": 0.002,
+        "price": 50000.0,
+        "timeInForce": "GTC"
+    },
+    "pending"
 )
 ```
 
-### 6.2 查询订单
+### 8.2 查询订单任务结果
 
 ```python
-# 通过client_order_id查询
-row = await pool.fetchrow("""
-    SELECT * FROM trading_orders
-    WHERE client_order_id = $1
-""", client_order_id)
+# 通过 requestId 在 payload 中查询
+request_id = "req_abc123..."
 
-# 通过binance_order_id查询
 row = await pool.fetchrow("""
-    SELECT * FROM trading_orders
-    WHERE binance_order_id = $1
-""", binance_order_id)
-
-# 查询某交易对的所有订单
-rows = await pool.fetch("""
-    SELECT * FROM trading_orders
-    WHERE symbol = $1 AND status IN ('NEW', 'PARTIALLY_FILLED')
+    SELECT * FROM order_tasks
+    WHERE payload->>'requestId' = $1
     ORDER BY created_at DESC
-""", symbol)
+    LIMIT 1
+""", request_id)
+
+if row["status"] == "completed":
+    order_data = row["result"]
+elif row["status"] == "failed":
+    error_info = row["result"]
 ```
 
-### 6.3 更新订单状态
+### 8.3 查询订单状态（向交易所查询）
 
 ```python
-# 通过WebSocket接收订单更新
+# 创建查询任务
+request_id = f"req_{uuid.uuid4().hex[:12]}"
+
 await pool.execute("""
-    UPDATE trading_orders
-    SET data = $1,
-        status = $2,
-        updated_at = NOW()
-    WHERE client_order_id = $3
+    INSERT INTO order_tasks (
+        type, payload, status
+    ) VALUES ($1, $2, $3)
 """,
-    update_data,        # 完整JSON
-    update_data["status"],
-    update_data["clientOrderId"]
+    "order.query",
+    {
+        "requestId": request_id,
+        "marketType": "FUTURES",
+        "symbol": "BTCUSDT",
+        "orderId": binance_order_id
+    },
+    "pending"
 )
+
+# 等待处理完成后查询结果
+row = await pool.fetchrow("""
+    SELECT * FROM order_tasks
+    WHERE payload->>'requestId' = $1 AND type = 'order.query'
+    ORDER BY created_at DESC
+    LIMIT 1
+""", request_id)
+
+# result 中包含交易所返回的当前订单状态
+current_status = row["result"]["status"]
 ```
 
-## 7. 官方文档参考
-
-- **期货U本位**: `binance_futures_docs/01_U本位合约/02_交易接口/03_REST API/下单(TRADE).md`
-- **现货**: `binance_spot_docs/01_REST API/Trading endpoints.md`
-- **期货响应**: `01_U本位合约/02_交易接口/03_REST API/查询订单(USER-DATA).md`
-- **现货响应**: `01_REST API/Trading endpoints.md` (Conditional fields in Order Responses)
-
-## 8. 相关文档
+## 9. 相关文档
 
 - [QUANT_TRADING_SYSTEM_ARCHITECTURE.md](./QUANT_TRADING_SYSTEM_ARCHITECTURE.md) - 完整实施文档
 - [03-binance-service.md](./03-binance-service.md) - 币安服务交易功能设计
 - [01-task-subscription.md](./01-task-subscription.md) - 任务与订阅管理
+- [02-dataflow.md](./02-dataflow.md) - 数据流设计
 
 ---
 
-**版本**: v1.0
-**更新**: 2026-03-02 - 新增交易订单表设计
+**版本**: v2.1
+**更新**: 2026-03-03 - 修复字段名错误：task_type → type；添加 requestId 说明；修正使用示例

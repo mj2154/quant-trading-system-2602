@@ -21,7 +21,7 @@
 - 现货: BINANCE:ACCOUNT@SPOT
 - 期货: BINANCE:ACCOUNT@FUTURES
 
-存储到 realtime_data 表，触发 realtime.update 通知给 API 网关。
+存储到 realtime_data 表，触发 realtime_update 通知给 API 网关。
 """
 
 import asyncio

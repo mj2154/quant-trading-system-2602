@@ -212,7 +212,7 @@ class SignalTestClient:
         {
             "action": "update",
             "data": {
-                "eventType": "signal.new",
+                "eventType": "signal_new",
                 "subscriptionKey": "SIGNAL:{alert_id}",
                 "content": { signal data }
             }
@@ -241,9 +241,9 @@ class SignalTestClient:
                 subscription_key = data.get("subscriptionKey", "")
                 event_type = data.get("eventType", "")
 
-                # 检查是否是 SIGNAL 开头的订阅键或 signal.new 事件
+                # 检查是否是 SIGNAL 开头的订阅键或 signal_new 事件
                 # 符合规范：前端通过 subscriptionKey.startsWith('SIGNAL:') 识别信号推送
-                if subscription_key.startswith("SIGNAL:") or event_type == "signal.new":
+                if subscription_key.startswith("SIGNAL:") or event_type == "signal_new":
                     content = data.get("content", {})
                     logger.info(
                         f"Received signal: alert_id={content.get('alert_id')}, "

@@ -17,10 +17,10 @@ DataProcessor 是 API 服务内部的数据处理中枢，负责：
 
 | 频道 | 触发条件 | 处理策略 |
 |------|----------|----------|
-| `task.completed` | 任务状态更新为 completed | 解析通知，查询 klines_history，推送结果给客户端 |
-| `task.failed` | 任务状态更新为 failed | 推送错误消息给客户端 |
-| `realtime.update` | realtime_data.data 更新 | 解析数据，广播给订阅该 subscription_key 的客户端 |
-| `signal.new` | strategy_signals 插入新记录 | 广播给订阅对应 SIGNAL:{alert_id} 的客户端 |
+| `task_completed` | 任务状态更新为 completed | 解析通知，查询 klines_history，推送结果给客户端 |
+| `task_failed` | 任务状态更新为 failed | 推送错误消息给客户端 |
+| `realtime_update` | realtime_data.data 更新 | 解析数据，广播给订阅该 subscription_key 的客户端 |
+| `signal_new` | strategy_signals 插入新记录 | 广播给订阅对应 SIGNAL:{alert_id} 的客户端 |
 | `config.new/update/delete` | strategy_config 变更 | 广播给订阅 strategy:* 的客户端 |
 | `alert_config.new/update/delete` | alert_configs 变更 | 仅记录日志，前端通过 CRUD 响应更新状态 |
 | `order.new` | trading_orders 新增记录 | 记录日志（binance-service执行下单） |
@@ -30,16 +30,16 @@ DataProcessor 是 API 服务内部的数据处理中枢，负责：
 | `order.rejected` | 订单拒绝 | 推送REJECTED状态给客户端 |
 | `order.expired` | 订单过期 | 推送EXPIRED状态给客户端 |
 
-> **重要说明**：`subscription.add/remove/clean` 频道由币安服务监听，API 服务不需要监听这些频道。
+> **重要说明**：`subscription_add/remove/clean` 频道由币安服务监听，API 服务不需要监听这些频道。
 
 ## 4. 组件结构
 
 ```
 DataProcessor
-├── _on_notification()          # 业务事件处理 (signal.new, config.*, alert_config.*)
-├── _on_task_notification()    # 任务事件处理 (task.completed, task.failed)
+├── _on_notification()          # 业务事件处理 (signal_new, config.*, alert_config.*)
+├── _on_task_notification()    # 任务事件处理 (task_completed, task_failed)
 ├── _on_subscription_notification()  # 订阅变更处理 (记录日志)
-├── _on_realtime_notification() # 实时数据处理 (realtime.update)
+├── _on_realtime_notification() # 实时数据处理 (realtime_update)
 ├── _on_order_notification()   # 订单事件处理 (order.new, order.update, order.filled 等)
 └── _client_manager           # 客户端管理，用于推送数据
 ```
@@ -47,7 +47,7 @@ DataProcessor
 ## 5. 任务处理流程
 
 ```
-任务完成通知 (task.completed)
+任务完成通知 (task_completed)
     │
     ▼
 DataProcessor._on_task_notification()
@@ -192,10 +192,10 @@ class DataProcessor:
         """启动监听"""
         # 注册通知频道
         channels = [
-            "task.completed",
-            "task.failed",
-            "realtime.update",
-            "signal.new",
+            "task_completed",
+            "task_failed",
+            "realtime_update",
+            "signal_new",
             "config.new",
             "config.update",
             "config.delete",
@@ -215,13 +215,13 @@ class DataProcessor:
         try:
             data = json.loads(payload)
 
-            if channel == "task.completed":
+            if channel == "task_completed":
                 await self._on_task_notification(data)
-            elif channel == "task.failed":
+            elif channel == "task_failed":
                 await self._on_task_failed(data)
-            elif channel == "realtime.update":
+            elif channel == "realtime_update":
                 await self._on_realtime_notification(data)
-            elif channel == "signal.new":
+            elif channel == "signal_new":
                 await self._on_signal_notification(data)
             elif channel.startswith("config."):
                 await self._on_config_notification(channel, data)

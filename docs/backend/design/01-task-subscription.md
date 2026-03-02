@@ -63,7 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks (created_at DESC);
 ```json
 {
     "event_id": "0189a1b3-c4d5-6e7f-8901-bcde23456789",
-    "event_type": "task.new",
+    "event_type": "task_new",
     "timestamp": "2026-02-05T10:30:00Z",
     "data": {
         "id": 12345,
@@ -82,16 +82,16 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks (created_at DESC);
 
 **字段说明**：
 - `event_id`：全局唯一事件ID（UUIDv7），用于事件追踪和幂等去重
-- `event_type`：事件类型，采用 `{资源}.{操作}` 命名风格（如 `task.new`、`subscription.add`）
+- `event_type`：事件类型，采用 `{资源}.{操作}` 命名风格（如 `task_new`、`subscription_add`）
 - `timestamp`：事件发生时间（ISO 8601 格式）
 - `data`：业务数据，包含触发通知的表记录字段
 
-**task.completed 通知**：UPDATE status=completed 时触发，通知 API 网关任务完成
+**task_completed 通知**：UPDATE status=completed 时触发，通知 API 网关任务完成
 
 ```json
 {
     "event_id": "0189a1b3-c4d5-6e7f-8901-bcde2345678a",
-    "event_type": "task.completed",
+    "event_type": "task_completed",
     "timestamp": "2026-02-05T10:30:05Z",
     "data": {
         "id": 12345,
@@ -116,12 +116,12 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks (created_at DESC);
 >   - `get_klines` 任务为 `null`（数据已写入 `klines_history` 表）
 >   - 其他任务类型包含实际结果（如 `get_server_time`、`get_quotes`）
 
-**task.failed 通知**：UPDATE status=failed 时触发，通知 API 网关任务失败
+**task_failed 通知**：UPDATE status=failed 时触发，通知 API 网关任务失败
 
 ```json
 {
     "event_id": "0189a1b3-c4d5-6e7f-8901-bcde2345678b",
-    "event_type": "task.failed",
+    "event_type": "task_failed",
     "timestamp": "2026-02-05T10:30:05Z",
     "data": {
         "id": 12345,
@@ -153,9 +153,9 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks (created_at DESC);
 CREATE OR REPLACE FUNCTION notify_task_new()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('task.new', jsonb_build_object(
+    PERFORM pg_notify('task_new', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'task.new',
+        'event_type', 'task_new',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
@@ -185,9 +185,9 @@ DECLARE
 BEGIN
     -- 确定事件类型
     IF NEW.status = 'completed' THEN
-        event_type := 'task.completed';
+        event_type := 'task_completed';
     ELSIF NEW.status = 'failed' THEN
-        event_type := 'task.failed';
+        event_type := 'task_failed';
     ELSE
         -- 其他状态不发送通知
         RETURN NEW;
@@ -225,19 +225,19 @@ SELECT add_retention_policy('tasks', INTERVAL '7 days');
 - **状态驱动**：通过 `status` 字段控制任务生命周期
 - **结果内嵌**：`result` 字段直接存储执行结果
 - **多次通知**：
-  - `task.new`：触发任务处理
-  - `task.completed`：任务成功完成
-  - `task.failed`：任务处理失败
+  - `task_new`：触发任务处理
+  - `task_completed`：任务成功完成
+  - `task_failed`：任务处理失败
 
 **账户信息任务处理流程**：
 
 ```
 1. 前端请求账户信息 (get_futures_account / get_spot_account)
 2. api-service 创建异步任务 (INSERT tasks)
-3. binance-service 监听 task.new 通知
+3. binance-service 监听 task_new 通知
 4. binance-service 获取账户信息，写入 account_info 表
 5. binance-service 更新 tasks.status = completed (result 为 null)
-6. api-service 监听 task.completed 通知
+6. api-service 监听 task_completed 通知
 7. api-service 查询 account_info 表，推送给前端
 ```
 
@@ -399,26 +399,26 @@ DELETE FROM realtime_data WHERE subscribers = ARRAY['api-service'];
 
 | 操作 | 触发器 | 通知频道 | 接收者 | 通知内容 |
 |------|--------|----------|--------|----------|
-| INSERT | AFTER INSERT | `subscription.add` | 币安服务 | subscription_key, data_type |
-| UPDATE data | AFTER UPDATE | `realtime.update` | API 网关 | subscription_key, data, event_time |
-| DELETE | AFTER DELETE | `subscription.remove` | 币安服务 | subscription_key, data_type |
-| DELETE (cleanup) | AFTER DELETE | `subscription.remove` | 币安服务 | subscription_key, data_type |
+| INSERT | AFTER INSERT | `subscription_add` | 币安服务 | subscription_key, data_type |
+| UPDATE data | AFTER UPDATE | `realtime_update` | API 网关 | subscription_key, data, event_time |
+| DELETE | AFTER DELETE | `subscription_remove` | 币安服务 | subscription_key, data_type |
+| DELETE (cleanup) | AFTER DELETE | `subscription_remove` | 币安服务 | subscription_key, data_type |
 
 #### 2.3.3 触发器实现
 
-> **设计原则**：INSERT 时只发送 `subscription.add` 通知，不发送 `realtime.update` 通知。
+> **设计原则**：INSERT 时只发送 `subscription_add` 通知，不发送 `realtime_update` 通知。
 > 原因：INSERT 时 `data` 字段为空对象 `{}`，推送空数据给客户端没有意义。
-> `realtime.update` 只在 UPDATE 时发送（当数据实际变化时）。
+> `realtime_update` 只在 UPDATE 时发送（当数据实际变化时）。
 
 ```sql
 -- INSERT：通知币安服务新增订阅（统一包装格式）
--- 注意：INSERT 时只发送 subscription.add 通知，不发送 realtime.update
+-- 注意：INSERT 时只发送 subscription_add 通知，不发送 realtime_update
 CREATE OR REPLACE FUNCTION notify_subscription_add()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('subscription.add', jsonb_build_object(
+    PERFORM pg_notify('subscription_add', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'subscription.add',
+        'event_type', 'subscription_add',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'subscription_key', NEW.subscription_key,
@@ -440,9 +440,9 @@ CREATE TRIGGER trigger_realtime_data_add
 CREATE OR REPLACE FUNCTION notify_realtime_update()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('realtime.update', jsonb_build_object(
+    PERFORM pg_notify('realtime_update', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'realtime.update',
+        'event_type', 'realtime_update',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'subscription_key', NEW.subscription_key,
@@ -466,9 +466,9 @@ CREATE TRIGGER trigger_realtime_data_update
 CREATE OR REPLACE FUNCTION notify_subscription_remove()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('subscription.remove', jsonb_build_object(
+    PERFORM pg_notify('subscription_remove', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'subscription.remove',
+        'event_type', 'subscription_remove',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'subscription_key', OLD.subscription_key,
@@ -490,9 +490,9 @@ CREATE TRIGGER trigger_realtime_data_remove
 CREATE OR REPLACE FUNCTION notify_subscription_clean()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('subscription.clean', jsonb_build_object(
+    PERFORM pg_notify('subscription_clean', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'subscription.clean',
+        'event_type', 'subscription_clean',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'action', 'clean_all'
@@ -865,20 +865,20 @@ sequenceDiagram
 
     Front->>APIGW: {"action": "get", "data.type": "get_klines"}
     APIGW->>DB: INSERT tasks (pending)
-    DB->>DB: TRIGGER: pg_notify('task.new')
-    DB-->>Binance: 收到 task.new 通知
+    DB->>DB: TRIGGER: pg_notify('task_new')
+    DB-->>Binance: 收到 task_new 通知
     Binance->>Binance: set_processing(task_id)
     Binance->>Binance: 处理任务...
 
     alt 任务成功
         Binance->>DB: UPDATE tasks (status=completed, result={...})
-        DB->>DB: TRIGGER: pg_notify('task.completed')
-        DB-->>APIGW: 收到 task.completed 通知
+        DB->>DB: TRIGGER: pg_notify('task_completed')
+        DB-->>APIGW: 收到 task_completed 通知
         APIGW->>Front: {"action": "success", "data": {...}}
     else 任务失败
         Binance->>DB: UPDATE tasks (status=failed, result={error: ...})
-        DB->>DB: TRIGGER: pg_notify('task.failed')
-        DB-->>APIGW: 收到 task.failed 通知
+        DB->>DB: TRIGGER: pg_notify('task_failed')
+        DB-->>APIGW: 收到 task_failed 通知
         APIGW->>Front: {"action": "error", "error": {...}}
     end
 ```
@@ -955,10 +955,10 @@ flowchart LR
     %% 连接
     TV <-->|WebSocket| Mem
     Mem --INSERT/DELETE--> RT
-    RT -.->|`subscription.add`| Sync
-    RT -.->|`subscription.remove`| Sync
+    RT -.->|`subscription_add`| Sync
+    RT -.->|`subscription_remove`| Sync
     Sync --UPDATE data--> RT
-    RT -.->|`realtime.update`| Mem
+    RT -.->|`realtime_update`| Mem
     Sync <-->|SUBSCRIBE/UNSUBSCRIBE| WS
 ```
 
@@ -967,8 +967,8 @@ flowchart LR
 | 组件 | 职责 |
 |------|------|
 | **API网关** | 管理内存字典 `subscription_key -> {client_ids}`<br>判断何时新增/删除订阅键<br>INSERT/DELETE `realtime_data` 表<br>**INSERT/DELETE 触发器自动发送通知** |
-| **数据库** | 持久化 `realtime_data` 表<br>**INSERT 触发器发送** `subscription.add` 通知<br>**DELETE 触发器发送** `subscription.remove` 通知 |
-| **币安服务** | `SubscriptionSync` 监听 `subscription.add`/`subscription.remove`<br>执行币安WS订阅/取消<br>断线重连后主动查询数据库恢复<br>更新 `realtime_data.data` 触发 `realtime.update` 通知 |
+| **数据库** | 持久化 `realtime_data` 表<br>**INSERT 触发器发送** `subscription_add` 通知<br>**DELETE 触发器发送** `subscription_remove` 通知 |
+| **币安服务** | `SubscriptionSync` 监听 `subscription_add`/`subscription_remove`<br>执行币安WS订阅/取消<br>断线重连后主动查询数据库恢复<br>更新 `realtime_data.data` 触发 `realtime_update` 通知 |
 
 ### 4.3 订阅类型
 
@@ -998,9 +998,9 @@ sequenceDiagram
 
     APIGW->>APIGW: 检查内存字典
     APIGW->>DB: INSERT realtime_data (subscription_key, data_type)
-    DB->>DB: TRIGGER: pg_notify('subscription.add', ...)
+    DB->>DB: TRIGGER: pg_notify('subscription_add', ...)
 
-    Binance->>DB: 收到 subscription.add 通知
+    Binance->>DB: 收到 subscription_add 通知
     Binance->>Binance: 加入待处理队列(0.25s窗口)
     Binance->>Binance: 批处理：WS订阅 btcusdt@kline_1m
 
@@ -1021,9 +1021,9 @@ sequenceDiagram
     APIGW->>APIGW: 检查内存字典中该key的客户端数
     Note over APIGW: 如果没有客户端订阅该key：
     APIGW->>DB: DELETE FROM realtime_data
-    DB->>DB: TRIGGER: pg_notify('subscription.remove', ...)
+    DB->>DB: TRIGGER: pg_notify('subscription_remove', ...)
 
-    Binance->>DB: 收到 subscription.remove 通知
+    Binance->>DB: 收到 subscription_remove 通知
     Binance->>Binance: 加入待处理队列
     Binance->>Binance: 批处理：WS取消订阅
 
@@ -1059,10 +1059,10 @@ sequenceDiagram
 
     BinanceWS->>Binance: K线数据更新
     Binance->>DB: UPDATE realtime_data SET data = {...}
-    DB->>DB: TRIGGER: pg_notify('realtime.update', ...)
+    DB->>DB: TRIGGER: pg_notify('realtime_update', ...)
 
     Note over DB: 数据库通知
-    DB-->>APIGW: 收到 realtime.update 通知
+    DB-->>APIGW: 收到 realtime_update 通知
     APIGW->>APIGW: 广播给订阅的前端
 ```
 
@@ -1076,9 +1076,9 @@ sequenceDiagram
 
     Note over APIGW: 启动时执行：
     APIGW->>DB: DELETE realtime_data WHERE subscribers = ARRAY['api-service']
-    DB->>DB: DELETE 触发 subscription.remove 通知
+    DB->>DB: DELETE 触发 subscription_remove 通知
 
-    Binance->>DB: 收到 subscription.remove 通知
+    Binance->>DB: 收到 subscription_remove 通知
     Binance->>Binance: 取消对应订阅
 
     APIGW->>DB: NOTIFY subscription_clean
@@ -1087,7 +1087,7 @@ sequenceDiagram
 
 **说明**：API网关启动时会：
 1. 精确删除 `api-service` 创建的订阅（`subscribers = ARRAY['api-service']`）
-2. 发送 `subscription.clean` 通知给币安服务清空WS连接
+2. 发送 `subscription_clean` 通知给币安服务清空WS连接
 
 **设计优势**：
 - 保留 `signal-service` 等其他服务创建的订阅
@@ -1099,10 +1099,10 @@ sequenceDiagram
 | 场景 | 设计决策 |
 |------|----------|
 | **取消订阅通知** | 从 `subscribers` 数组移除订阅源，如果数组变空则删除行并通知 |
-| **API网关启动** | DELETE WHERE `subscribers = ARRAY['api-service']`，发送 `subscription.clean` 通知 |
+| **API网关启动** | DELETE WHERE `subscribers = ARRAY['api-service']`，发送 `subscription_clean` 通知 |
 | **币安重连恢复** | 主动查询 realtime_data 重新订阅 |
 | **批处理窗口** | 0.25秒聚合多个订阅请求 |
-| **实时数据推送** | UPDATE realtime_data.data 触发 realtime.update 通知 |
+| **实时数据推送** | UPDATE realtime_data.data 触发 realtime_update 通知 |
 | **多服务订阅** | 使用 `subscribers` 数组追踪多个订阅源，避免相互覆盖 |
 
 ### 4.6 API网关启动与清理
@@ -1117,9 +1117,9 @@ sequenceDiagram
 
     Note over APIGW: 启动时执行：
     APIGW->>DB: DELETE FROM realtime_data WHERE subscribers = ARRAY['api-service']
-    DB->>DB: DELETE 触发 subscription.remove 通知
+    DB->>DB: DELETE 触发 subscription_remove 通知
 
-    BN->>DB: 收到 subscription.remove 通知
+    BN->>DB: 收到 subscription_remove 通知
     BN->>BN: 取消对应订阅
 
     APIGW->>DB: NOTIFY subscription_clean, '{"action": "clean_all"}'
@@ -1133,7 +1133,7 @@ sequenceDiagram
 - **DELETE 而非 TRUNCATE**：精确删除 `api-service` 创建的订阅，保留 `signal-service` 的订阅
 - **删除后发送清理通知**：通知币安服务清空所有WS连接，避免残留
 - **复合操作**：
-  1. `remove_api_service_subscriptions()` - 删除 api-service 的订阅（触发 `subscription.remove`）
+  1. `remove_api_service_subscriptions()` - 删除 api-service 的订阅（触发 `subscription_remove`）
   2. `NOTIFY subscription_clean` - 清理币安WS连接
 
 #### 4.6.2 Repository 层实现

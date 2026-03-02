@@ -95,7 +95,7 @@ sequenceDiagram
     BN->>BN: 解析数据格式
     BN->>DB: UPDATE realtime_data SET data = {...}, event_time = NOW()
     DB->>DB: 检查数据是否变化
-    DB->>DB: 触发 realtime.update 通知
+    DB->>DB: 触发 realtime_update 通知
     DB-->>BN: 通知已发送
 
     alt K线已闭合 (x = true)
@@ -344,9 +344,9 @@ $$ LANGUAGE plpgsql;
 
 | 频道 | 操作 |
 |------|------|
-| `subscription.add` | 执行WS订阅 |
-| `subscription.remove` | 执行WS取消订阅 |
-| `subscription.clean` | 清空所有订阅并重连 |
+| `subscription_add` | 执行WS订阅 |
+| `subscription_remove` | 执行WS取消订阅 |
+| `subscription_clean` | 清空所有订阅并重连 |
 
 ### 6.3 批处理优化
 
@@ -961,11 +961,11 @@ account = await client.get_account_info()
 #### 8.8.2 数据流
 
 ```
-前端 → WebSocket请求 → api-service → tasks表 → task.new通知
+前端 → WebSocket请求 → api-service → tasks表 → task_new通知
                                                     ↓
                                               binance-service (监听处理)
                                                     ↓
-                                              写入 result → task.completed通知
+                                              写入 result → task_completed通知
                                                     ↓
                                               api-service → WebSocket推送 → 前端
 ```
@@ -1285,7 +1285,13 @@ async function init() {
 
 ### 8.10.1 设计概述
 
-交易功能通过私有API实现期货和现货的下单、撤单、查询等操作。采用Demo网进行测试验证。
+交易功能通过私有API实现期货和现货的下单、撤单、查询等操作。采用任务驱动模式，参考 [04-trading-orders.md](./04-trading-orders.md) 详细设计。
+
+**核心原则**：订单状态以交易所为准，本地不维护"当前状态"
+
+**数据流**：
+- 订单操作通过 `order_tasks` 表执行
+- 状态获取通过 WebSocket 订阅或任务查询
 
 **支持的交易功能**：
 | 功能 | 期货API | 现货API |
@@ -1306,46 +1312,54 @@ async function init() {
 | 价格限制 | 限价单价格不能超过市价约5% | 正常市价波动范围 |
 | 资金 | 虚拟资金，无实际风险 | 真实资金 |
 
-### 8.10.2 订单执行流程
+### 8.10.2 订单任务执行流程
 
-binance-service 监听 `trading_orders` 表的变更事件，执行实际的下单、撤单操作。
+binance-service 监听 `order_tasks` 表的任务事件，执行实际的下单、撤单、查询操作。
 
 #### 8.10.2.1 订单创建流程
 
 ```
 1. 前端发送 CREATE_ORDER 请求 → API服务
-2. API服务写入 trading_orders 表 (status=NEW)
-3. INSERT 触发 notify_order_new() → binance-service
-4. binance-service 读取 trading_orders 表
-5. binance-service 调用币安API下单
-6. binance-service 更新 trading_orders 表:
-   - binance_order_id = 币安返回的orderId
-   - data = 币安返回的完整响应
-   - status = 币安返回的状态
-7. UPDATE 触发 notify_order_update() → API服务
-8. API服务推送 ORDER_UPDATE 给前端
+2. API服务写入 order_tasks 表 (task_type=order.create, status=pending)
+3. INSERT 触发 notify_order_task_new() → binance-service
+4. binance-service 读取 order_tasks 表，获取下单参数
+5. binance-service 调用币安API下单:
+   - 成功: UPDATE result=API响应, binance_order_id=xxx, status=completed
+   - 失败: UPDATE result=错误信息, status=failed
+6. UPDATE 触发 notify_order_task_completed / notify_order_task.failed → API服务
+7. API服务推送结果给前端
 ```
 
-#### 8.10.2.2 订单状态更新流程
+#### 8.10.2.2 订单状态查询流程
 
 ```
-1. 用户通过 WebSocket 连接到币安用户数据流
-2. 币安 WebSocket 推送 ORDER_TRADE_UPDATE 事件
-3. binance-service 监听并更新 trading_orders 表:
-   - data = 最新订单数据
-   - status = 最新状态
-4. UPDATE 触发 notify_order_update() → API服务
-5. API服务推送 ORDER_UPDATE 给前端
+方式A: WebSocket订阅 (推荐)
+  1. 前端连接 WebSocket
+  2. 订阅订单更新频道 (ORDER_TRADE_UPDATE)
+  3. 币安 WS 推送订单状态变化
+  4. 前端实时更新订单状态
+
+方式B: 任务查询 (兜底)
+  1. 前端发送 QUERY_ORDER 请求 → API服务
+  2. API服务写入 order_tasks 表 (task_type=order.query, status=pending)
+  3. binance-service 读取 order_tasks 表
+  4. binance-service 调用币安API查询订单
+  5. 返回当前订单状态
+  6. 前端更新显示
 ```
 
 #### 8.10.2.3 撤销订单流程
 
 ```
 1. 前端发送 CANCEL_ORDER 请求 → API服务
-2. API服务更新 trading_orders 表 (标记为取消)
-3. UPDATE 触发 notify_order_cancel() → binance-service
-4. binance-service 调用币安API撤单
-5. binance-service 更新 trading_orders 表
+2. API服务写入 order_tasks 表 (task_type=order.cancel, status=pending)
+3. INSERT 触发 notify_order_task_new() → binance-service
+4. binance-service 读取 order_tasks 表，获取撤单参数
+5. binance-service 调用币安API撤单:
+   - 成功: UPDATE result=API响应, status=completed
+   - 失败: UPDATE result=错误信息, status=failed
+6. UPDATE 触发通知 → API服务
+7. API服务推送结果给前端
 ```
 
 #### 8.10.2.4 监听频道
@@ -1354,20 +1368,19 @@ binance-service 需要监听以下数据库通知频道：
 
 | 频道 | 触发条件 | 处理动作 |
 |------|---------|----------|
-| `order.new` | INSERT trading_orders | 读取订单，调用币安API下单 |
-| `order.cancel` | UPDATE status=CANCELED | 调用币安API撤单 |
-| WebSocket用户数据流 | ORDER_TRADE_UPDATE | 更新订单状态 |
+| `order_task_new` | INSERT order_tasks | 读取任务，调用币安API执行 |
+| WebSocket用户数据流 | ORDER_TRADE_UPDATE | 实时推送订单状态（可选） |
 
-#### 8.10.2.5 订单状态映射
+#### 8.10.2.5 任务状态说明
 
-| trading_orders.status | 币安状态 | 说明 |
-|----------------------|---------|------|
-| NEW | NEW | 订单已创建，等待成交 |
-| PARTIALLY_FILLED | PARTIALLY_FILLED | 部分成交 |
-| FILLED | FILLED | 完全成交 |
-| CANCELED | CANCELED | 用户撤销 |
-| REJECTED | REJECTED | 订单被拒绝 |
-| EXPIRED | EXPIRED | 订单过期 |
+| order_tasks.status | 说明 |
+|-------------------|------|
+| pending | 等待处理 |
+| processing | 处理中（已发送到交易所） |
+| completed | 成功（result 包含订单信息） |
+| failed | 失败（result 包含错误信息） |
+
+**重要**：不再维护订单的"当前状态"，始终以交易所返回的信息为准。
 
 ### 8.10.3 期货交易接口
 

@@ -3,10 +3,10 @@
 
 使用 asyncpg 原生 SQL。
 遵循 SUBSCRIPTION_AND_REALTIME_DATA.md 设计：
-- INSERT realtime_data → pg_notify('subscription.add')
-- DELETE realtime_data → pg_notify('subscription.remove')
-- UPDATE realtime_data.data → pg_notify('realtime.update')
-- TRUNCATE realtime_data → pg_notify('subscription.clean')
+- INSERT realtime_data → pg_notify('subscription_add')
+- DELETE realtime_data → pg_notify('subscription_remove')
+- UPDATE realtime_data.data → pg_notify('realtime_update')
+- TRUNCATE realtime_data → pg_notify('subscription_clean')
 """
 
 import asyncpg

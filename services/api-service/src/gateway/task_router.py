@@ -8,7 +8,7 @@
 
 遵循 SUBSCRIPTION_AND_REALTIME_DATA.md 设计：
 - 异步任务通过 tasks 表触发通知
-- 任务完成后通过 task.completed 通知返回结果
+- 任务完成后通过 task_completed 通知返回结果
 
 K线历史数据查询策略（重要）：
 1. 先根据周期对齐时间（from_time, to_time）

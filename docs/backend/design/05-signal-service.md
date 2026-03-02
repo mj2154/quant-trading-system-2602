@@ -2,10 +2,10 @@
 
 ## 概述
 
-信号服务（Signal Service）负责根据实时数据计算策略信号，监听 `realtime.update` 通知，当K线数据更新时触发策略计算，并将结果写入策略信号表。
+信号服务（Signal Service）负责根据实时数据计算策略信号，监听 `realtime_update` 通知，当K线数据更新时触发策略计算，并将结果写入策略信号表。
 
 **核心职责**：
-- 监听 `realtime.update` 数据库通知
+- 监听 `realtime_update` 数据库通知
 - 根据订阅的策略类型筛选相关数据
 - 调用策略计算模块进行信号计算
 - 将计算结果写入 `strategy_signals` 表
@@ -14,17 +14,17 @@
 ## 架构
 
 ```
-realtime_data (K线) → 信号计算 → strategy_signals → signal.new 事件
+realtime_data (K线) → 信号计算 → strategy_signals → signal_new 事件
 ```
 
 ---
 
 ## 8.1 设计背景
 
-信号服务（Signal Service）负责根据实时数据计算策略信号，监听 `realtime.update` 通知，当K线数据更新时触发策略计算，并将结果写入策略信号表。
+信号服务（Signal Service）负责根据实时数据计算策略信号，监听 `realtime_update` 通知，当K线数据更新时触发策略计算，并将结果写入策略信号表。
 
 **核心职责**：
-- 监听 `realtime.update` 数据库通知
+- 监听 `realtime_update` 数据库通知
 - 根据订阅的策略类型筛选相关数据
 - 调用策略计算模块进行信号计算
 - 将计算结果写入 `strategy_signals` 表
@@ -119,14 +119,14 @@ SELECT add_retention_policy('strategy_signals', drop_after => INTERVAL '30 days'
 - 精简设计：其他字段（created_by, strategy_type, interval, trigger_type）可通过 alert_id 关联 alert_configs 表获取
 - 冗余 symbol：保留以优化常见查询性能
 
-### 8.2.2 signal.new 信号生成通知
+### 8.2.2 signal_new 信号生成通知
 
-**signal.new 通知**：INSERT strategy_signals 时触发，通知 API 网关或交易系统。**格式与 realtime.update 通知保持统一**：
+**signal_new 通知**：INSERT strategy_signals 时触发，通知 API 网关或交易系统。**格式与 realtime_update 通知保持统一**：
 
 ```json
 {
     "event_id": "0189a1b3-c4d5-6e7f-8901-bcde23456789",
-    "event_type": "signal.new",
+    "event_type": "signal_new",
     "timestamp": "2026-02-05T10:30:05Z",
     "data": {
         "id": 12345,
@@ -183,7 +183,7 @@ flowchart TB
 
 | 组件 | 职责 |
 |------|------|
-| **通知监听器** | 监听 `realtime.update` 频道，接收实时数据更新通知 |
+| **通知监听器** | 监听 `realtime_update` 频道，接收实时数据更新通知 |
 | **数据筛选器** | 根据订阅的策略类型筛选相关订阅键 |
 | **策略计算模块** | 接收K线数据，执行策略计算，返回信号值 |
 | **信号写入器** | 将计算结果写入 `strategy_signals` 表 |
@@ -209,7 +209,7 @@ WHERE subscription_key LIKE '%KLINE%'
 信号服务启动时：
 1. 查询 `realtime_data` 表获取现有订阅
 2. 如果没有需要的订阅，创建新的 `realtime_data` 条目（`subscribers = ARRAY['signal-service']`）
-3. INSERT 触发 `subscription.add` 通知，币安服务开始订阅
+3. INSERT 触发 `subscription_add` 通知，币安服务开始订阅
 4. 如果已存在但没有 signal-service 订阅，追加 `signal-service` 到 `subscribers` 数组
 
 ```python
@@ -254,7 +254,7 @@ subscribers: {'api-service', 'signal-service'}
 **取消行为**：
 - api-service 取消订阅：从数组移除 `api-service`，保留数据行
 - signal-service 取消订阅：从数组移除 `signal-service`，保留数据行
-- 两个服务都取消：数组变空，删除数据行，触发 `subscription.remove`
+- 两个服务都取消：数组变空，删除数据行，触发 `subscription_remove`
 
 ### 8.5.4 K线缓存初始化设计
 
@@ -303,8 +303,8 @@ flowchart TD
 
     LISTEN --> RESULT{任务结果}
 
-    RESULT -->|task.completed| SUCCESS[补齐成功]
-    RESULT -->|task.failed| RETRY[重试: sleep 2s<br/>重新创建任务]
+    RESULT -->|task_completed| SUCCESS[补齐成功]
+    RESULT -->|task_failed| RETRY[重试: sleep 2s<br/>重新创建任务]
     RESULT -->|超时5秒| CHECK_STATE[查询任务状态]
 
     CHECK_STATE -->|status=processing| RETRY
@@ -319,7 +319,7 @@ flowchart TD
 
     subgraph "运行时自愈机制"
         DONE --> WAIT[等待实时数据]
-        WAIT --> REALTIME[收到 realtime.update]
+        WAIT --> REALTIME[收到 realtime_update]
         REALTIME --> CHECK_TIME[检测时间正确性]
         CHECK_TIME -->|需要补齐| FILL_GAP[触发补齐]
         CHECK_TIME -->|无需补齐| UPDATE[更新缓存]
@@ -354,7 +354,7 @@ flowchart TD
 2. 任意条件不满足，进入补齐循环
 3. 循环内：
    - 创建任务：`get_klines`，limit=1000
-   - 监听任务通知（`task.completed`、`task.failed`），超时5秒
+   - 监听任务通知（`task_completed`、`task_failed`），超时5秒
    - 超时或收到失败通知，sleep 2秒后重新创建任务
    - 收到成功通知，退出循环
 
@@ -365,7 +365,7 @@ flowchart TD
 
 **等待任务完成**：
 - 使用 PostgreSQL NOTIFY/LISTEN 机制监听任务通知（详见第7章任务处理流程）
-- 监听频道：`task.completed`、`task.failed`
+- 监听频道：`task_completed`、`task_failed`
 - 超时时间：5秒
 
 **超时/失败处理**：
@@ -398,14 +398,14 @@ flowchart TD
 在信号服务运行过程中，可能出现以下场景导致K线数据不连续：
 
 1. **币安服务停止**：币安服务停止运行时，K线数据停止写入数据库
-2. **实时更新停止**：信号服务不再收到 `realtime.update` 通知
+2. **实时更新停止**：信号服务不再收到 `realtime_update` 通知
 3. **数据缺口**：当币安服务恢复后，新的实时数据与缓存中的历史数据存在时间缺口
 
 此时如果不检测并补齐数据，会导致策略计算错误（使用不连续的K线数据）。
 
 #### 8.5.5.2 设计方案
 
-**检测时机**：每次收到 `realtime.update` 通知时，先进行连续性检测，再更新缓存
+**检测时机**：每次收到 `realtime_update` 通知时，先进行连续性检测，再更新缓存
 
 **检测位置**：`_process_realtime_update()` 函数中，缓存更新之前
 
@@ -588,19 +588,19 @@ sequenceDiagram
     %% 数据推送阶段
     WS->>BN: K线数据更新
     BN->>DB: UPDATE realtime_data SET data = {...}
-    DB->>DB: TRIGGER: pg_notify('realtime.update', {...})
+    DB->>DB: TRIGGER: pg_notify('realtime_update', {...})
 
     Note right of DB: 实时数据更新通知
-    DB-->>Sig: realtime.update 通知
+    DB-->>Sig: realtime_update 通知
     Sig->>Sig: 筛选相关订阅
     Sig->>Sig: 策略计算
 
     %% 信号生成阶段
     Sig->>DB: INSERT strategy_signals (signal_value, ...)
-    DB->>DB: TRIGGER: pg_notify('signal.new', {...})
+    DB->>DB: TRIGGER: pg_notify('signal_new', {...})
 
     Note right of DB: 新信号生成通知
-    DB-->>Trade: signal.new 通知（可选）
+    DB-->>Trade: signal_new 通知（可选）
 ```
 
 ---
@@ -613,9 +613,9 @@ sequenceDiagram
 CREATE OR REPLACE FUNCTION notify_signal_new()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('signal.new', jsonb_build_object(
+    PERFORM pg_notify('signal_new', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'signal.new',
+        'event_type', 'signal_new',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
@@ -647,8 +647,8 @@ CREATE TRIGGER trigger_strategy_signals_new
 
 | 通知频道 | 触发时机 | 发送者 | 接收者 | 通知内容 |
 |---------|---------|-------|--------|----------|
-| `realtime.update` | UPDATE realtime_data.data | 数据库 | 信号服务/API网关 | 订阅键、数据、事件时间 |
-| `signal.new` | INSERT strategy_signals | 数据库 | API网关/交易系统 | 信号ID、策略名、信号值、原因 |
+| `realtime_update` | UPDATE realtime_data.data | 数据库 | 信号服务/API网关 | 订阅键、数据、事件时间 |
+| `signal_new` | INSERT strategy_signals | 数据库 | API网关/交易系统 | 信号ID、策略名、信号值、原因 |
 
 ---
 
@@ -699,9 +699,9 @@ services/
 ### 8.11.2 集成测试
 
 - 信号服务启动和订阅管理
-- realtime.update 通知监听
+- realtime_update 通知监听
 - strategy_signals 表写入验证
-- signal.new 通知触发验证
+- signal_new 通知触发验证
 
 ### 8.11.3 E2E测试
 
@@ -1046,7 +1046,7 @@ class SignalService:
 **数据流**：
 
 ```
-收到 realtime.update (subscription_key, kline_data, is_closed)
+收到 realtime_update (subscription_key, kline_data, is_closed)
     │
     ├── 1. 更新K线缓存
     │       │
@@ -1127,7 +1127,7 @@ def create_strategy(strategy_type: str, params: dict[str, Any] | None = None) ->
    ↓
 5. self._alerts[alert_id] = alert_signal  # 缓存
    ↓
-6. K线更新时 (realtime.update)
+6. K线更新时 (realtime_update)
    ↓
 7. 遍历告警配置，找到匹配的订阅键
    ↓
@@ -1497,7 +1497,7 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
    - 需要添加订阅
 5. 检查 realtime_data.subscribers 是否包含 signal-service：
    - 如果不包含：INSERT/UPDATE 添加 signal-service 到 subscribers
-6. 触发 subscription.add 通知
+6. 触发 subscription_add 通知
 7. binance-service 开始/恢复 WebSocket 订阅
 8. signal-service 初始化 K 线缓存，开始计算信号
 ```
@@ -1514,7 +1514,7 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
 5. 检查同一 subscription_key 下是否还有其他 enabled 的告警：
    - 如果没有：调用 remove_subscription() 移除 signal-service
    - 如果有：保留订阅（其他告警可能还需要）
-6. 触发 subscription.remove 通知（如果 subscribers 数组变空）
+6. 触发 subscription_remove 通知（如果 subscribers 数组变空）
 7. binance-service 取消 WebSocket 订阅
 ```
 
@@ -1527,7 +1527,7 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
 4. 从内存中移除告警
 5. 检查同一 subscription_key 下是否还有其他告警：
    - 如果没有：调用 remove_subscription() 移除 signal-service
-6. 触发 subscription.remove 通知
+6. 触发 subscription_remove 通知
 7. binance-service 取消 WebSocket 订阅
 ```
 
@@ -1539,7 +1539,7 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
 
 **启用告警后的恢复**：
 - 启用告警时，检查 `realtime_data` 表中该 subscription_key 是否存在
-- 如果不存在：INSERT 新行，触发 subscription.add
+- 如果不存在：INSERT 新行，触发 subscription_add
 - 如果存在但没有 signal-service：UPDATE 添加 signal-service 到 subscribers
 - signal-service 调用 `_init_kline_cache_for_key()` 初始化 K 线缓存
 - K 线缓存从 `klines_history` 表加载历史数据
@@ -1567,7 +1567,7 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
 
 binance-service 的 `full_sync()` 方法按照设计正常工作：
 - 当 `subscribers` 数组变空时，行会被删除（由 signal-service 的 `remove_subscription` 触发）
-- binance-service 收到 `subscription.remove` 通知后取消 WebSocket 订阅
+- binance-service 收到 `subscription_remove` 通知后取消 WebSocket 订阅
 - 无需额外修改 binance-service 代码
 
 ### 8.14.6 关键设计决策

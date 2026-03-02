@@ -23,7 +23,7 @@ class EventType(str, Enum):
     KLINE_CLOSED = "kline.closed"  # K线收盘
 
     # 信号相关
-    SIGNAL_NEW = "signal.new"  # 新信号
+    SIGNAL_NEW = "signal_new"  # 新信号
 
 
 @dataclass

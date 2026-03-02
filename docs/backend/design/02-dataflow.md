@@ -48,22 +48,22 @@ flowchart TB
     %% 一次性请求流程
     TV -->|"camelCase<br/>WebSocket请求"| GW
     GW -->|"snake_case<br/>INSERT tasks"| Tasks
-    Tasks -->|"触发器: task.new通知"| Events
+    Tasks -->|"触发器: task_new通知"| Events
     Events -.->|"pg_notify"| BN
     BN -->|"snake_case<br/>UPDATE tasks.result"| Tasks
-    Tasks -->|"触发器: task.completed通知"| Events
+    Tasks -->|"触发器: task_completed通知"| Events
     Events -.->|"pg_notify"| GW
     GW -->|"camelCase<br/>WebSocket响应"| TV
 
     %% 订阅管理流程
     TV -->|"camelCase<br/>subscribe"| GW
     GW -->|"snake_case<br/>INSERT realtime_data"| RT
-    RT -->|"触发器: subscription.add通知"| Events
+    RT -->|"触发器: subscription_add通知"| Events
     Events -.->|"pg_notify"| BN
     BN -->|"WS订阅"| WS
     WS -->|"camelCase<br/>数据推送"| BN
     BN -->|"snake_case<br/>UPDATE realtime_data.data"| RT
-    RT -->|"触发器: realtime.update通知"| Events
+    RT -->|"触发器: realtime_update通知"| Events
     Events -.->|"pg_notify"| GW
     GW -->|"camelCase<br/>实时推送"| TV
 ```
@@ -80,15 +80,15 @@ flowchart TB
 
 | 通知频道 | 触发时机 | 发送者 | 接收者 | 通知内容 |
 |---------|---------|-------|-------|----------|
-| `task.new` | INSERT tasks | 数据库 | 币安服务 | 任务ID、类型、payload |
-| `task.completed` | UPDATE tasks.status=completed | 数据库 | API网关 | 任务ID、类型、**payload（含requestId）、result** |
-| `task.failed` | UPDATE tasks.status=failed | 数据库 | API网关 | 任务ID、类型、错误信息 |
-| `subscription.add` | INSERT realtime_data | 数据库 | 币安服务 | 订阅键、数据类型 |
-| `subscription.remove` | DELETE realtime_data | 数据库 | 币安服务 | 订阅键、数据类型 |
-| `subscription.clean` | API网关手动通知 | API网关 | 币安服务 | 清空所有订阅（API网关重启） |
-| `realtime.update` | UPDATE realtime_data.data (仅当data变化时) | 数据库 | API网关/信号服务 | 订阅键、数据、事件时间 |
+| `task_new` | INSERT tasks | 数据库 | 币安服务 | 任务ID、类型、payload |
+| `task_completed` | UPDATE tasks.status=completed | 数据库 | API网关 | 任务ID、类型、**payload（含requestId）、result** |
+| `task_failed` | UPDATE tasks.status=failed | 数据库 | API网关 | 任务ID、类型、错误信息 |
+| `subscription_add` | INSERT realtime_data | 数据库 | 币安服务 | 订阅键、数据类型 |
+| `subscription_remove` | DELETE realtime_data | 数据库 | 币安服务 | 订阅键、数据类型 |
+| `subscription_clean` | API网关手动通知 | API网关 | 币安服务 | 清空所有订阅（API网关重启） |
+| `realtime_update` | UPDATE realtime_data.data (仅当data变化时) | 数据库 | API网关/信号服务 | 订阅键、数据、事件时间 |
 
-> **重要说明**：`realtime.update` 只在 UPDATE 且 data 字段实际变化时触发，INSERT 时不触发。
+> **重要说明**：`realtime_update` 只在 UPDATE 且 data 字段实际变化时触发，INSERT 时不触发。
 > 这样可以避免向客户端推送空数据。
 
 > **task_completed 优化说明**：
@@ -114,17 +114,17 @@ sequenceDiagram
     Front->>GW: {"type": "GET_KLINES", "requestId": "req_xxx", "data": {"symbol": "BTCUSDT", ...}}
 
     GW->>DB: INSERT INTO tasks (type, payload)
-    DB->>DB: TRIGGER: pg_notify('task.new', {...})
+    DB->>DB: TRIGGER: pg_notify('task_new', {...})
 
     Note right of DB: 数据库通知
-    DB-->>BN: task.new 通知
+    DB-->>BN: task_new 通知
     BN->>BN: 监听任务通知
     BN->>BN: 调用币安HTTP API获取数据
     BN->>DB: UPDATE tasks SET result = {...} WHERE id = ?
-    DB->>DB: TRIGGER: pg_notify('task.completed', {...})
+    DB->>DB: TRIGGER: pg_notify('task_completed', {...})
 
     Note right of DB: 任务完成通知
-    DB-->>GW: task.completed 通知
+    DB-->>GW: task_completed 通知
     GW->>GW: 解析任务结果
     GW->>Front: {"type": "KLINES_DATA", "requestId": "req_xxx", "data": {...}}
 ```
@@ -143,16 +143,16 @@ sequenceDiagram
     Front->>GW: {"type": "GET_KLINES", "requestId": "req_xxx", "data": {"symbol": "BTCUSDT", ...}}
 
     GW->>DB: INSERT INTO tasks (type, payload)
-    DB->>DB: TRIGGER: pg_notify('task.new', {...})
+    DB->>DB: TRIGGER: pg_notify('task_new', {...})
 
-    DB-->>BN: task.new 通知
+    DB-->>BN: task_new 通知
     BN->>BN: 监听任务通知
     BN->>BN: 处理任务时发生异常
     BN->>DB: UPDATE tasks SET status='failed', result={error: ...} WHERE id = ?
-    DB->>DB: TRIGGER: pg_notify('task.failed', {...})
+    DB->>DB: TRIGGER: pg_notify('task_failed', {...})
 
     Note right of DB: 任务失败通知
-    DB-->>GW: task.failed 通知
+    DB-->>GW: task_failed 通知
     GW->>GW: 解析错误信息
     GW->>Front: {"type": "ERROR", "requestId": "req_xxx", "data": {"errorCode": "...", "errorMessage": "..."}}
 ```
@@ -173,9 +173,9 @@ sequenceDiagram
     Front->>GW: {"type": "SUBSCRIBE", "requestId": "req_xxx", "data": {"subscriptions": ["BINANCE:BTCUSDT@KLINE_1"]}}
     GW->>GW: 检查内存字典，判断新增订阅
     GW->>DB: INSERT INTO realtime_data (subscription_key, data_type)
-    DB->>DB: TRIGGER: pg_notify('subscription.add', {...})
+    DB->>DB: TRIGGER: pg_notify('subscription_add', {...})
 
-    DB-->>BN: subscription.add 通知
+    DB-->>BN: subscription_add 通知
     BN->>BN: 0.25秒批处理窗口
     BN->>BWS: {"method": "SUBSCRIBE", "params": ["btcusdt@kline_1m"]}
 
@@ -184,9 +184,9 @@ sequenceDiagram
     %% 数据推送阶段
     BWS->>BN: K线数据更新
     BN->>DB: UPDATE realtime_data SET data = {...}
-    DB->>DB: TRIGGER: pg_notify('realtime.update', {...})
+    DB->>DB: TRIGGER: pg_notify('realtime_update', {...})
 
-    DB-->>GW: realtime.update 通知
+    DB-->>GW: realtime_update 通知
     GW->>Front: {"type": "UPDATE", "timestamp": 1234567890, "data": {"subscriptionKey": "BINANCE:BTCUSDT@KLINE_1", "bar": {...}}}
 ```
 
@@ -218,13 +218,13 @@ sequenceDiagram
 
     Note over GW: 启动时执行：
     GW->>DB: DELETE realtime_data WHERE subscribers = ARRAY['api-service']
-    DB->>DB: DELETE 触发 subscription.remove 通知
+    DB->>DB: DELETE 触发 subscription_remove 通知
 
-    DB-->>BN: subscription.remove 通知
+    DB-->>BN: subscription_remove 通知
     BN->>BN: 取消对应订阅
 
     GW->>DB: NOTIFY subscription_clean, '{"action": "clean_all"}'
-    DB-->>BN: subscription.clean 通知
+    DB-->>BN: subscription_clean 通知
     BN->>BN: 清空所有币安WS订阅
     BN->>BN: 断开并重新连接WS
 
@@ -342,9 +342,9 @@ sequenceDiagram
 
     Frontend->>GW: WebSocket订阅 BINANCE:ACCOUNT@SPOT
     GW->>DB: INSERT realtime_data (subscription_key=BINANCE:ACCOUNT@SPOT)
-    DB->>DB: 触发 subscription.add 通知
+    DB->>DB: 触发 subscription_add 通知
 
-    BN-->>DB: 监听 subscription.add
+    BN-->>DB: 监听 subscription_add
     BN->>BinanceWS: 创建 listenKey 并连接 WebSocket
     BinanceWS-->>BN: 连接成功
 
@@ -353,8 +353,8 @@ sequenceDiagram
     loop 账户余额/持仓变化
         BinanceWS-->>BN: 推送增量事件 (ACCOUNT_UPDATE, outboundAccountPosition)
         BN->>DB: UPDATE realtime_data SET data = 增量数据 (覆盖写入)
-        DB->>DB: 检查 data 变化，触发 realtime.update
-        DB-->>GW: realtime.update 通知
+        DB->>DB: 检查 data 变化，触发 realtime_update
+        DB-->>GW: realtime_update 通知
         GW-->>FrontEnd: 推送增量数据
     end
 
@@ -500,10 +500,10 @@ sequenceDiagram
         DB-->>GW: task_id
         GW->>DB: 注册任务-客户端映射 (task_id -> client_id)
 
-        GW->>DB: TRIGGER: pg_notify('task.new', {...})
+        GW->>DB: TRIGGER: pg_notify('task_new', {...})
 
         Note right of DB: 数据库通知
-        DB-->>BN: task.new 通知
+        DB-->>BN: task_new 通知
 
         BN->>BN: 监听任务通知
         BN->>BN: 调用币安HTTP API获取K线数据
@@ -513,10 +513,10 @@ sequenceDiagram
 
         %% 步骤4: 完成任务
         BN->>DB: UPDATE tasks SET status='completed', result=NULL WHERE id=N
-        DB->>DB: TRIGGER: pg_notify('task.completed', {payload, result, ...})
+        DB->>DB: TRIGGER: pg_notify('task_completed', {payload, result, ...})
 
         Note right of DB: 任务完成通知（含 payload 和 result）
-        DB-->>GW: task.completed 通知
+        DB-->>GW: task_completed 通知
 
         GW->>GW: 通过 task_id 查找 client_id
         GW->>GW: 从通知 payload 提取 requestId（无需查表）
@@ -604,7 +604,7 @@ sequenceDiagram
 
     GW->>DB: INSERT tasks (type=get_quotes, payload={symbols: [...]})
 
-    DB-->>BN: task.new 通知
+    DB-->>BN: task_new 通知
     BN->>BN: 解析 symbols，按现货/期货分组
 
     Note over BN: 现货: ["BTCUSDT","ETHUSDT"]
@@ -617,8 +617,8 @@ sequenceDiagram
 
     BN->>BN: 转换为统一格式
     BN->>DB: UPDATE tasks SET result={quotes: [...]} WHERE id=?
-    DB-->>BN: task.completed 通知
-    DB-->>GW: task.completed 通知
+    DB-->>BN: task_completed 通知
+    DB-->>GW: task_completed 通知
     GW->>Front: 推送 quotes 数据
 ```
 

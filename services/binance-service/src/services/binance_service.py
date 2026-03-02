@@ -9,11 +9,11 @@
 - HTTP客户端：获取历史数据
 - WebSocket客户端：订阅实时数据
 - 数据存储：写入数据库
-- 任务监听：监听 task.new 通知
+- 任务监听：监听 task_new 通知
 - 订阅同步：监听 subscription_add/remove/clean 通知，管理币安WS订阅
 
 事件驱动流程：
-1. 监听 task.new 频道
+1. 监听 task_new 频道
 2. 收到任务后，根据类型调用对应客户端
 3. 将数据写入数据库（触发 realtime_update 通知）
 4. 监听 subscription_add/remove/clean 频道，执行币安WS订阅/取消
@@ -60,7 +60,7 @@ class BinanceService:
     """币安数据采集服务（新架构）
 
     职责：
-    1. 监听数据库任务队列（task.new 频道）
+    1. 监听数据库任务队列（task_new 频道）
     2. 根据任务类型调用币安客户端
     3. 写入数据库（realtime_update 通知 + 归档触发器）
     4. 订阅同步：监听subscription_add/remove/clean通知，管理币安WS订阅

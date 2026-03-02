@@ -163,9 +163,9 @@ DROP INDEX IF EXISTS idx_signals_params_gin;
 CREATE OR REPLACE FUNCTION notify_signal_new()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('signal.new', jsonb_build_object(
+    PERFORM pg_notify('signal_new', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'signal.new',
+        'event_type', 'signal_new',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
@@ -193,9 +193,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION notify_task_new()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('task.new', jsonb_build_object(
+    PERFORM pg_notify('task_new', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'task.new',
+        'event_type', 'task_new',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
@@ -213,9 +213,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION notify_task_completed()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('task.completed', jsonb_build_object(
+    PERFORM pg_notify('task_completed', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'task.completed',
+        'event_type', 'task_completed',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
@@ -238,9 +238,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION notify_realtime_update()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('realtime.update', jsonb_build_object(
+    PERFORM pg_notify('realtime_update', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'realtime.update',
+        'event_type', 'realtime_update',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'subscription_key', NEW.subscription_key,
@@ -257,9 +257,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION notify_subscription_add()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('subscription.add', jsonb_build_object(
+    PERFORM pg_notify('subscription_add', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'subscription.add',
+        'event_type', 'subscription_add',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'subscription_key', NEW.subscription_key,
@@ -275,9 +275,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION notify_subscription_remove()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('subscription.remove', jsonb_build_object(
+    PERFORM pg_notify('subscription_remove', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'subscription.remove',
+        'event_type', 'subscription_remove',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'subscription_key', OLD.subscription_key,

@@ -2609,7 +2609,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 | `SIGNAL:{alert_id}` | 实时推送 | 指定告警配置实时推送（前端订阅） |
 
 **信号数据推送**:
-当策略计算产生信号时，推送 `signal.new` 消息。**设计原则**：订阅键 `SIGNAL:{alert_id}` 已表明数据类型，`content` 直接展开业务数据，无需冗余的 `type` 字段：
+当策略计算产生信号时，推送 `signal_new` 消息。**设计原则**：订阅键 `SIGNAL:{alert_id}` 已表明数据类型，`content` 直接展开业务数据，无需冗余的 `type` 字段：
 
 ```json
 {
@@ -2806,7 +2806,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
   - 账户订阅采用增量数据推送，前端需先 GET 完整数据再订阅增量
 - **v16.0.0**: 告警配置系统集成
   - 新增告警配置管理消息类型（create_alert_config, list_alert_configs, update_alert_config, delete_alert_config, enable_alert_config, list_signals）
-  - 新增实时信号推送（signal.new）和订阅通道（SIGNAL:ALERT, SIGNAL:{alert_id}）
+  - 新增实时信号推送（signal_new）和订阅通道（SIGNAL:ALERT, SIGNAL:{alert_id}）
   - 告警配置格式与现有 WebSocket API 协议完全统一
 - **v15.4.0**: GET类型命名优化
   - `list_subscriptions` 改为 `subscriptions`，风格与其他类型统一
@@ -2819,7 +2819,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
   - 新增 `TaskResultData` 模型用于任务完成响应
   - 使用 Pydantic 数据模型替代硬编码字典
 - **v15.1.0**: 任务通知优化 - 减少数据库查询
-  - task.completed 通知包含 payload（requestId）和 result
+  - task_completed 通知包含 payload（requestId）和 result
   - API 网关无需再查询 tasks 表获取这些信息
   - 优化后除 get_klines 外无需额外数据库查询
 - **v15.0.0**: 移除任务系统设计章节（移至 DATABASE_COORDINATED_ARCHITECTURE.md）

@@ -100,7 +100,19 @@ services/
 │   │   │   ├── ticker.py
 │   │   │   ├── base.py
 │   │   │   ├── spot_account.py
-│   │   │   └── futures_account.py
+│   │   │   ├── futures_account.py
+│   │   │   └── trading_order.py
+│   │   │       ├── OrderType
+│   │   │       ├── OrderSide
+│   │   │       ├── PositionSide
+│   │   │       ├── TimeInForce
+│   │   │       ├── OrderResponseType
+│   │   │       ├── OrderStatus
+│   │   │       ├── OrderRequest
+│   │   │       ├── FuturesOrderRequest
+│   │   │       ├── FuturesOrderResponse
+│   │   │       ├── SpotOrderResponse
+│   │   │       └── CancelOrderResponse
 │   │   ├── services/
 │   │   │   └── binance_service.py
 │   │   ├── constants/
@@ -110,6 +122,8 @@ services/
 │   │   │   ├── rsa_signer.py
 │   │   │   └── ed25519_signer.py
 │   │   └── ws_subscription_manager.py
+│   ├── test_trading_futures.py     # 期货交易功能测试
+│   └── test_trading_spot.py        # 现货交易功能测试
 │
 ├── signal-service/
 │   ├── src/
@@ -287,6 +301,15 @@ Binance Service now supports private API endpoints:
 - **Futures Account**: Account balance via `/fapi/v2/account`
 - **User Data Streams**: Real-time account updates via WebSocket
 - **Signature Methods**: HMAC SHA256, RSA SHA256, ED25519
+
+## Trading Functionality
+
+Trading functionality (order placement, cancellation, and query) is now implemented:
+
+- **Futures Trading**: Via `/fapi/v1/order`, `/fapi/v1/order/test`, DELETE `/fapi/v1/order`
+- **Spot Trading**: Via `/api/v3/order`, `/api/v3/order/test`, DELETE `/api/v3/order`
+- **Data Models**: See `src/models/trading_order.py` for complete order type definitions
+- **Test Files**: `test_trading_futures.py`, `test_trading_spot.py`
 
 ## File Statistics
 

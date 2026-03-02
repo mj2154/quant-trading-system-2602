@@ -3,8 +3,8 @@
 
 使用 asyncpg 原生 SQL。
 遵循 QUANT_TRADING_SYSTEM_ARCHITECTURE.md 设计：
-- INSERT tasks → pg_notify('task.new')
-- UPDATE tasks.status=completed → pg_notify('task.completed')
+- INSERT tasks → pg_notify('task_new')
+- UPDATE tasks.status=completed → pg_notify('task_completed')
 
 tasks 表字段：
 - type: 任务类型（get_klines, get_server_time, get_quotes）

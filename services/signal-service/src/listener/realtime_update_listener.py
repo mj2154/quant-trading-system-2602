@@ -1,4 +1,4 @@
-"""Listener for realtime.update database notifications."""
+"""Listener for realtime_update database notifications."""
 
 import asyncio
 import json
@@ -12,10 +12,10 @@ RealtimeUpdateCallback = Callable[[dict[str, Any]], None]
 
 
 class RealtimeUpdateListener:
-    """Listener for realtime.update PostgreSQL notifications.
+    """Listener for realtime_update PostgreSQL notifications.
 
     This listener connects to the database and listens for NOTIFY events
-    on the 'realtime.update' channel.
+    on the 'realtime_update' channel.
     """
 
     def __init__(self, connection, callback: RealtimeUpdateCallback) -> None:
@@ -33,11 +33,11 @@ class RealtimeUpdateListener:
     async def start(self) -> None:
         """Start listening for notifications."""
         if self._listening:
-            logger.warning("Already listening for realtime.update")
+            logger.warning("Already listening for realtime_update")
             return
 
-        logger.info("Starting to listen for realtime.update notifications")
-        await self._connection.add_listener("realtime.update", self._handle_notification)
+        logger.info("Starting to listen for realtime_update notifications")
+        await self._connection.add_listener("realtime_update", self._handle_notification)
         self._listening = True
 
         # Start background task to keep connection alive
@@ -48,7 +48,7 @@ class RealtimeUpdateListener:
         if not self._listening:
             return
 
-        logger.info("Stopping realtime.update listener")
+        logger.info("Stopping realtime_update listener")
         if self._task:
             self._task.cancel()
             try:
@@ -56,7 +56,7 @@ class RealtimeUpdateListener:
             except asyncio.CancelledError:
                 pass
 
-        await self._connection.remove_listener("realtime.update", self._handle_notification)
+        await self._connection.remove_listener("realtime_update", self._handle_notification)
         self._listening = False
 
     async def _handle_notification(
@@ -67,7 +67,7 @@ class RealtimeUpdateListener:
         Args:
             connection: The connection that received the notification.
             pid: Process ID of the notifying backend.
-            channel: Channel name ('realtime.update').
+            channel: Channel name ('realtime_update').
             payload: JSON payload string.
         """
         try:
@@ -76,7 +76,7 @@ class RealtimeUpdateListener:
             data_type = data.get("data", {}).get("data_type")
             if data_type == "KLINE":
                 logger.debug(
-                    "Received realtime.update notification: event_id=%s subscription_key=%s",
+                    "Received realtime_update notification: event_id=%s subscription_key=%s",
                     data.get("event_id"),
                     data.get("data", {}).get("subscription_key"),
                 )

@@ -2,9 +2,9 @@
 数据处理器 - 统一数据处理中心
 
 使用 PostgreSQL LISTEN/NOTIFY 机制监听数据库事件：
-- 任务事件: task.completed, task.failed
-- 实时数据: realtime.update
-- 业务事件: signal.new, config.new/update/delete
+- 任务事件: task_completed, task_failed
+- 实时数据: realtime_update
+- 业务事件: signal_new, config.new/update/delete
 - 告警配置: alert_config.new/update/delete
 
 遵循 QUANT_TRADING_SYSTEM_ARCHITECTURE.md 设计。
@@ -47,18 +47,18 @@ def _map_task_type_to_response_type(task_type: str) -> str:
 
 # 任务事件频道列表
 TASK_CHANNELS = [
-    "task.completed",
-    "task.failed",
+    "task_completed",
+    "task_failed",
 ]
 
 # 实时数据事件频道列表
 REALTIME_CHANNELS = [
-    "realtime.update",
+    "realtime_update",
 ]
 
 # 业务事件频道列表
 BUSINESS_CHANNELS = [
-    "signal.new",
+    "signal_new",
     "config.new",
     "config.update",
     "config.delete",
@@ -74,9 +74,9 @@ class DataProcessor:
 
     监听 PostgreSQL NOTIFY 事件并广播给相关客户端。
     作为 API 服务内部的统一数据处理中心，负责：
-    - 监听任务完成通知 (task.completed, task.failed)
-    - 监听实时数据更新 (realtime.update)
-    - 监听业务事件 (signal.new, config.*, alert_config.*)
+    - 监听任务完成通知 (task_completed, task_failed)
+    - 监听实时数据更新 (realtime_update)
+    - 监听业务事件 (signal_new, config.*, alert_config.*)
     - 处理任务结果并推送给客户端
     """
 
@@ -194,9 +194,9 @@ class DataProcessor:
             data = json.loads(payload)
             event_type = data.get("event_type", channel)
 
-            # signal.new 事件的 payload 有 data 包装，需要提取
+            # signal_new 事件的 payload 有 data 包装，需要提取
             # 格式：{ event_type, timestamp, data: { alert_id, ... } }
-            if channel in ("signal.new",):
+            if channel in ("signal_new",):
                 event_data = data.get("data", data)
             elif channel in ("config.new", "config.update", "config.delete"):
                 event_data = data
@@ -226,8 +226,8 @@ class DataProcessor:
             )
 
             # 广播给订阅的客户端
-            # 注意：signal.new 和 alert_config 事件使用下面的专用广播逻辑
-            if channel not in ("signal.new", "alert_config.new", "alert_config.update", "alert_config.delete"):
+            # 注意：signal_new 和 alert_config 事件使用下面的专用广播逻辑
+            if channel not in ("signal_new", "alert_config.new", "alert_config.update", "alert_config.delete"):
                 await self._client_manager.broadcast(
                     subscription_key, message
                 )
@@ -243,7 +243,7 @@ class DataProcessor:
                 )
 
             # 对于信号和配置事件，广播到通用的策略频道
-            if channel in ("signal.new", "config.new", "config.update", "config.delete"):
+            if channel in ("signal_new", "config.new", "config.update", "config.delete"):
                 await self._client_manager.broadcast(
                     "strategy:all",
                     message,
@@ -251,22 +251,22 @@ class DataProcessor:
 
             # 对于信号事件，广播到特定告警频道
             # 只广播到 SIGNAL:{alert_id}，不使用通配符
-            if channel == "signal.new":
+            if channel == "signal_new":
                 # 获取 alert_id 用于精确广播
                 alert_id = event_data.get("alert_id")
 
                 # 广播到 SIGNAL:{alert_id}（用于订阅特定告警的客户端）
                 if alert_id:
-                    logger.info(f"[Broadcast] signal.new to SIGNAL:{alert_id}")
+                    logger.info(f"[Broadcast] signal_new to SIGNAL:{alert_id}")
                     await self._client_manager.broadcast(
                         f"SIGNAL:{alert_id}",
                         message,
                     )
                 else:
-                    logger.warning("[Broadcast] signal.new has no alert_id, skipping broadcast")
+                    logger.warning("[Broadcast] signal_new has no alert_id, skipping broadcast")
 
             # 注意：alert_config 事件（alert_config.new/update/delete）不再广播到 SIGNAL: 频道
-            # 前端通过订阅 SIGNAL:{alert_id} 来接收真正的信号 (signal.new)
+            # 前端通过订阅 SIGNAL:{alert_id} 来接收真正的信号 (signal_new)
             # 告警配置变更不需要推送到前端，前端会通过 CRUD 操作的响应更新本地状态
 
             logger.debug(
@@ -293,13 +293,13 @@ class DataProcessor:
         Args:
             connection: 数据库连接
             pid: 后端进程 ID
-            channel: 通知频道 (task.completed 或 task.failed)
+            channel: 通知频道 (task_completed 或 task_failed)
             payload: 通知载荷（JSON 字符串）
 
         数据库通知采用统一包装格式：
         {
             "event_id": "...",
-            "event_type": "task.completed" 或 "task.failed",
+            "event_type": "task_completed" 或 "task_failed",
             "timestamp": "...",
             "data": {
                 "id": 123,
@@ -747,8 +747,8 @@ class DataProcessor:
 
         if event_type.startswith("kline"):
             return f"{symbol}_{interval}"
-        elif event_type == "signal.new":
-            # signal.new 事件使用 SIGNAL:{alert_id} 格式
+        elif event_type == "signal_new":
+            # signal_new 事件使用 SIGNAL:{alert_id} 格式
             # 与广播频道保持一致，以便前端订阅匹配
             alert_id = event_data.get("alert_id")
             if alert_id:

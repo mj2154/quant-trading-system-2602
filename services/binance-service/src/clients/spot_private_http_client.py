@@ -12,6 +12,11 @@ from urllib.parse import urlencode
 
 from .base_http_client import BinanceHTTPClient
 from models.spot_account import SpotAccountInfo
+from models.trading_order import (
+    OrderSide,
+    OrderType,
+    TimeInForce,
+)
 from utils.ed25519_signer import Ed25519Signer
 from utils.rsa_signer import RSASigner
 
@@ -298,6 +303,160 @@ class BinanceSpotPrivateHTTPClient(BinanceHTTPClient):
         return await self._signed_request(
             method="GET",
             path="api/v3/allOrders",
+            params=params,
+            recv_window=recv_window,
+        )
+
+    # ========== 交易相关方法 ==========
+
+    async def create_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        time_in_force: Optional[str] = None,
+        stop_price: Optional[float] = None,
+        quote_order_qty: Optional[float] = None,
+        new_client_order_id: Optional[str] = None,
+        new_order_resp_type: str = "FULL",
+        recv_window: Optional[int] = None,
+    ) -> dict:
+        """创建新订单
+
+        调用 POST /api/v3/order 创建新订单。
+
+        Args:
+            symbol: 交易对，如 BTCUSDT
+            side: 订单方向，BUY 或 SELL
+            order_type: 订单类型，LIMIT, MARKET, STOP_LOSS 等
+            quantity: 订单数量
+            price: 价格（限价单必需）
+            time_in_force: 时间策略，GTC, IOC, FOK
+            stop_price: 止损价格
+            quote_order_qty: 报价数量（市价买单使用USDT金额）
+            new_client_order_id: 客户端订单ID
+            new_order_resp_type: 响应类型，ACK, RESULT, FULL
+            recv_window: 接收窗口时间
+
+        Returns:
+            订单响应
+        """
+        params: dict = {
+            "symbol": symbol.upper(),
+            "side": side.upper(),
+            "type": order_type.upper(),
+            "newOrderRespType": new_order_resp_type.upper(),
+        }
+
+        # 市价单可以用 quantity 或 quoteOrderQty
+        if quote_order_qty is not None and order_type.upper() == "MARKET":
+            params["quoteOrderQty"] = str(quote_order_qty)
+        else:
+            params["quantity"] = str(quantity)
+
+        if price is not None:
+            params["price"] = str(price)
+
+        if time_in_force is not None:
+            params["timeInForce"] = time_in_force.upper()
+
+        if stop_price is not None:
+            params["stopPrice"] = str(stop_price)
+
+        if new_client_order_id is not None:
+            params["newClientOrderId"] = new_client_order_id
+
+        return await self._signed_request(
+            method="POST",
+            path="api/v3/order",
+            params=params,
+            recv_window=recv_window,
+        )
+
+    async def test_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        time_in_force: Optional[str] = None,
+        stop_price: Optional[float] = None,
+        recv_window: Optional[int] = None,
+    ) -> dict:
+        """测试下单（不执行）
+
+        调用 POST /api/v3/order/test 测试下单参数。
+
+        Args:
+            symbol: 交易对
+            side: 订单方向
+            order_type: 订单类型
+            quantity: 订单数量
+            price: 价格
+            time_in_force: 时间策略
+            stop_price: 止损价格
+            recv_window: 接收窗口时间
+
+        Returns:
+            测试结果
+        """
+        params: dict = {
+            "symbol": symbol.upper(),
+            "side": side.upper(),
+            "type": order_type.upper(),
+            "quantity": str(quantity),
+        }
+
+        if price is not None:
+            params["price"] = str(price)
+
+        if time_in_force is not None:
+            params["timeInForce"] = time_in_force.upper()
+
+        if stop_price is not None:
+            params["stopPrice"] = str(stop_price)
+
+        return await self._signed_request(
+            method="POST",
+            path="api/v3/order/test",
+            params=params,
+            recv_window=recv_window,
+        )
+
+    async def cancel_order(
+        self,
+        symbol: str,
+        order_id: Optional[str] = None,
+        orig_client_order_id: Optional[str] = None,
+        recv_window: Optional[int] = None,
+    ) -> dict:
+        """撤销订单
+
+        调用 DELETE /api/v3/order 撤销订单。
+
+        Args:
+            symbol: 交易对
+            order_id: 订单ID
+            orig_client_order_id: 客户端订单ID
+            recv_window: 接收窗口时间
+
+        Returns:
+            撤销结果
+        """
+        params: dict = {"symbol": symbol.upper()}
+
+        if order_id is not None:
+            params["orderId"] = order_id
+
+        if orig_client_order_id is not None:
+            params["origClientOrderId"] = orig_client_order_id
+
+        return await self._signed_request(
+            method="DELETE",
+            path="api/v3/order",
             params=params,
             recv_window=recv_window,
         )

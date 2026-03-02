@@ -535,7 +535,7 @@ sequenceDiagram
     BN->>DB: UPDATE realtime_data
     DB->>DB: 触发 trigger_archive_closed_kline
 
-    DB-->>Sig: realtime.update 通知
+    DB-->>Sig: realtime_update 通知
 
     Sig->>Sig: 检查触发条件类型
 
@@ -549,7 +549,7 @@ sequenceDiagram
 
 ### 10.4 触发条件与信号服务
 
-信号服务监听 `realtime.update` 通知，根据配置中的 `trigger_type` 决定是否执行策略计算：
+信号服务监听 `realtime_update` 通知，根据配置中的 `trigger_type` 决定是否执行策略计算：
 
 ```python
 async def handle_realtime_update(self, notification: dict):

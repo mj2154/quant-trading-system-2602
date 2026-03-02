@@ -5,10 +5,10 @@ RealtimeData 表仓储
 订阅键格式：{EXCHANGE}:{SYMBOL}[.{产品后缀}]@{DATA_TYPE}[_{RESOLUTION}]
 
 事件驱动流程：
-1. API网关 INSERT realtime_data 表 → 触发 subscription.add 通知
-2. API网关 DELETE realtime_data 表 → 触发 subscription.remove 通知
-3. 币安服务 UPDATE realtime_data.data → 触发 realtime.update 通知
-4. API网关监听 realtime.update 通知，推送数据给前端
+1. API网关 INSERT realtime_data 表 → 触发 subscription_add 通知
+2. API网关 DELETE realtime_data 表 → 触发 subscription_remove 通知
+3. 币安服务 UPDATE realtime_data.data → 触发 realtime_update 通知
+4. API网关监听 realtime_update 通知，推送数据给前端
 
 支持的数据类型：
 - KLINE: K线数据，如 "BINANCE:BTCUSDT@KLINE_1m"

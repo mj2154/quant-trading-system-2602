@@ -2,7 +2,7 @@
 
 This module contains the main signal service that:
 1. Loads alert configurations from alert_signals table
-2. Listens for realtime.update notifications
+2. Listens for realtime_update notifications
 3. Uses trigger engine to determine when to execute strategies
 4. Fetches historical klines for indicator calculation
 5. Calculates strategy signals
@@ -50,7 +50,7 @@ class SignalService:
     This service:
     1. Loads alert configurations from alert_signals table on startup
     2. Creates strategy instances based on alert configuration (strategy_type)
-    3. Listens for realtime.update notifications
+    3. Listens for realtime_update notifications
     4. Uses trigger engine to determine execution timing
     5. Fetches historical klines for indicator calculation
     6. Calculates and stores signals
@@ -108,7 +108,7 @@ class SignalService:
         # Ensure subscriptions exist for configured alerts
         await self._ensure_subscriptions()
 
-        # Create listener for realtime.update notifications
+        # Create listener for realtime_update notifications
         # Use dedicated connection (not from pool) to maintain LISTEN state
         conn = await self._db.create_dedicated_connection()
         self._connection = conn
@@ -750,7 +750,7 @@ class SignalService:
         """Wait for task completion via notification or timeout.
 
         Uses PostgreSQL NOTIFY/LISTEN mechanism:
-        - Listen for task.completed and task.failed notifications
+        - Listen for task_completed and task_failed notifications
         - 5 second timeout
         - On timeout, query database to check if task is stuck
 
@@ -772,32 +772,32 @@ class SignalService:
             async def handle_completed(
                 connection: Any, pid: int, channel: str, payload: str
             ) -> None:
-                """Handle task.completed notification."""
+                """Handle task_completed notification."""
                 try:
                     data = json.loads(payload)
                     if data.get("id") == task_id:
                         completed_event.set()
                 except json.JSONDecodeError as e:
-                    logger.warning("Failed to parse task.completed payload: %s", e)
+                    logger.warning("Failed to parse task_completed payload: %s", e)
                 except Exception as e:
-                    logger.error("Unexpected error in task.completed handler: %s", e)
+                    logger.error("Unexpected error in task_completed handler: %s", e)
 
             async def handle_failed(
                 connection: Any, pid: int, channel: str, payload: str
             ) -> None:
-                """Handle task.failed notification."""
+                """Handle task_failed notification."""
                 try:
                     data = json.loads(payload)
                     if data.get("id") == task_id:
                         failed_event.set()
                 except json.JSONDecodeError as e:
-                    logger.warning("Failed to parse task.failed payload: %s", e)
+                    logger.warning("Failed to parse task_failed payload: %s", e)
                 except Exception as e:
-                    logger.error("Unexpected error in task.failed handler: %s", e)
+                    logger.error("Unexpected error in task_failed handler: %s", e)
 
             # Register listeners
-            await conn.add_listener("task.completed", handle_completed)
-            await conn.add_listener("task.failed", handle_failed)
+            await conn.add_listener("task_completed", handle_completed)
+            await conn.add_listener("task_failed", handle_failed)
 
             # Wait for either notification with timeout
             done, pending = await asyncio.wait(
@@ -857,7 +857,7 @@ class SignalService:
         which is more efficient when called in a loop (e.g., kline fill loop).
 
         Uses PostgreSQL NOTIFY/LISTEN mechanism:
-        - Listen for task.completed and task.failed notifications
+        - Listen for task_completed and task_failed notifications
         - 5 second timeout
         - On timeout, query database to check if task is stuck
 
@@ -876,32 +876,32 @@ class SignalService:
         async def handle_completed(
             connection: Any, pid: int, channel: str, payload: str
         ) -> None:
-            """Handle task.completed notification."""
+            """Handle task_completed notification."""
             try:
                 data = json.loads(payload)
                 if data.get("id") == task_id:
                     completed_event.set()
             except json.JSONDecodeError as e:
-                logger.warning("Failed to parse task.completed payload: %s", e)
+                logger.warning("Failed to parse task_completed payload: %s", e)
             except Exception as e:
-                logger.error("Unexpected error in task.completed handler: %s", e)
+                logger.error("Unexpected error in task_completed handler: %s", e)
 
         async def handle_failed(
             connection: Any, pid: int, channel: str, payload: str
         ) -> None:
-            """Handle task.failed notification."""
+            """Handle task_failed notification."""
             try:
                 data = json.loads(payload)
                 if data.get("id") == task_id:
                     failed_event.set()
             except json.JSONDecodeError as e:
-                logger.warning("Failed to parse task.failed payload: %s", e)
+                logger.warning("Failed to parse task_failed payload: %s", e)
             except Exception as e:
-                logger.error("Unexpected error in task.failed handler: %s", e)
+                logger.error("Unexpected error in task_failed handler: %s", e)
 
         # Register listeners on the provided connection
-        await conn.add_listener("task.completed", handle_completed)
-        await conn.add_listener("task.failed", handle_failed)
+        await conn.add_listener("task_completed", handle_completed)
+        await conn.add_listener("task_failed", handle_failed)
 
         try:
             # Wait for either notification with timeout
@@ -948,8 +948,8 @@ class SignalService:
             return None
         finally:
             # Clean up listeners but DON'T close the connection (caller manages it)
-            await conn.remove_listener("task.completed", handle_completed)
-            await conn.remove_listener("task.failed", handle_failed)
+            await conn.remove_listener("task_completed", handle_completed)
+            await conn.remove_listener("task_failed", handle_failed)
 
     async def _do_init_kline_cache(
         self,
@@ -990,7 +990,7 @@ class SignalService:
         )
 
     def _handle_realtime_update(self, notification: dict[str, Any]) -> None:
-        """Handle realtime.update notification.
+        """Handle realtime_update notification.
 
         Args:
             notification: The notification payload from pg_notify.
@@ -1002,7 +1002,7 @@ class SignalService:
         asyncio.create_task(self._process_realtime_update(notification))
 
     async def _process_realtime_update(self, notification: dict[str, Any]) -> None:
-        """Process a realtime.update notification.
+        """Process a realtime_update notification.
 
         处理流程（按照设计文档 8.5.5.2）：
         1. 检查该订阅键是否正在补齐（是否有锁）

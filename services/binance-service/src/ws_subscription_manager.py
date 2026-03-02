@@ -2,7 +2,7 @@
 WS订阅管理器
 
 职责：
-1. 【核心】监听数据库订阅通知 (subscription.add/remove/clean)
+1. 【核心】监听数据库订阅通知 (subscription_add/remove/clean)
 2. 【核心】统一调度所有WS客户端执行订阅/取消
 3. 【核心】接收所有WS客户端的数据包
 4. 【核心】统一将数据写入数据库
@@ -18,7 +18,7 @@ WS订阅管理器
 - 系统内部统一使用TV格式
 
 数据流:
-1. 监听数据库 subscription.add/remove/clean 通知
+1. 监听数据库 subscription_add/remove/clean 通知
 2. 批处理后执行 WS 订阅/取消
 3. 接收 WS 数据包，解析并写入 realtime_data 表
 4. 触发 realtime_update 通知
@@ -43,7 +43,7 @@ class WSSubscriptionManager:
     """WS订阅管理器（币安服务专用）- 订阅管理核心
 
     职责:
-    1. 【核心】监听数据库订阅通知 (subscription.add/remove/clean)
+    1. 【核心】监听数据库订阅通知 (subscription_add/remove/clean)
     2. 【核心】统一调度所有WS客户端执行订阅/取消
     3. 【核心】接收所有WS客户端的数据包
     4. 【核心】统一将数据写入数据库
@@ -272,15 +272,15 @@ class WSSubscriptionManager:
     async def _listen_notifications(self) -> None:
         """监听数据库订阅通知
 
-        监听频道：subscription.add, subscription.remove, subscription.clean
+        监听频道：subscription_add, subscription_remove, subscription_clean
         """
         conn: Optional[asyncpg.Connection] = None
         while self._running:
             try:
                 conn = await self._pool.acquire()
-                await conn.add_listener("subscription.add", self._notify_handler)
-                await conn.add_listener("subscription.remove", self._notify_handler)
-                await conn.add_listener("subscription.clean", self._notify_handler)
+                await conn.add_listener("subscription_add", self._notify_handler)
+                await conn.add_listener("subscription_remove", self._notify_handler)
+                await conn.add_listener("subscription_clean", self._notify_handler)
 
                 logger.info("已注册订阅通知监听器")
 
@@ -321,7 +321,7 @@ class WSSubscriptionManager:
         注意：数据库通知采用统一包装格式：
         {
             "event_id": "...",
-            "event_type": "subscription.add",
+            "event_type": "subscription_add",
             "timestamp": "...",
             "data": {
                 "subscription_key": "...",
@@ -334,29 +334,29 @@ class WSSubscriptionManager:
         try:
             data = json.loads(payload)
 
-            if channel == "subscription.add":
+            if channel == "subscription_add":
                 # 统一包装格式：数据在 data 字段中
                 event_data = data.get("data", {})
                 subscription_key = event_data.get("subscription_key")
                 data_type = event_data.get("data_type")
                 logger.debug(
-                    f"[HANDLE] subscription.add: key={subscription_key}, type={data_type}"
+                    f"[HANDLE] subscription_add: key={subscription_key}, type={data_type}"
                 )
                 if subscription_key and data_type:
                     await self._add_subscribe(subscription_key)
 
-            elif channel == "subscription.remove":
+            elif channel == "subscription_remove":
                 # 统一包装格式：数据在 data 字段中
                 event_data = data.get("data", {})
                 subscription_key = event_data.get("subscription_key")
                 data_type = event_data.get("data_type")
                 logger.debug(
-                    f"[HANDLE] subscription.remove: key={subscription_key}, type={data_type}"
+                    f"[HANDLE] subscription_remove: key={subscription_key}, type={data_type}"
                 )
                 if subscription_key and data_type:
                     await self._add_unsubscribe(subscription_key)
 
-            elif channel == "subscription.clean":
+            elif channel == "subscription_clean":
                 await self._handle_clean_all()
 
         except json.JSONDecodeError:

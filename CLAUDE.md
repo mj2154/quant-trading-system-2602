@@ -13,6 +13,30 @@
 
 **核心理念**: 数据库即调度中心，事件驱动架构，状态集中管理，服务松耦合。
 
+## 快速开始
+
+### 启动服务
+```bash
+cd docker && docker-compose up -d
+```
+
+### 运行微服务
+- API服务: `cd services/api-service && uv run python src/main.py`
+- 币安服务: `cd services/binance-service && uv run python main.py`
+- 信号服务: `cd services/signal-service && uv run python main.py`
+- 交易系统: `cd services/trading && uv run python main.py`
+
+### 常用命令
+- 查看日志: `cd docker && docker-compose logs -f [service-name]`
+- 重启服务: `cd docker && docker-compose restart [service-name]`
+- 进入数据库: `docker exec -it timescale-db psql -U dbuser -d trading_db`
+
+### Python包管理
+> 详细规则由 hookify 自动强制执行
+
+- 添加依赖: `cd services/<name> && uv add <package>`
+- 运行脚本: `cd services/<name> && uv run python script.py`
+
 ## 核心文档
 
 **系统采用分层文档架构**，理念与实施分离：
@@ -175,97 +199,13 @@
 - **禁止**在其他位置放置SQL文件（migrations目录仅用于版本追溯）
 - 不要在多个服务目录下分散放置SQL脚本
 
-## 目录结构
+## 代码结构
 
-```
-quant-trading/
-├── services/                    # 后端微服务
-│   ├── api-service/           # API服务 (端口8000)
-│   │   └── src/
-│   │       ├── main.py        # FastAPI入口
-│   │       ├── gateway/       # WebSocket网关
-│   │       │   ├── websocket_handler.py  # WebSocket处理
-│   │       │   ├── client_manager.py    # 客户端管理
-│   │       │   ├── subscription_manager.py  # 订阅管理
-│   │       │   └── realtime_handler.py     # 实时数据处理
-│   │       ├── db/            # 数据库仓储
-│   │       │   ├── database.py       # 数据库连接
-│   │       │   ├── tasks_repository.py
-│   │       │   ├── subscription_repository.py
-│   │       │   └── realtime_data_repository.py
-│   │       ├── models/        # 数据模型
-│   │       ├── converters/    # 数据转换器
-│   │       ├── services/      # 业务服务
-│   │       └── protocol/      # 协议定义
-│   ├── binance-service/       # 币安API服务 (端口8001)
-│   │   ├── src/
-│   │   │   ├── collectors/   # 数据采集器
-│   │   │   ├── storage/       # 数据存储
-│   │   │   └── events/        # 事件发布
-│   │   └── main.py
-│   ├── signal-service/        # 信号计算服务 (新)
-│   │   ├── src/
-│   │   │   ├── main.py        # 服务入口
-│   │   │   ├── db/            # 数据库仓储
-│   │   │   │   ├── database.py       # 数据库连接
-│   │   │   │   ├── realtime_data_repository.py
-│   │   │   │   └── strategy_signals_repository.py
-│   │   │   ├── listener/      # 通知监听
-│   │   │   │   └── realtime_update_listener.py
-│   │   │   ├── strategies/    # 策略计算
-│   │   │   │   ├── base.py    # 策略抽象基类
-│   │   │   │   └── random_strategy.py  # 随机策略（测试用）
-│   │   │   └── services/      # 业务服务
-│   │   │       └── signal_service.py
-│   │   ├── tests/
-│   │   └── pyproject.toml
-│   ├── trading/              # 交易系统 (端口8003)
-│   │   ├── src/
-│   │   │   ├── engine/       # 交易引擎
-│   │   │   ├── risk/         # 风险管理
-│   │   │   ├── account/      # 账户管理
-│   │   │   └── events/       # 事件监听
-│   │   └── main.py
-│   └── clash-proxy/          # 网络代理 (端口7890-7892,9090)
-│
-├── shared/                    # 共享代码
-│   ├── python/              # Python共享模块
-│   │   ├── converters/      # 币安数据转换器
-│   │   │   └── binance/    # 币安API转换器
-│   │   ├── models/         # 共享数据模型
-│   │   ├── constants/      # 常量定义
-│   │   └── utils/          # 工具函数
-│   ├── typescript/          # TypeScript类型定义
-│   └── schemas/             # 数据模式
-│
-├── docker/                   # Docker配置
-│   ├── docker-compose.yml
-│   └── init-scripts/
-│       ├── 01-database-init.sql           # 数据库初始化 (单一真相来源)
-│       ├── 02-migrate-to-unified-architecture.sql  # 架构迁移
-│       ├── 03-migrate-klines-history.sql   # K线历史迁移
-│       ├── 99-verify-migration.sql        # 迁移验证
-│       └── 99-verify-final.sql             # 最终验证
-│
-├── docs/                     # 项目文档
-│   ├── api/                 # API文档
-│   ├── architecture/         # 架构设计
-│   │   ├── README.md                # 文档体系指南
-│   │   ├── DATABASE_COORDINATED_ARCHITECTURE.md  # 核心理念文档
-│   │   ├── QUANT_TRADING_SYSTEM_ARCHITECTURE.md  # 详细实施文档
-│   │   └── TradingView-完整API规范设计文档.md
-│   ├── database/            # 数据库相关
-│   ├── archive/             # 归档文档
-│   ├── deployment/         # 部署文档
-│   ├── development/        # 开发文档
-│   └── troubleshooting/    # 故障排除
-│
-├── frontend/                 # 前端应用
-├── configs/                  # 配置文件
-├── scripts/                  # 运维脚本
-├── tests/                    # 全局测试
-└── backups/                 # 备份文件
-```
+详见 `docs/codemaps/` 目录：
+- `backend.md` - 后端服务代码结构
+- `frontend.md` - 前端代码结构
+- `architecture.md` - 架构代码结构
+- `data.md` - 数据层代码结构
 
 ### 重要提醒
 
@@ -303,31 +243,9 @@ quant-trading/
 
 ## 项目管理规范
 
-### Python包管理
-
-- **统一使用uv**: 每个服务独立使用uv进行包管理和依赖管理
-- **依赖添加**: 进入服务目录后使用`uv add package-name`添加依赖
-- **禁止方式**:
-  - 禁止在根目录编写pyproject.toml（各服务独立管理）
-  - 禁止手动编写requirements.txt，pyproject.toml文件
-  - 禁止使用`uv pip install`和`pip install`命令安装依赖
-- **脚本运行**: 在服务目录内使用`uv run python script.py`，禁止直接使用`python`
-
-### 依赖管理原则
-
-- **独立管理**: 每个服务独立管理依赖，拥有独立的pyproject.toml文件
-- **无workspace**: 不使用uv workspace，确保服务间完全隔离
-- **依赖隔离**: 每个服务有自己的.venv环境，避免依赖冲突
-- 共享代码放置在`shared/`目录（不包含uv依赖）
-- 生产环境固定版本，开发环境可使用版本范围
-- 定期更新依赖，但需经过充分测试验证
-
 ### 微服务脚本运行
 
-由于每个微服务都独立管理自己的依赖（拥有独立的pyproject.toml文件），运行任何微服务的脚本时必须先进入该服务的目录：
-
-- **API服务**: `cd services/api-service && uv run python src/main.py`
-- **币安服务**: `cd services/binance-service && uv run python main.py`
+> 每个服务独立管理依赖，运行脚本时必须进入对应目录
 - **信号服务**: `cd services/signal-service && uv run python main.py`
 - **交易系统**: `cd services/trading && uv run python main.py`
 

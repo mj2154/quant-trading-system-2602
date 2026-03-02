@@ -54,7 +54,6 @@ export function useTradingView(containerId = 'tv_chart_container') {
                 disabled_features: [
                     "left_toolbar",
                     "create_volume_indicator_by_default",
-                    "use_localstorage_for_settings",
                     "trading_account_manager"
                 ],
 

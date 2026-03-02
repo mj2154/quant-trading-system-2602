@@ -2,20 +2,20 @@
 数据库任务监听器
 
 根据 QUANT_TRADING_SYSTEM_ARCHITECTURE.md 设计：
-- 监听频道：task.new（带点号）
+- 监听频道：task_new（带点号）
 - 任务表：tasks
 - 通知载荷（统一包装格式）：
   {
       "event_id": "...",
-      "event_type": "task.new",
+      "event_type": "task_new",
       "timestamp": "...",
       "data": {"id": 123, "type": "get_klines", "payload": {...}, "status": "pending"}
   }
 - 任务类型：get_klines, get_server_time, get_quotes
 
 事件驱动流程：
-1. API网关 INSERT tasks 表 → 触发 task.new 通知
-2. 币安服务监听 task.new 通知
+1. API网关 INSERT tasks 表 → 触发 task_new 通知
+2. 币安服务监听 task_new 通知
 3. 币安服务处理任务并 UPDATE tasks.result → 触发 task_completed 通知
 
 参考设计文档：
@@ -49,13 +49,13 @@ class TaskListener:
     """数据库任务监听器
 
     职责：
-    - 监听 task.new 频道（新任务通知）
+    - 监听 task_new 频道（新任务通知）
     - 解析任务载荷并分发到对应的处理器
     - 仅支持新任务格式（get_klines, get_server_time, get_quotes）
 
     事件驱动流程：
     1. API网关 INSERT tasks 表
-    2. 数据库触发器发送 task.new 通知
+    2. 数据库触发器发送 task_new 通知
     3. 此监听器接收通知并分发处理
 
     使用方式：
@@ -67,8 +67,8 @@ class TaskListener:
         await listener.start()
     """
 
-    # 监听频道：task.new（带点号，与数据库触发器一致）
-    CHANNEL = "task.new"
+    # 监听频道：task_new（带点号，与数据库触发器一致）
+    CHANNEL = "task_new"
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         """初始化监听器
@@ -157,7 +157,7 @@ class TaskListener:
         通知格式（统一包装格式）：
         {
             "event_id": "...",
-            "event_type": "task.new",
+            "event_type": "task_new",
             "timestamp": "...",
             "data": {"id": 123, "type": "get_klines", "payload": {...}, "status": "pending"}
         }

@@ -24,7 +24,7 @@ def _update_kline_cache(
     Args:
         cache: K-line cache dictionary.
         subscription_key: Subscription key (e.g., "BINANCE:BTCUSDT@KLINE_60").
-        kline_data: New K-line data from realtime.update.
+        kline_data: New K-line data from realtime_update.
         required_klines: Required number of klines (default 280).
 
     Returns:

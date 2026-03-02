@@ -16,7 +16,7 @@
 遵循 SUBSCRIPTION_AND_REALTIME_DATA.md 设计：
 - INSERT realtime_data → pg_notify('subscription.add')
 - DELETE realtime_data → pg_notify('subscription.remove')
-- TRUNCATE realtime_data → pg_notify('subscription.clean')
+- TRUNCATE realtime_data → pg_notify('subscription_clean')
 
 重要：SIGNAL:* 等告警信号订阅不应存入 realtime_data 表
 （它们只用于 API 网关内部的客户端广播，不应转发给币安服务）
@@ -278,7 +278,7 @@ class SubscriptionManager:
     async def _publish_clean_notification(self) -> None:
         """发送清空订阅通知"""
         async with self._pool.acquire() as conn:
-            await conn.execute('NOTIFY "subscription.clean", \'{"action": "clean_all"}\'')
+            await conn.execute('NOTIFY "subscription_clean", \'{"action": "clean_all"}\'')
 
     # ========== 辅助方法 ==========
 

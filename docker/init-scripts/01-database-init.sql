@@ -236,53 +236,43 @@ CREATE INDEX IF NOT EXISTS idx_exchange_info_symbol ON exchange_info (symbol);
 CREATE INDEX IF NOT EXISTS idx_exchange_info_market ON exchange_info (market_type);
 
 -- -----------------------------------------------------------------------------
--- 3.5 trading_orders 交易订单表
--- 设计: 存储交易订单完整数据，INSERT触发order.new通知
--- 极简JSONB方案: 核心字段列存储，完整数据JSONB存储
+-- 3.5 order_tasks 订单任务表
+-- 设计: 完全复用 tasks 表结构，仅表名和保留策略不同
+-- INSERT 触发 order_task_new 通知
+-- 数据保留: 永久保留（用于分析和追溯）
+-- 注意: created_at 必须是 NOT NULL 才能转换为 Hypertable
 -- 参考文档: docs/backend/design/04-trading-orders.md
 -- -----------------------------------------------------------------------------
-CREATE TABLE trading_orders (
-    id BIGSERIAL PRIMARY KEY,
+CREATE TABLE order_tasks (
+    id BIGSERIAL,
 
-    -- 唯一标识（用于查询）
-    client_order_id VARCHAR(36) NOT NULL UNIQUE,
+    -- 任务类型: order.create, order.cancel, order.query
+    type VARCHAR(50) NOT NULL,
 
-    -- 币安订单ID（订单在交易所的唯一标识）
-    binance_order_id BIGINT,
+    -- 任务参数（JSON格式）
+    payload JSONB NOT NULL DEFAULT '{}',
 
-    -- 区分市场类型（用于路由查询）
-    market_type VARCHAR(10) NOT NULL,  -- SPOT / FUTURES
+    -- 任务结果（API响应或错误信息）
+    result JSONB,
 
-    -- 交易对（如 BTCUSDT）
-    symbol VARCHAR(20) NOT NULL,
+    -- 任务状态
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
 
-    -- 核心状态（常用查询）
-    status VARCHAR(20) NOT NULL DEFAULT 'NEW',  -- NEW / PARTIALLY_FILLED / FILLED / CANCELED / REJECTED / EXPIRED
-    side VARCHAR(10) NOT NULL,                   -- BUY / SELL
-    order_type VARCHAR(20) NOT NULL,              -- LIMIT / MARKET / STOP / TAKE_PROFIT 等
-
-    -- 全部数据用JSONB存储（完美适配币安格式）
-    data JSONB NOT NULL,
-
-    -- 时间戳
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- 时间戳（必须是 NOT NULL 才能转换为 Hypertable）
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 转换为 Hypertable（必须在添加主键之前执行）
+SELECT create_hypertable('order_tasks', 'created_at');
+
+-- 添加复合主键（与 tasks 表一致，包含 created_at）
+ALTER TABLE order_tasks ADD PRIMARY KEY (id, created_at);
+
 -- 索引
-CREATE INDEX IF NOT EXISTS idx_trading_orders_client_id ON trading_orders (client_order_id);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_binance_id ON trading_orders (binance_order_id);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_market_status ON trading_orders (market_type, status);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_symbol ON trading_orders (symbol);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_side ON trading_orders (side);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_created ON trading_orders (created_at DESC);
-
--- 复合索引：常用查询
-CREATE INDEX IF NOT EXISTS idx_trading_orders_symbol_status ON trading_orders (symbol, status);
-CREATE INDEX IF NOT EXISTS idx_trading_orders_market_created ON trading_orders (market_type, created_at DESC);
-
--- 转换为 Hypertable（时间分区）
-SELECT create_hypertable('trading_orders', 'created_at');
+CREATE INDEX IF NOT EXISTS idx_order_tasks_status ON order_tasks (status);
+CREATE INDEX IF NOT EXISTS idx_order_tasks_type ON order_tasks (type);
+CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, status);
 
 -- -----------------------------------------------------------------------------
 -- 3.6 alert_configs 告警配置表
@@ -349,7 +339,7 @@ CREATE INDEX IF NOT EXISTS idx_alerts_enabled
 
 -- -----------------------------------------------------------------------------
 -- 3.6 strategy_signals 策略信号表
--- 设计: 存储策略计算产生的信号，INSERT触发signal.new通知
+-- 设计: 存储策略计算产生的信号，INSERT触发signal_new通知
 -- 用于追踪历史信号记录，支持按用户/策略索引查询
 -- 注意: id (BIGSERIAL) 作为唯一标识
 -- -----------------------------------------------------------------------------
@@ -420,9 +410,9 @@ CREATE INDEX IF NOT EXISTS idx_strategy_signals_computed
 CREATE OR REPLACE FUNCTION notify_task_new()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('task.new', jsonb_build_object(
+    PERFORM pg_notify('task_new', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'task.new',
+        'event_type', 'task_new',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
@@ -445,9 +435,9 @@ DECLARE
 BEGIN
     -- 确定事件类型
     IF NEW.status = 'completed' THEN
-        event_type := 'task.completed';
+        event_type := 'task_completed';
     ELSIF NEW.status = 'failed' THEN
-        event_type := 'task.failed';
+        event_type := 'task_failed';
     ELSE
         -- 其他状态不发送通知
         RETURN NEW;
@@ -471,17 +461,17 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- 新增订阅通知：INSERT realtime_data时触发，通知币安服务（统一包装格式）
--- 注意：INSERT 时只发送 subscription.add 通知，不发送 realtime.update
+-- 注意：INSERT 时只发送 subscription_add 通知，不发送 realtime_update
 -- 原因：INSERT 时 data 字段为空对象 '{}'，推送空数据给客户端没有意义
--- realtime.update 只在 UPDATE 时发送（当数据实际变化时）
+-- realtime_update 只在 UPDATE 时发送（当数据实际变化时）
 CREATE OR REPLACE FUNCTION notify_subscription_add()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- 发送 subscription.add 通知给 api-service（用于前端订阅）
+    -- 发送 subscription_add 通知给 api-service（用于前端订阅）
     -- 发送 binance-service（用于订阅币安WS）
-    PERFORM pg_notify('subscription.add', jsonb_build_object(
+    PERFORM pg_notify('subscription_add', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'subscription.add',
+        'event_type', 'subscription_add',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'subscription_key', NEW.subscription_key,
@@ -498,9 +488,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION notify_realtime_update()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('realtime.update', jsonb_build_object(
+    PERFORM pg_notify('realtime_update', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'realtime.update',
+        'event_type', 'realtime_update',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'subscription_key', NEW.subscription_key,
@@ -517,9 +507,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION notify_subscription_remove()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('subscription.remove', jsonb_build_object(
+    PERFORM pg_notify('subscription_remove', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'subscription.remove',
+        'event_type', 'subscription_remove',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'subscription_key', OLD.subscription_key,
@@ -535,9 +525,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION notify_subscription_clean()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('subscription.clean', jsonb_build_object(
+    PERFORM pg_notify('subscription_clean', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'subscription.clean',
+        'event_type', 'subscription_clean',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'action', 'clean_all'
@@ -612,9 +602,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION notify_signal_new()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('signal.new', jsonb_build_object(
+    PERFORM pg_notify('signal_new', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'signal.new',
+        'event_type', 'signal_new',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
@@ -634,27 +624,25 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- -----------------------------------------------------------------------------
--- 交易订单通知函数（使用 trading_orders 表）
+-- 订单任务通知函数（使用 order_tasks 表）
 -- -----------------------------------------------------------------------------
 
--- 订单创建通知：INSERT trading_orders 时触发
-CREATE OR REPLACE FUNCTION notify_order_new()
+-- 任务创建通知：INSERT order_tasks 时触发
+CREATE OR REPLACE FUNCTION notify_order_task_new()
 RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM pg_notify('order.new', jsonb_build_object(
+    PERFORM pg_notify('order_task_new', jsonb_build_object(
         'event_id', uuidv7()::TEXT,
-        'event_type', 'order.new',
+        'event_type', 'order_task_new',
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
+            'task_type', NEW.task_type,
             'client_order_id', NEW.client_order_id,
-            'binance_order_id', NEW.binance_order_id,
             'market_type', NEW.market_type,
-            'symbol', NEW.symbol,
+            'payload', NEW.payload,
             'status', NEW.status,
-            'side', NEW.side,
-            'order_type', NEW.order_type,
-            'data', NEW.data,
+            'binance_order_id', NEW.binance_order_id,
             'created_at', NEW.created_at::TEXT
         )
     )::TEXT);
@@ -662,23 +650,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 订单状态/数据更新通知：UPDATE trading_orders 时触发
-CREATE OR REPLACE FUNCTION notify_order_update()
+-- 任务状态更新通知：UPDATE order_tasks 时触发
+CREATE OR REPLACE FUNCTION notify_order_task_update()
 RETURNS TRIGGER AS $$
 DECLARE
     event_type TEXT;
 BEGIN
-    -- 确定事件类型
-    IF NEW.status = 'FILLED' THEN
-        event_type := 'order.filled';
-    ELSIF NEW.status = 'CANCELED' THEN
-        event_type := 'order.canceled';
-    ELSIF NEW.status = 'REJECTED' THEN
-        event_type := 'order.rejected';
-    ELSIF NEW.status = 'EXPIRED' THEN
-        event_type := 'order.expired';
+    -- 根据任务状态确定事件类型
+    IF NEW.status = 'completed' THEN
+        event_type := 'order_task_completed';
+    ELSIF NEW.status = 'failed' THEN
+        event_type := 'order_task_failed';
     ELSE
-        event_type := 'order.update';
+        event_type := 'order_task.update';
     END IF;
 
     PERFORM pg_notify(event_type, jsonb_build_object(
@@ -687,14 +671,13 @@ BEGIN
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
+            'task_type', NEW.task_type,
             'client_order_id', NEW.client_order_id,
-            'binance_order_id', NEW.binance_order_id,
             'market_type', NEW.market_type,
-            'symbol', NEW.symbol,
+            'payload', NEW.payload,
+            'result', NEW.result,
             'status', NEW.status,
-            'side', NEW.side,
-            'order_type', NEW.order_type,
-            'data', NEW.data,
+            'binance_order_id', NEW.binance_order_id,
             'updated_at', NEW.updated_at::TEXT
         )
     )::TEXT);
@@ -859,21 +842,21 @@ CREATE TRIGGER trigger_alert_config_delete
     FOR EACH ROW
     EXECUTE FUNCTION notify_alert_config_delete();
 
--- trading_orders 触发器
--- 订单创建通知
-DROP TRIGGER IF EXISTS trigger_order_new ON trading_orders;
-CREATE TRIGGER trigger_order_new
-    AFTER INSERT ON trading_orders
+-- order_tasks 触发器
+-- 任务创建通知
+DROP TRIGGER IF EXISTS trigger_order_task_new ON order_tasks;
+CREATE TRIGGER trigger_order_task_new
+    AFTER INSERT ON order_tasks
     FOR EACH ROW
-    EXECUTE FUNCTION notify_order_new();
+    EXECUTE FUNCTION notify_order_task_new();
 
--- 订单状态/数据更新通知
-DROP TRIGGER IF EXISTS trigger_order_update ON trading_orders;
-CREATE TRIGGER trigger_order_update
-    AFTER UPDATE ON trading_orders
+-- 任务状态更新通知
+DROP TRIGGER IF EXISTS trigger_order_task_update ON order_tasks;
+CREATE TRIGGER trigger_order_task_update
+    AFTER UPDATE ON order_tasks
     FOR EACH ROW
-    WHEN (OLD.data IS DISTINCT FROM NEW.data OR OLD.status IS DISTINCT FROM NEW.status)
-    EXECUTE FUNCTION notify_order_update();
+    WHEN (OLD.status IS DISTINCT FROM NEW.status OR OLD.result IS DISTINCT FROM NEW.result)
+    EXECUTE FUNCTION notify_order_task_update();
 
 -- =============================================================================
 -- 第六部分: 数据保留策略
@@ -893,7 +876,7 @@ PERFORM add_retention_policy('realtime_data', drop_after => INTERVAL '1 day');
 -- strategy_signals: 保留30天（策略信号需要长期跟踪）
 PERFORM add_retention_policy('strategy_signals', drop_after => INTERVAL '30 days');
 
--- trading_orders: 永久保留（交易记录需要长期保存）
+-- order_tasks: 永久保留（订单任务需要长期保存，用于分析和追溯）
 
 -- =============================================================================
 -- 第七部分: upsert_exchange_info 存储过程
@@ -1005,20 +988,19 @@ $$ LANGUAGE plpgsql;
 --
 -- | 频道                   | 触发条件                    | 发送者  | 接收者         | 说明                    |
 -- |-----------------------|----------------------------|---------|----------------|-------------------------|
--- | task.new              | INSERT tasks               | 数据库  | 币安服务       | 新任务通知              |
--- | task.completed        | UPDATE status=completed    | 数据库  | API网关        | 任务完成通知            |
--- | subscription.add      | INSERT realtime_data        | 数据库  | 币安服务       | 新增订阅通知            |
--- | subscription.remove   | DELETE realtime_data        | 数据库  | 币安服务       | 取消订阅通知            |
--- | subscription.clean    | TRUNCATE realtime_data     | 数据库  | 币安服务       | 清空所有订阅（重启）    |
--- | realtime.update       | UPDATE realtime_data        | 数据库  | API网关/信号服务 | 实时数据更新通知     |
--- | signal.new            | INSERT strategy_signals     | 数据库  | API网关/交易系统 | 新信号生成通知       |
+-- | task_new              | INSERT tasks               | 数据库  | 币安服务       | 新任务通知              |
+-- | task_completed        | UPDATE status=completed    | 数据库  | API网关        | 任务完成通知            |
+-- | subscription_add      | INSERT realtime_data        | 数据库  | 币安服务       | 新增订阅通知            |
+-- | subscription_remove   | DELETE realtime_data        | 数据库  | 币安服务       | 取消订阅通知            |
+-- | subscription_clean    | TRUNCATE realtime_data     | 数据库  | 币安服务       | 清空所有订阅（重启）    |
+-- | realtime_update       | UPDATE realtime_data        | 数据库  | API网关/信号服务 | 实时数据更新通知     |
+-- | signal_new            | INSERT strategy_signals     | 数据库  | API网关/交易系统 | 新信号生成通知       |
 -- | alert_config.new      | INSERT alert_configs        | 数据库  | 信号服务       | 新建告警配置通知       |
 -- | alert_config.update   | UPDATE alert_configs        | 数据库  | 信号服务       | 更新告警配置通知       |
 -- | alert_config.delete   | DELETE alert_configs        | 数据库  | 信号服务       | 删除告警配置通知       |
--- | order.new             | INSERT trading_orders       | 数据库  | API/交易服务   | 新订单创建通知         |
--- | order.update          | UPDATE trading_orders       | 数据库  | API/交易服务   | 订单数据更新通知       |
--- | order.filled          | UPDATE status=FILLED       | 数据库  | API/交易服务   | 订单完全成交通知       |
--- | order.canceled        | UPDATE status=CANCELED      | 数据库  | API/交易服务   | 订单撤销通知           |
+-- | order_task_new        | INSERT order_tasks          | 数据库  | binance-service | 新订单任务通知         |
+-- | order_task_completed  | UPDATE status=completed    | 数据库  | api-service    | 订单任务完成通知       |
+-- | order_task_failed     | UPDATE status=failed       | 数据库  | api-service    | 订单任务失败通知       |
 --
 -- =============================================================================
 -- 策略元数据表（由 signal-service 自动维护）
@@ -1042,10 +1024,10 @@ BEGIN
     RAISE NOTICE '========================================';
     RAISE NOTICE '数据库初始化完成！';
     RAISE NOTICE '========================================';
-    RAISE NOTICE '表: realtime_data, tasks, klines_history, exchange_info, alert_configs, strategy_signals, trading_orders';
+    RAISE NOTICE '表: realtime_data, tasks, klines_history, exchange_info, alert_configs, strategy_signals, order_tasks';
     RAISE NOTICE 'Hypertable: 5个表已转换为TimescaleDB Hypertable';
-    RAISE NOTICE '触发器: 11个触发器已创建（trading_orders触发器待添加）';
-    RAISE NOTICE '保留策略: tasks(7天), realtime_data(1天), strategy_signals(30天)';
-    RAISE NOTICE '通知频道: task.new, task.completed, subscription.add, subscription.remove, subscription.clean, realtime.update, signal.new, alert_config.new, alert_config.update, alert_config.delete';
+    RAISE NOTICE '触发器: 12个触发器已创建';
+    RAISE NOTICE '保留策略: tasks(7天), realtime_data(1天), strategy_signals(30天), order_tasks(永久)';
+    RAISE NOTICE '通知频道: task_new, task_completed, subscription_add, subscription_remove, subscription_clean, realtime_update, signal_new, alert_config.new, alert_config.update, alert_config.delete';
     RAISE NOTICE '========================================';
 END $$;
