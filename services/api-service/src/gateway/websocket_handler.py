@@ -70,7 +70,9 @@ async def ws_market(
 
     # 注册客户端
     client_id = await client_manager.connect(websocket)
-    logger.info(f"Client connected: {client_id}")
+    # 记录客户端连接的 WebSocket 路径（用于调试消息路由问题）
+    client_path = getattr(websocket, 'url', None)
+    logger.info(f"Client connected: {client_id}, path: {client_path}")
 
     try:
         while True:
@@ -96,6 +98,10 @@ async def ws_market(
 
             # 获取请求 ID
             request_id = message.get("requestId")
+            msg_type = message.get("type", "UNKNOWN")
+
+            # 记录接收到的请求（用于调试消息路由问题）
+            logger.info(f"← [WS] client_id={client_id}, requestId={request_id}, type={msg_type}")
 
             # 路由任务
             try:

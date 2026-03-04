@@ -5,5 +5,6 @@
 """
 
 from .realtime_data_repository import RealtimeDataRepository
+from .order_tasks_repository import OrderTasksRepository
 
-__all__ = ["RealtimeDataRepository"]
+__all__ = ["RealtimeDataRepository", "OrderTasksRepository"]

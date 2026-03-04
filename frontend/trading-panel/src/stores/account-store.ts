@@ -24,12 +24,10 @@ const WS_BASE_URL = import.meta.env?.VITE_WS_URL || 'ws://127.0.0.1:8000'
 
 /**
  * requestId 生成器
+ * 格式: req_a1b2c3d4e5f6g7h8
  */
-let requestIdCounter = 0
-function generateRequestId(prefix: string = 'req'): string {
-  const timestamp = Date.now()
-  requestIdCounter = (requestIdCounter + 1) % 10000
-  return `${prefix}_${timestamp}_${requestIdCounter}`
+function generateRequestId(): string {
+  return `req_${crypto.randomUUID().substring(0, 16)}`
 }
 
 // ==================== Store 定义 ====================
@@ -218,7 +216,7 @@ export const useAccountStore = defineStore('account', () => {
     return {
       protocolVersion: '2.0',
       type: typeMap[dataType] || dataType,
-      requestId: generateRequestId('req_account'),
+      requestId: generateRequestId(),
       timestamp: Date.now(),
       data,
     }

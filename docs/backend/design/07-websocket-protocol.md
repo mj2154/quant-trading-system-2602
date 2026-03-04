@@ -194,6 +194,35 @@ class KlineResponse(BaseModel):
 }
 ```
 
+### 交易端点
+
+- **路径**: `/ws/trading`
+- **开发环境**: `ws://localhost:8000/ws/trading`
+- **生产环境**: `wss://your-domain.com/ws/trading`
+- **协议**: WebSocket (RFC 6455)
+- **消息格式**: JSON
+- **用途**: 处理订单操作（创建、查询、取消）
+
+**职责分离**：
+| 端点 | 职责 |
+|------|------|
+| `/ws/market` | 市场数据（K线、报价、订阅） |
+| `/ws/trading` | 交易操作（订单创建、查询、取消） |
+
+**交易消息类型**（与 /ws/market 复用同一协议）：
+
+| type | 响应类型 | 说明 |
+|------|---------|------|
+| `CREATE_ORDER` | `ORDER_DATA` | 创建订单 |
+| `GET_ORDER` | `ORDER_DATA` | 查询单个订单 |
+| `LIST_ORDERS` | `ORDER_LIST_DATA` | 查询订单列表 |
+| `CANCEL_ORDER` | `ORDER_DATA` | 撤销订单 |
+| `GET_OPEN_ORDERS` | `ORDER_LIST_DATA` | 查询当前挂单 |
+
+**数据存储**：
+- 交易请求写入 `order_tasks` 表（而非 `tasks` 表）
+- 触发 `order_task_new` 通知给 binance-service 执行
+
 ### 心跳机制（Ping-Pong）
 
 本系统采用 **Uvicorn 服务器级别自动 ping/pong** 机制，与币安 WebSocket API 保持完全一致。
@@ -459,7 +488,7 @@ v2.0 完全不兼容 v1.0 格式。前端需要使用新的订阅键格式。
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_1703123456789_002",
+    "requestId": "req_i9j0k1l2m3n4o5p6",
     "timestamp": 1703123456790,
     "data": {
         "type": "search_symbols",
@@ -604,7 +633,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_KLINES",
-    "requestId": "req_xxx",
+    "requestId": "req_a1b2c3d4e5f6g7h8",
     "timestamp": 1234567890,
     "data": {
         "symbol": "BTCUSDT",
@@ -620,7 +649,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "ACK",
-    "requestId": "req_xxx",
+    "requestId": "req_a1b2c3d4e5f6g7h8",
     "timestamp": 1234567890,
     "data": {}
 }
@@ -631,7 +660,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "KLINES_DATA",
-    "requestId": "req_xxx",
+    "requestId": "req_a1b2c3d4e5f6g7h8",
     "timestamp": 1234567890,
     "data": {
         "symbol": "BTCUSDT",
@@ -647,7 +676,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "ERROR",
-    "requestId": "req_xxx",
+    "requestId": "req_a1b2c3d4e5f6g7h8",
     "timestamp": 1234567890,
     "data": {
         "errorCode": "INVALID_SYMBOL",
@@ -803,7 +832,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_CONFIG",
-    "requestId": "req_1703123456789_001",
+    "requestId": "req_a1b2c3d4e5f6g7h8",
     "timestamp": 1703123456789,
     "data": {}
 }
@@ -822,7 +851,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_SEARCH_SYMBOLS",
-    "requestId": "req_1703123456789_002",
+    "requestId": "req_i9j0k1l2m3n4o5p6",
     "timestamp": 1703123456789,
     "data": {
         "query": "BTC",
@@ -856,7 +885,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_RESOLVE_SYMBOL",
-    "requestId": "req_1703123456789_003",
+    "requestId": "req_q7r8s9t0u1v2w3x4",
     "timestamp": 1703123456789,
     "data": {
         "symbol": "BINANCE:BTCUSDT"
@@ -879,7 +908,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "SYMBOL_DATA",
-    "requestId": "req_1703123456789_003",
+    "requestId": "req_q7r8s9t0u1v2w3x4",
     "timestamp": 1703123456790,
     "data": {
         "symbol": "BTCUSDT",
@@ -941,7 +970,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_KLINES",
-    "requestId": "req_1703123456789_004",
+    "requestId": "req_y5z6a7b8c9d0e1f2",
     "timestamp": 1703123456789,
     "data": {
         "symbol": "BINANCE:BTCUSDT",
@@ -1084,7 +1113,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACK",
-    "requestId": "req_1703123456789_004",
+    "requestId": "req_y5z6a7b8c9d0e1f2",
     "timestamp": 1703123456790,
     "data": {}
 }
@@ -1097,7 +1126,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "KLINES_DATA",
-    "requestId": "req_1703123456789_004",
+    "requestId": "req_y5z6a7b8c9d0e1f2",
     "timestamp": 1703123456800,
     "data": {
         "symbol": "BINANCE:BTCUSDT",
@@ -1118,7 +1147,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_SERVER_TIME",
-    "requestId": "req_1703123456789_005",
+    "requestId": "req_g3h4i5j6k7l8m9n0",
     "timestamp": 1703123456789,
     "data": {}
     }
@@ -1138,7 +1167,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_FUTURES_ACCOUNT",
-    "requestId": "req_account_001",
+    "requestId": "req_a1b2c3d4e5f6g7h8",
     "timestamp": 1703123456789,
     "data": {}
 }
@@ -1154,7 +1183,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACCOUNT_DATA",
-    "requestId": "req_account_001",
+    "requestId": "req_a1b2c3d4e5f6g7h8",
     "timestamp": 1703123456790,
     "data": {
         "account": {
@@ -1194,7 +1223,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_SPOT_ACCOUNT",
-    "requestId": "req_account_002",
+    "requestId": "req_i9j0k1l2m3n4o5p6",
     "timestamp": 1703123456789,
     "data": {}
 }
@@ -1210,7 +1239,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACCOUNT_DATA",
-    "requestId": "req_account_002",
+    "requestId": "req_i9j0k1l2m3n4o5p6",
     "timestamp": 1703123456790,
     "data": {
         "account": {
@@ -1242,7 +1271,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_SUBSCRIPTIONS",
-    "requestId": "req_1703123456789_006",
+    "requestId": "req_o1p2q3r4s5t6u7v8",
     "timestamp": 1703123456789,
     "data": {}
 }
@@ -1262,7 +1291,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_QUOTES",
-    "requestId": "req_1703123456789_006",
+    "requestId": "req_o1p2q3r4s5t6u7v8",
     "timestamp": 1703123456789,
     "data": {
         "symbols": ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT"]
@@ -1293,7 +1322,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SUBSCRIBE",
-    "requestId": "req_1703123456789_007",
+    "requestId": "req_w9x0y1z2a3b4c5d6",
     "timestamp": 1703123456789,
     "data": {
         "subscriptions": [
@@ -1341,7 +1370,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "UNSUBSCRIBE",
-    "requestId": "req_1703123456789_008",
+    "requestId": "req_e7f8g9h0i1j2k3l4",
     "timestamp": 1703123456789,
     "data": {
         "subscriptions": [
@@ -1357,7 +1386,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "UNSUBSCRIBE",
-    "requestId": "req_1703123456789_009",
+    "requestId": "req_m5n6o7p8q9r0s1t2",
     "timestamp": 1703123456789,
     "data": {
         "all": true
@@ -1382,7 +1411,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_1703123456789_001",
+    "requestId": "req_a1b2c3d4e5f6g7h8",
     "timestamp": 1703123456790,
     "data": {
         "supports_search": true,
@@ -1409,7 +1438,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SEARCH_SYMBOLS_DATA",
-    "requestId": "req_1703123456789_002",
+    "requestId": "req_i9j0k1l2m3n4o5p6",
     "timestamp": 1703123456790,
     "data": {
         "symbols": [
@@ -1455,7 +1484,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_1703123456789_003",
+    "requestId": "req_q7r8s9t0u1v2w3x4",
     "timestamp": 1703123456790,
     "data": {
         "type": "resolve_symbol",
@@ -1497,7 +1526,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_1703123456789_004",
+    "requestId": "req_y5z6a7b8c9d0e1f2",
     "timestamp": 1703123456790,
     "data": {
         "type": "klines",
@@ -1540,7 +1569,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_1703123456789_005",
+    "requestId": "req_g3h4i5j6k7l8m9n0",
     "timestamp": 1703123456790,
     "data": {
         "type": "server_time",
@@ -1559,7 +1588,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_1703123456789_006",
+    "requestId": "req_o1p2q3r4s5t6u7v8",
     "timestamp": 1703123456790,
     "data": {
         "type": "subscriptions",
@@ -1635,7 +1664,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_1703123456789_006",
+    "requestId": "req_o1p2q3r4s5t6u7v8",
     "timestamp": 1703123456790,
     "data": {
         "type": "subscriptions",
@@ -1656,7 +1685,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_1703123456789_006",
+    "requestId": "req_o1p2q3r4s5t6u7v8",
     "timestamp": 1703123456790,
     "data": {
         "type": "quotes",
@@ -1740,7 +1769,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CREATE_ALERT_CONFIG",
-    "requestId": "req_alert_001",
+    "requestId": "req_q7r8s9t0u1v2w3x4",
     "timestamp": 1704067200000,
     "data": {
         "name": "macd_resonance_btcusdt",
@@ -1781,7 +1810,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ALERT_CONFIG_DATA",
-    "requestId": "req_alert_001",
+    "requestId": "req_q7r8s9t0u1v2w3x4",
     "timestamp": 1704067201000,
     "data": {
         "type": "create_alert_config",
@@ -1816,7 +1845,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "LIST_ALERT_CONFIGS",
-    "requestId": "req_list_001",
+    "requestId": "req_y5z6a7b8c9d0e1f2",
     "timestamp": 1704067200000,
     "data": {
         "page": 1,
@@ -1832,7 +1861,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ALERT_CONFIG_DATA",
-    "requestId": "req_list_001",
+    "requestId": "req_y5z6a7b8c9d0e1f2",
     "timestamp": 1704067201000,
     "data": {
         "items": [
@@ -1873,7 +1902,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "LIST_SIGNALS",
-    "requestId": "req_signals_001",
+    "requestId": "req_g3h4i5j6k7l8m9n0",
     "timestamp": 1704067200000,
     "data": {
         "page": 1,
@@ -1891,7 +1920,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SIGNAL_DATA",
-    "requestId": "req_signals_001",
+    "requestId": "req_g3h4i5j6k7l8m9n0",
     "timestamp": 1704067201000,
     "data": {
         "items": [
@@ -1945,7 +1974,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "UPDATE_ALERT_CONFIG",
-    "requestId": "req_update_001",
+    "requestId": "req_o1p2q3r4s5t6u7v8",
     "timestamp": 1704067200000,
     "data": {
         "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
@@ -1968,7 +1997,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ALERT_CONFIG_DATA",
-    "requestId": "req_update_001",
+    "requestId": "req_o1p2q3r4s5t6u7v8",
     "timestamp": 1704067201000,
     "data": {
         "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
@@ -2007,7 +2036,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "DELETE_ALERT_CONFIG",
-    "requestId": "req_delete_001",
+    "requestId": "req_w9x0y1z2a3b4c5d6",
     "timestamp": 1704067200000,
     "data": {
         "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678"
@@ -2024,7 +2053,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ENABLE_ALERT_CONFIG",
-    "requestId": "req_enable_001",
+    "requestId": "req_e7f8g9h0i1j2k3l4",
     "timestamp": 1704067200000,
     "data": {
         "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678"
@@ -2050,7 +2079,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_STRATEGY_METADATA",
-    "requestId": "req_strategy_001",
+    "requestId": "req_m5n6o7p8q9r0s1t2",
     "timestamp": 1704067200000,
     "data": {}
 }
@@ -2061,7 +2090,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "STRATEGY_METADATA_DATA",
-    "requestId": "req_strategy_001",
+    "requestId": "req_m5n6o7p8q9r0s1t2",
     "timestamp": 1704067201000,
     "data": {
         "strategies": [
@@ -2295,7 +2324,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_STRATEGY_METADATA_BY_TYPE",
-    "requestId": "req_strategy_002",
+    "requestId": "req_u3v4w5x6y7z8a9b0",
     "timestamp": 1704067200000,
     "data": {
         "strategyType": "MACDResonanceStrategyV5"
@@ -2308,7 +2337,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "STRATEGY_METADATA_DATA",
-    "requestId": "req_strategy_002",
+    "requestId": "req_u3v4w5x6y7z8a9b0",
     "timestamp": 1704067201000,
     "data": {
         "strategy": {
@@ -2344,7 +2373,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACK",
-    "requestId": "req_1703123456789_007",
+    "requestId": "req_w9x0y1z2a3b4c5d6",
     "timestamp": 1703123456790,
     "data": {}
 }
@@ -2353,7 +2382,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SUBSCRIPTION_DATA",
-    "requestId": "req_1703123456789_007",
+    "requestId": "req_w9x0y1z2a3b4c5d6",
     "timestamp": 1703123456790,
     "data": {
         "subscriptions": [...]
@@ -2386,7 +2415,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACK",
-    "requestId": "req_1703123456789_008",
+    "requestId": "req_e7f8g9h0i1j2k3l4",
     "timestamp": 1703123456790,
     "data": {}
 }
@@ -2395,7 +2424,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SUBSCRIPTION_DATA",
-    "requestId": "req_1703123456789_008",
+    "requestId": "req_e7f8g9h0i1j2k3l4",
     "timestamp": 1703123456790,
     "data": {}
 }
@@ -2641,7 +2670,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SUBSCRIBE",
-    "requestId": "req_sub_001",
+    "requestId": "req_c1d2e3f4g5h6i7j8",
     "timestamp": 1704067200000,
     "data": {
         "subscriptions": [
@@ -2665,7 +2694,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ERROR",
-    "requestId": "req_1703123456789_004",
+    "requestId": "req_y5z6a7b8c9d0e1f2",
     "timestamp": 1703123456790,
     "data": {
         "errorCode": "INVALID_SYMBOL",

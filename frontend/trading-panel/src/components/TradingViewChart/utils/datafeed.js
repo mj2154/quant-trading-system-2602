@@ -95,6 +95,10 @@ const pendingRequests = new Map();
 // 挂起的请求队列（WebSocket未连接时缓存）
 const pendingRequestsQueue = [];
 
+// 请求历史记录（用于调试：追踪请求生命周期）
+// requestId -> { type, createdAt, ackedAt, completedAt, deletedAt, deleteReason }
+const requestHistory = new Map();
+
 /**
  * 生成唯一请求ID
  */
@@ -108,7 +112,15 @@ function generateRequestId() {
  */
 function handleRequestTimeout(requestId) {
     const request = pendingRequests.get(requestId);
+    const history = requestHistory.get(requestId);
+
     if (!request) return;
+
+    // 记录超时原因
+    if (history) {
+        history.deletedAt = Date.now();
+        history.deleteReason = 'TIMEOUT';
+    }
 
     // 如果请求已完成（已收到响应），忽略超时
     if (request.state === RequestState.COMPLETED) {
@@ -138,7 +150,7 @@ function handleRequestTimeout(requestId) {
     request.state = RequestState.COMPLETED;
     request.timedOut = true;
 
-    console.log(`⏱️ 请求超时: ${requestId}, 延迟响应将被忽略`);
+    console.log(`⏱️ 请求超时: ${requestId}, 类型: ${request.type}, 延迟响应将被忽略`);
 }
 
 /**
@@ -148,9 +160,18 @@ function handleRequestTimeout(requestId) {
  */
 function handleAck(requestId, messageData) {
     const request = pendingRequests.get(requestId);
+    const history = requestHistory.get(requestId);
+
     if (!request) {
-        console.warn(`⚠️ 收到未知请求的 ACK: ${requestId}`);
+        // 从历史记录中获取信息用于调试
+        const historyInfo = history ? `, 创建时间: ${new Date(history.createdAt).toISOString()}, 类型: ${history.type}` : '';
+        console.warn(`⚠️ 收到未知请求的 ACK: ${requestId}${historyInfo}`);
         return;
+    }
+
+    // 记录ACK时间
+    if (history) {
+        history.ackedAt = Date.now();
     }
 
     // 更新状态为已确认
@@ -161,7 +182,7 @@ function handleAck(requestId, messageData) {
         request.ackCallback(messageData);
     }
 
-    console.log(`✅ ACK 已处理: ${requestId}`);
+    console.log(`✅ ACK 已处理: ${requestId}, 类型: ${request.type}`);
 }
 
 /**
@@ -172,10 +193,18 @@ function handleAck(requestId, messageData) {
  */
 function handleSuccess(requestId, messageData, dataType) {
     const request = pendingRequests.get(requestId);
+    const history = requestHistory.get(requestId);
+
     if (!request) {
-        // 请求可能已超时被标记为完成，但仍在pendingRequests中
-        console.warn(`⚠️ 收到未知请求的 Success: ${requestId}`);
+        // 从历史记录中获取信息用于调试
+        const historyInfo = history ? `, 创建时间: ${new Date(history.createdAt).toISOString()}, 类型: ${history.type}, 删除原因: ${history.deleteReason || '未知'}` : '';
+        console.warn(`⚠️ 收到未知请求的 Success: ${requestId}${historyInfo}`);
         return;
+    }
+
+    // 记录完成时间
+    if (history) {
+        history.completedAt = Date.now();
     }
 
     // 如果请求已超时完成，忽略此响应
@@ -215,10 +244,19 @@ function handleSuccess(requestId, messageData, dataType) {
  */
 function handleError(requestId, messageData) {
     const request = pendingRequests.get(requestId);
+    const history = requestHistory.get(requestId);
+
     if (!request) {
-        // 请求可能已超时被标记为完成
-        console.warn(`⚠️ 收到未知请求的 Error: ${requestId}`);
+        // 从历史记录中获取信息用于调试
+        const historyInfo = history ? `, 创建时间: ${new Date(history.createdAt).toISOString()}, 类型: ${history.type}, 删除原因: ${history.deleteReason || '未知'}` : '';
+        console.warn(`⚠️ 收到未知请求的 Error: ${requestId}${historyInfo}`);
         return;
+    }
+
+    // 记录完成时间
+    if (history) {
+        history.completedAt = Date.now();
+        history.deleteReason = 'handleError';
     }
 
     // 如果请求已超时完成，忽略此响应
@@ -388,6 +426,17 @@ function sendWSRequest(data, resultCallback, ackCallback = null, timeout = 10000
         timeout: timeout
     });
 
+    // 记录请求历史（用于调试）
+    requestHistory.set(requestId, {
+        type: data.type,
+        symbol: data.symbol || null,
+        createdAt: Date.now(),
+        ackedAt: null,
+        completedAt: null,
+        deletedAt: null,
+        deleteReason: null
+    });
+
     console.log(`📤 发送请求: ${requestId}, type: ${data.type}, symbol: ${data.symbol || 'N/A'}`);
 
     // 发送消息
@@ -395,7 +444,14 @@ function sendWSRequest(data, resultCallback, ackCallback = null, timeout = 10000
         ws.send(JSON.stringify(message));
     } catch (error) {
         clearTimeout(timeoutId);
+        // 记录删除原因
+        const history = requestHistory.get(requestId);
+        if (history) {
+            history.deletedAt = Date.now();
+            history.deleteReason = 'SEND_FAILED';
+        }
         pendingRequests.delete(requestId);
+        console.error(`❌ 发送请求失败: ${requestId}, 原因: ${error.message}`);
         // v2.0 协议: 错误通过 type: 'ERROR' 传递，但本地错误仍使用 action 保持兼容
         resultCallback({
             action: 'error',
@@ -686,6 +742,12 @@ function connectWebSocket(isManualReconnect = false) {
             // 清理所有挂起的请求
             if (pendingRequests.size > 0) {
                 pendingRequests.forEach((request, requestId) => {
+                    // 记录删除原因
+                    const history = requestHistory.get(requestId);
+                    if (history) {
+                        history.deletedAt = Date.now();
+                        history.deleteReason = 'WS_RECONNECT';
+                    }
                     // 清理超时定时器
                     if (request.timeoutId) {
                         clearTimeout(request.timeoutId);
@@ -987,24 +1049,16 @@ export default {
 
         subscriptions.set(subscriberUID, subscriptionInfo);
 
-        connectWebSocket()
-            .then(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    const subscribeMessage = {
-                        protocolVersion: "2.0",
-                        type: "SUBSCRIBE",
-                        requestId: generateRequestId(),
-                        timestamp: Date.now(),
-                        data: {
-                            subscriptions: [subscriptionKey]
-                        }
-                    };
-                    ws.send(JSON.stringify(subscribeMessage));
-                }
-            })
-            .catch(() => {
-                // 静默处理 WebSocket 连接失败
-            });
+        // 使用 sendWSRequest 发送订阅请求，以便正确追踪请求生命周期
+        sendWSRequest({
+            type: "SUBSCRIBE",
+            subscriptions: [subscriptionKey]
+        }, (response) => {
+            // 订阅响应处理（通常不需要，因为订阅是持续推送）
+            if (response.type === 'ERROR') {
+                console.warn(`⚠️ 订阅失败: ${subscriptionKey}`, response.error);
+            }
+        });
     },
 
     unsubscribeBars: (subscriberUID) => {
@@ -1030,22 +1084,16 @@ export default {
         const klineSubscription = subscriptionInfo.subscriptionKey;
         console.log('🗑️  准备取消 K 线订阅:', klineSubscription);
 
-        // 直接发送取消订阅请求
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            const unsubscribeMessage = {
-                protocolVersion: "2.0",
-                type: "UNSUBSCRIBE",
-                requestId: generateRequestId(),
-                timestamp: Date.now(),
-                data: {
-                    subscriptions: [klineSubscription]
-                }
-            };
-            console.log('📤 发送取消 K 线订阅 WebSocket 消息:', unsubscribeMessage);
-            ws.send(JSON.stringify(unsubscribeMessage));
-        } else {
-            console.log('⚠️  WebSocket 未连接，跳过取消 K 线订阅消息发送');
-        }
+        // 使用 sendWSRequest 发送取消订阅请求，以便正确追踪请求生命周期
+        sendWSRequest({
+            type: "UNSUBSCRIBE",
+            subscriptions: [klineSubscription]
+        }, (response) => {
+            // 取消订阅响应处理
+            if (response.type === 'ERROR') {
+                console.warn(`⚠️ 取消订阅失败: ${klineSubscription}`, response.error);
+            }
+        });
 
         subscriptions.delete(subscriberUID);
         console.log('✅ 清理本地 K 线订阅记录完成，剩余订阅:', Array.from(subscriptions.keys()));
@@ -1123,19 +1171,17 @@ export default {
         });
 
         // 只有当需要真正取消时才发送WebSocket消息
+        // 使用 sendWSRequest 发送取消订阅请求，以便正确追踪请求生命周期
         if (subscriptionsToRemove.length > 0) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                const unsubscribeMessage = {
-                    protocolVersion: "2.0",
-                    type: "UNSUBSCRIBE",
-                    requestId: generateRequestId(),
-                    timestamp: Date.now(),
-                    data: {
-                        subscriptions: subscriptionsToRemove
-                    }
-                };
-                ws.send(JSON.stringify(unsubscribeMessage));
-            }
+            sendWSRequest({
+                type: "UNSUBSCRIBE",
+                subscriptions: subscriptionsToRemove
+            }, (response) => {
+                // 取消订阅响应处理
+                if (response.type === 'ERROR') {
+                    console.warn(`⚠️ 取消订阅报价失败: ${subscriptionsToRemove.join(', ')}`, response.error);
+                }
+            });
         }
 
         // 清理订阅记录
@@ -1196,22 +1242,17 @@ export default {
         });
 
         // 只有当有新订阅时才发送WebSocket消息
+        // 使用 sendWSRequest 发送订阅请求，以便正确追踪请求生命周期
         if (newSubscriptions.length > 0) {
-            connectWebSocket()
-                .then(() => {
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        const subscribeMessage = {
-                            protocolVersion: "2.0",
-                            type: "SUBSCRIBE",
-                            requestId: generateRequestId(),
-                            timestamp: Date.now(),
-                            data: {
-                                subscriptions: newSubscriptions
-                            }
-                        };
-                        ws.send(JSON.stringify(subscribeMessage));
-                    }
-                });
+            sendWSRequest({
+                type: "SUBSCRIBE",
+                subscriptions: newSubscriptions
+            }, (response) => {
+                // 订阅响应处理（通常不需要，因为订阅是持续推送的）
+                if (response.type === 'ERROR') {
+                    console.warn(`⚠️ 订阅报价失败: ${newSubscriptions.join(', ')}`, response.error);
+                }
+            });
         }
     },
 
@@ -1221,6 +1262,34 @@ export default {
      */
     setChartApi: (chartWidget) => {
         setChartApi(chartWidget);
+    },
+
+    /**
+     * 调试函数：获取请求历史记录
+     * 在浏览器控制台调用 window.datafeed.getRequestHistory() 查看
+     * @returns {Array} 请求历史数组
+     */
+    getRequestHistory: () => {
+        const history = Array.from(requestHistory.entries()).map(([id, record]) => ({
+            requestId: id,
+            ...record,
+            createdAt: record.createdAt ? new Date(record.createdAt).toISOString() : null,
+            ackedAt: record.ackedAt ? new Date(record.ackedAt).toISOString() : null,
+            completedAt: record.completedAt ? new Date(record.completedAt).toISOString() : null,
+            deletedAt: record.deletedAt ? new Date(record.deletedAt).toISOString() : null,
+        }));
+        console.log('📋 请求历史记录:', history);
+        console.log(`共 ${history.length} 条记录，pendingRequests: ${pendingRequests.size}`);
+        return history;
+    },
+
+    /**
+     * 调试函数：清空请求历史记录
+     * 在浏览器控制台调用 window.datafeed.clearRequestHistory() 使用
+     */
+    clearRequestHistory: () => {
+        requestHistory.clear();
+        console.log('✅ 请求历史记录已清空');
     }
 
 };

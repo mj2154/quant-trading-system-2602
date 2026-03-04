@@ -16,9 +16,10 @@ tasks 表字段：
 """
 
 import json
+from datetime import UTC, datetime
+from typing import Any
+
 import asyncpg
-from datetime import datetime, timezone
-from typing import Optional, Any
 
 
 class TasksRepository:
@@ -37,12 +38,14 @@ class TasksRepository:
         self,
         task_type: str,
         payload: dict[str, Any],
+        request_id: str | None = None,
     ) -> int:
         """创建任务并返回任务ID
 
         Args:
             task_type: 任务类型 (get_klines, get_server_time, get_quotes)
             payload: 任务参数
+            request_id: 请求ID（用于关联请求和响应）
 
         Returns:
             任务ID
@@ -50,18 +53,30 @@ class TasksRepository:
         Raises:
             Exception: 创建失败
         """
-        query = """
-            INSERT INTO tasks (type, payload)
-            VALUES ($1, $2)
-            RETURNING id
-        """
         import json
-        payload_json = json.dumps(payload)
-        async with self._pool.acquire() as conn:
-            task_id = await conn.fetchval(query, task_type, payload_json)
+
+        # 构建插入字段
+        if request_id:
+            query = """
+                INSERT INTO tasks (type, request_id, payload)
+                VALUES ($1, $2, $3)
+                RETURNING id
+            """
+            payload_json = json.dumps(payload)
+            async with self._pool.acquire() as conn:
+                task_id = await conn.fetchval(query, task_type, request_id, payload_json)
+        else:
+            query = """
+                INSERT INTO tasks (type, payload)
+                VALUES ($1, $2)
+                RETURNING id
+            """
+            payload_json = json.dumps(payload)
+            async with self._pool.acquire() as conn:
+                task_id = await conn.fetchval(query, task_type, payload_json)
         return task_id
 
-    async def get_task(self, task_id: int) -> Optional[dict[str, Any]]:
+    async def get_task(self, task_id: int) -> dict[str, Any] | None:
         """根据ID获取任务
 
         Args:
@@ -106,7 +121,7 @@ class TasksRepository:
             result = await conn.execute(query, result, status, task_id)
         return result != "UPDATE 0"
 
-    async def get_task_result(self, task_id: int) -> Optional[dict[str, Any]]:
+    async def get_task_result(self, task_id: int) -> dict[str, Any] | None:
         """获取任务结果
 
         Args:
@@ -207,8 +222,8 @@ class TasksRepository:
         # interval 已经是标准格式，直接使用
 
         # 转换时间戳为TIMESTAMPTZ
-        from_timestamp = datetime.fromtimestamp(from_time / 1000, tz=timezone.utc)
-        to_timestamp = datetime.fromtimestamp(to_time / 1000, tz=timezone.utc)
+        from_timestamp = datetime.fromtimestamp(from_time / 1000, tz=UTC)
+        to_timestamp = datetime.fromtimestamp(to_time / 1000, tz=UTC)
 
         query = """
             SELECT
@@ -286,8 +301,8 @@ class TasksRepository:
         # interval 已经是标准格式，直接使用
 
         # 转换时间戳
-        from_timestamp = datetime.fromtimestamp(from_time / 1000, tz=timezone.utc)
-        to_timestamp = datetime.fromtimestamp(to_time / 1000, tz=timezone.utc)
+        from_timestamp = datetime.fromtimestamp(from_time / 1000, tz=UTC)
+        to_timestamp = datetime.fromtimestamp(to_time / 1000, tz=UTC)
 
         query = """
             SELECT

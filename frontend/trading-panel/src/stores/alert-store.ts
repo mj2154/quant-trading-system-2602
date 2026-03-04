@@ -129,12 +129,10 @@ export const DEFAULT_PARAMS = {
 
 /**
  * requestId 生成器
+ * 格式: req_a1b2c3d4e5f6g7h8
  */
-let requestIdCounter = 0
-function generateRequestId(prefix: string = 'req'): string {
-  const timestamp = Date.now()
-  requestIdCounter = (requestIdCounter + 1) % 10000
-  return `${prefix}_${timestamp}_${requestIdCounter}`
+function generateRequestId(): string {
+  return `req_${crypto.randomUUID().substring(0, 16)}`
 }
 
 /**
@@ -250,7 +248,7 @@ export const useAlertStore = defineStore('alert', () => {
     return {
       protocolVersion: '2.0',
       type: typeMap[dataType] || dataType,
-      requestId: generateRequestId('req_alert'),
+      requestId: generateRequestId(),
       timestamp: Date.now(),
       data,
     }

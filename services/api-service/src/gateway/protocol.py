@@ -2,6 +2,7 @@
 消息协议封装
 
 提供 WebSocket 消息的解析和格式化功能。
+使用 Pydantic 模型进行数据验证，确保符合协议规范。
 
 命名规范：
 - data: 通用数据容器
@@ -9,16 +10,24 @@
 - payload: 数据库任务表的载荷字段
 """
 
-import json
+import time
 from typing import Any
 
-PROTOCOL_VERSION = "2.0"
+from ..models.protocol.ws_message import (
+    MessageSuccess,
+    MessageError,
+    MessageRequest,
+    KlinesRequest,
+    SubscribeRequest,
+    UnsubscribeRequest,
+)
+from ..models.protocol.constants import PROTOCOL_VERSION
 
 
 def parse_message(raw: dict[str, Any]) -> dict[str, Any]:
     """解析客户端消息
 
-    验证必要字段并返回标准化的请求格式。
+    使用 Pydantic 模型验证必要字段并返回标准化的请求格式。
 
     Args:
         raw: 原始消息字典
@@ -29,28 +38,76 @@ def parse_message(raw: dict[str, Any]) -> dict[str, Any]:
     Raises:
         ValueError: 消息格式无效
     """
-    # 验证协议版本
+    # 先用基础验证检查必要字段
     version = raw.get("protocolVersion") or raw.get("protocol_version")
     if version and version != PROTOCOL_VERSION:
         raise ValueError(f"Unsupported protocol version: {version}")
 
-    # 验证消息类型（严格遵循07-websocket-protocol.md）
     msg_type = raw.get("type")
     if not msg_type:
         raise ValueError("Missing required field: type")
 
-    # 验证时间戳
     timestamp = raw.get("timestamp")
     if not timestamp:
         raise ValueError("Missing required field: timestamp")
 
-    return {
-        "protocolVersion": version or PROTOCOL_VERSION,
-        "type": msg_type,  # 遵循07-websocket-protocol.md规范：使用type字段
-        "requestId": raw.get("requestId"),
-        "timestamp": timestamp,
-        "data": raw.get("data", {}),
-    }
+    # 使用 Pydantic 模型验证完整消息结构
+    try:
+        validated = MessageRequest.model_validate({
+            "protocolVersion": version or PROTOCOL_VERSION,
+            "type": msg_type,
+            "requestId": raw.get("requestId", ""),
+            "timestamp": timestamp,
+            "data": raw.get("data", {}),
+        })
+        return validated.model_dump(by_alias=True)
+    except Exception as e:
+        raise ValueError(f"Invalid message format: {e}")
+
+
+def validate_klines_request(data: dict[str, Any]) -> KlinesRequest:
+    """验证 K线数据请求
+
+    Args:
+        data: 请求数据
+
+    Returns:
+        验证后的 KlinesRequest 模型
+
+    Raises:
+        ValidationError: 验证失败
+    """
+    return KlinesRequest.model_validate(data)
+
+
+def validate_subscribe_request(data: dict[str, Any]) -> SubscribeRequest:
+    """验证订阅请求
+
+    Args:
+        data: 请求数据
+
+    Returns:
+        验证后的 SubscribeRequest 模型
+
+    Raises:
+        ValidationError: 验证失败
+    """
+    return SubscribeRequest.model_validate(data)
+
+
+def validate_unsubscribe_request(data: dict[str, Any]) -> UnsubscribeRequest:
+    """验证取消订阅请求
+
+    Args:
+        data: 请求数据
+
+    Returns:
+        验证后的 UnsubscribeRequest 模型
+
+    Raises:
+        ValidationError: 验证失败
+    """
+    return UnsubscribeRequest.model_validate(data)
 
 
 def format_success_response(
@@ -59,6 +116,8 @@ def format_success_response(
     response_type: str = "SUCCESS",
 ) -> dict[str, Any]:
     """格式化成功响应
+
+    使用 Pydantic 模型确保响应符合协议规范。
 
     严格遵循07-websocket-protocol.md规范：
     - type 字段使用具体数据类型（如 KLINES_DATA, CONFIG_DATA 等）
@@ -72,13 +131,14 @@ def format_success_response(
     Returns:
         响应消息字典
     """
-    return {
-        "protocolVersion": PROTOCOL_VERSION,
-        "type": response_type,  # 使用具体数据类型，非 "success"
-        "requestId": request_id,
-        "timestamp": _timestamp(),
-        "data": data,
-    }
+    response = MessageSuccess(
+        type=response_type,
+        request_id=request_id or "",
+        protocol_version=PROTOCOL_VERSION,
+        timestamp=_timestamp_ms(),
+        data=data,
+    )
+    return response.model_dump(by_alias=True)
 
 
 def format_error_response(
@@ -87,6 +147,8 @@ def format_error_response(
     error_message: str,
 ) -> dict[str, Any]:
     """格式化错误响应
+
+    使用 Pydantic 模型确保响应符合协议规范。
 
     严格遵循07-websocket-protocol.md规范：
     - type 字段值为 "ERROR"
@@ -99,16 +161,17 @@ def format_error_response(
     Returns:
         错误响应字典
     """
-    return {
-        "protocolVersion": PROTOCOL_VERSION,
-        "type": "ERROR",  # 遵循07-websocket-protocol.md规范
-        "requestId": request_id,
-        "timestamp": _timestamp(),
-        "data": {
+    response = MessageError(
+        type="ERROR",
+        request_id=request_id or "",
+        protocol_version=PROTOCOL_VERSION,
+        timestamp=_timestamp_ms(),
+        data={
             "errorCode": error_code,
             "errorMessage": error_message,
         },
-    }
+    )
+    return response.model_dump(by_alias=True)
 
 
 def format_update_message(
@@ -117,6 +180,8 @@ def format_update_message(
     subscription_key: str,
 ) -> dict[str, Any]:
     """格式化更新消息（服务器推送）
+
+    使用 Pydantic 模型确保响应符合协议规范。
 
     严格遵循07-websocket-protocol.md规范：
     - type 字段值为 "UPDATE"
@@ -131,16 +196,19 @@ def format_update_message(
     Returns:
         更新消息字典
     """
-    return {
-        "protocolVersion": PROTOCOL_VERSION,
-        "type": "UPDATE",  # 遵循07-websocket-protocol.md规范
-        "timestamp": _timestamp_ms(),
-        "data": {
+    from ..models.protocol.ws_message import MessageUpdate
+
+    response = MessageUpdate(
+        type="UPDATE",
+        protocol_version=PROTOCOL_VERSION,
+        timestamp=_timestamp_ms(),
+        data={
             "eventType": event_type,
             "subscriptionKey": subscription_key,
-            "content": content,  # 使用 content 而非 payload
+            "content": content,
         },
-    }
+    )
+    return response.model_dump(by_alias=True)
 
 
 def format_ping_message() -> dict[str, Any]:
@@ -152,7 +220,7 @@ def format_ping_message() -> dict[str, Any]:
     return {
         "protocolVersion": PROTOCOL_VERSION,
         "type": "PING",
-        "timestamp": _timestamp(),
+        "timestamp": _timestamp_ms(),
     }
 
 
@@ -165,17 +233,10 @@ def format_pong_message() -> dict[str, Any]:
     return {
         "protocolVersion": PROTOCOL_VERSION,
         "type": "PONG",
-        "timestamp": _timestamp(),
+        "timestamp": _timestamp_ms(),
     }
-
-
-def _timestamp() -> int:
-    """获取当前时间戳（秒）"""
-    import time
-    return int(time.time())
 
 
 def _timestamp_ms() -> int:
     """获取当前时间戳（毫秒）"""
-    import time
     return int(time.time() * 1000)

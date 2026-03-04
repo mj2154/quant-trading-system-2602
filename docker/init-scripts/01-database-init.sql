@@ -84,6 +84,10 @@ CREATE TABLE tasks (
     -- 任务类型: get_klines, get_server_time, get_quotes, system.fetch_exchange_info
     type VARCHAR(50) NOT NULL,
 
+    -- 请求ID（前端生成，用于关联请求和响应）
+    -- 提升到顶层字段，可建索引优化查询
+    request_id VARCHAR(50),
+
     -- 任务参数（JSON格式）
     payload JSONB NOT NULL DEFAULT '{}',
 
@@ -101,6 +105,7 @@ CREATE TABLE tasks (
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks (type);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);
+CREATE INDEX IF NOT EXISTS idx_tasks_request_id ON tasks (request_id);  -- request_id 索引
 CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks (created_at DESC);
 
 -- 转换为 Hypertable
@@ -237,8 +242,9 @@ CREATE INDEX IF NOT EXISTS idx_exchange_info_market ON exchange_info (market_typ
 
 -- -----------------------------------------------------------------------------
 -- 3.5 order_tasks 订单任务表
--- 设计: 完全复用 tasks 表结构，仅表名和保留策略不同
+-- 设计: 复用 tasks 表结构，request_id 提升到顶层字段
 -- INSERT 触发 order_task_new 通知
+-- UPDATE 触发 order_task_completed / order_task_failed 通知
 -- 数据保留: 永久保留（用于分析和追溯）
 -- 注意: created_at 必须是 NOT NULL 才能转换为 Hypertable
 -- 参考文档: docs/backend/design/04-trading-orders.md
@@ -248,6 +254,11 @@ CREATE TABLE order_tasks (
 
     -- 任务类型: order.create, order.cancel, order.query
     type VARCHAR(50) NOT NULL,
+
+    -- 请求ID（前端生成，用于关联请求和响应）
+    -- 贯穿整个数据流：前端 → API → 币安 → 结果推送
+    -- 提升到顶层字段，可建索引优化查询
+    request_id VARCHAR(50),
 
     -- 任务参数（JSON格式）
     payload JSONB NOT NULL DEFAULT '{}',
@@ -272,6 +283,7 @@ ALTER TABLE order_tasks ADD PRIMARY KEY (id, created_at);
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_order_tasks_status ON order_tasks (status);
 CREATE INDEX IF NOT EXISTS idx_order_tasks_type ON order_tasks (type);
+CREATE INDEX IF NOT EXISTS idx_order_tasks_request_id ON order_tasks (request_id);  -- request_id 索引
 CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, status);
 
 -- -----------------------------------------------------------------------------
@@ -417,6 +429,7 @@ BEGIN
         'data', jsonb_build_object(
             'id', NEW.id,
             'type', NEW.type,
+            'request_id', NEW.request_id,
             'payload', NEW.payload,
             'status', NEW.status,
             'created_at', NEW.created_at::TEXT
@@ -450,6 +463,7 @@ BEGIN
         'data', jsonb_build_object(
             'id', NEW.id,
             'type', NEW.type,
+            'request_id', NEW.request_id,
             'payload', NEW.payload,
             'result', NEW.result,
             'status', NEW.status,
@@ -637,12 +651,10 @@ BEGIN
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
-            'task_type', NEW.task_type,
-            'client_order_id', NEW.client_order_id,
-            'market_type', NEW.market_type,
+            'type', NEW.type,
+            'request_id', NEW.request_id,
             'payload', NEW.payload,
             'status', NEW.status,
-            'binance_order_id', NEW.binance_order_id,
             'created_at', NEW.created_at::TEXT
         )
     )::TEXT);
@@ -671,13 +683,11 @@ BEGIN
         'timestamp', NOW()::TEXT,
         'data', jsonb_build_object(
             'id', NEW.id,
-            'task_type', NEW.task_type,
-            'client_order_id', NEW.client_order_id,
-            'market_type', NEW.market_type,
+            'type', NEW.type,
+            'request_id', NEW.request_id,
             'payload', NEW.payload,
             'result', NEW.result,
             'status', NEW.status,
-            'binance_order_id', NEW.binance_order_id,
             'updated_at', NEW.updated_at::TEXT
         )
     )::TEXT);

@@ -23,10 +23,19 @@ from typing import Any
 
 from ..db.alert_signal_repository import AlertSignalRepository
 from ..db.exchange_info_repository import ExchangeInfoRepository
+from ..db.order_tasks_repository import OrderTasksRepository
 from ..db.strategy_signals_repository import StrategySignalsRepository
 from ..db.tasks_repository import TasksRepository
+from ..models.protocol.constants import PROTOCOL_VERSION
+from ..models.protocol.ws_message import MessageError, MessageSuccess
 from ..models.trading.kline_models import KlineBar, KlineBars
+from ..models.trading.order_models import (
+    CancelOrderRequest,
+    CreateOrderRequest,
+    GetOrderRequest,
+)
 from ..protocol.messages import MessageAck
+from ..utils.symbol import parse_semantic_symbol
 from .alert_handler import AlertHandler
 from .client_manager import ClientManager
 from .subscription_manager import SubscriptionManager
@@ -56,6 +65,9 @@ class TaskRouter:
         # 新任务仓储（基于 tasks 表）
         self._tasks_repo: TasksRepository | None = None
 
+        # 订单任务仓储（基于 order_tasks 表）
+        self._order_tasks_repo: OrderTasksRepository | None = None
+
         # 交易所信息仓储
         self._exchange_repo: ExchangeInfoRepository | None = None
 
@@ -69,6 +81,15 @@ class TaskRouter:
             tasks_repo: 新任务仓储实例（基于 tasks 表）
         """
         self._tasks_repo = tasks_repo
+
+    def set_order_tasks_repository(self, order_tasks_repo: OrderTasksRepository) -> None:
+        """设置订单任务仓储实例
+
+        Args:
+            order_tasks_repo: 订单任务仓储实例（基于 order_tasks 表）
+        """
+        self._order_tasks_repo = order_tasks_repo
+        logger.info("OrderTasksRepository set in TaskRouter")
 
     def set_exchange_info_repository(self, exchange_repo: ExchangeInfoRepository) -> None:
         """设置交易所信息仓储实例
@@ -168,7 +189,9 @@ class TaskRouter:
         # 严格遵循07-websocket-protocol.md：type字段直接是操作类型
         msg_type = request.get("type", "GET")
         data = request.get("data", {})
-        request_id = request.get("requestId")
+        request_id = request.get("request_id")
+
+        logger.info(f"handle: msg_type={msg_type}, request_id={request_id}, request={request}")
 
         # ========== 需要三阶段模式的请求类型 ==========
         # 严格遵循07-websocket-protocol.md：所有请求都先返回 ACK，确认后再处理
@@ -345,18 +368,60 @@ class TaskRouter:
             await self._client_manager.send(client_id, result)
             return None
 
+        # ========== 订单交易请求（严格遵循 07-websocket-protocol.md：三阶段模式）==========
+        # 订单交易请求 - 三阶段模式
+        elif msg_type == "CREATE_ORDER":
+            # 第一阶段：发送 ACK
+            await self._client_manager.send(client_id, self._create_ack(request_id))
+            # 第二阶段：处理请求
+            result = await self._handle_create_order(data, request_id)
+            # 第三阶段：发送结果
+            await self._client_manager.send(client_id, result)
+            return None
+
+        elif msg_type == "GET_ORDER":
+            # 第一阶段：发送 ACK
+            await self._client_manager.send(client_id, self._create_ack(request_id))
+            # 第二阶段：处理请求
+            result = await self._handle_get_order(data, request_id)
+            # 第三阶段：发送结果
+            await self._client_manager.send(client_id, result)
+            return None
+
+        elif msg_type == "LIST_ORDERS":
+            # 第一阶段：发送 ACK
+            await self._client_manager.send(client_id, self._create_ack(request_id))
+            # 第二阶段：处理请求
+            result = await self._handle_list_orders(data, request_id)
+            # 第三阶段：发送结果
+            await self._client_manager.send(client_id, result)
+            return None
+
+        elif msg_type == "CANCEL_ORDER":
+            # 第一阶段：发送 ACK
+            await self._client_manager.send(client_id, self._create_ack(request_id))
+            # 第二阶段：处理请求
+            result = await self._handle_cancel_order(data, request_id)
+            # 第三阶段：发送结果
+            await self._client_manager.send(client_id, result)
+            return None
+
+        elif msg_type == "GET_OPEN_ORDERS":
+            # 第一阶段：发送 ACK
+            await self._client_manager.send(client_id, self._create_ack(request_id))
+            # 第二阶段：处理请求
+            result = await self._handle_get_open_orders(data, request_id)
+            # 第三阶段：发送结果
+            await self._client_manager.send(client_id, result)
+            return None
+
         # ========== 未知类型 ==========
         else:
-            return {
-                "protocolVersion": "2.0",
-                "type": "ERROR",
-                "requestId": request_id,
-                "timestamp": self._timestamp(),
-                "data": {
-                    "errorCode": "UNKNOWN_TYPE",
-                    "errorMessage": f"Unknown type: {msg_type}",
-                },
-            }
+            return self._error_response(
+                error_code="UNKNOWN_TYPE",
+                error_message=f"Unknown type: {msg_type}",
+                request_id=request_id,
+            )
 
     # ========== 直接查询处理方法（遵循07-websocket-protocol.md：顶层type是具体操作）==========
 
@@ -669,11 +734,31 @@ class TaskRouter:
             )
 
         try:
+            # 使用 SemanticSymbol 解析 symbol，自动判断市场类型
+            parsed = parse_semantic_symbol(symbol)
+            # 根据是否有合约类型判断市场类型
+            market_type = "FUTURES" if parsed.is_futures else "SPOT"
+
             symbol_info = await self._exchange_repo.resolve_symbol(
                 symbol=symbol,
-                exchange="BINANCE",
-                market_type="SPOT",
+                exchange=parsed.exchange,
+                market_type=market_type,
             )
+
+            # 如果在指定市场找不到，尝试在另一个市场查找
+            if symbol_info is None:
+                fallback_market = "SPOT" if market_type == "FUTURES" else "FUTURES"
+                symbol_info = await self._exchange_repo.resolve_symbol(
+                    symbol=symbol,
+                    exchange=parsed.exchange,
+                    market_type=fallback_market,
+                )
+
+            if symbol_info is None:
+                return self._error_response(
+                    error_code="SYMBOL_NOT_FOUND",
+                    error_message=f"Symbol not found: {symbol}",
+                )
 
             return self._response(
                 msg_type="SYMBOL_DATA",
@@ -682,6 +767,13 @@ class TaskRouter:
                     "type": "resolve_symbol",
                     "symbol": symbol_info,
                 },
+            )
+        except ValueError as e:
+            # 处理无效 symbol 格式
+            logger.error(f"Symbol 格式错误: {e}")
+            return self._error_response(
+                error_code="INVALID_SYMBOL_FORMAT",
+                error_message=f"无效的 symbol 格式: {str(e)}",
             )
         except Exception as e:
             logger.error(f"解析交易对失败: {e}")
@@ -830,6 +922,327 @@ class TaskRouter:
             },
         )
 
+    # ========== 订单交易处理方法 ==========
+
+    async def _handle_create_order(
+        self, data: dict[str, Any], request_id: str | None
+    ) -> dict[str, Any]:
+        """处理创建订单请求
+
+        使用 Pydantic 模型验证订单数据，确保符合协议规范。
+        将订单请求写入 order_tasks 表，触发 binance-service 执行。
+
+        Args:
+            data: 请求数据
+            request_id: 请求 ID
+
+        Returns:
+            订单数据响应
+        """
+        if self._order_tasks_repo is None:
+            return self._error_response(
+                error_code="ORDER_REPO_NOT_INITIALIZED",
+                error_message="Order tasks repository not initialized",
+            )
+
+        # 使用 Pydantic 模型验证订单数据
+        try:
+            validated_order = CreateOrderRequest.model_validate(data)
+        except Exception as e:
+            return self._error_response(
+                error_code="INVALID_PARAMETERS",
+                error_message=f"Invalid order data: {str(e)}",
+                request_id=request_id,
+            )
+
+        try:
+            # 创建订单任务
+            task_id = await self._order_tasks_repo.create_order_task(
+                task_type="order.create",
+                payload={
+                    "requestId": request_id,
+                    **validated_order.model_dump(),
+                },
+            )
+
+            logger.info(
+                f"Created order task: id={task_id}, symbol={validated_order.symbol}, "
+                f"side={validated_order.side}, type={validated_order.type}"
+            )
+
+            # 注册任务与客户端的映射（用于订单完成后推送结果）
+            self._client_manager.register_task(task_id, client_id)
+
+            # 返回处理中状态（实际结果由 binance-service 推送）
+            return self._response(
+                msg_type="ORDER_DATA",
+                request_id=request_id,
+                data={
+                    "type": "order",
+                    "status": "PENDING",
+                    "taskId": task_id,
+                    "clientOrderId": validated_order.clientOrderId,
+                    "symbol": validated_order.symbol,
+                    "side": validated_order.side,
+                    "orderType": validated_order.type,
+                },
+            )
+        except Exception as e:
+            logger.error(f"创建订单任务失败: {e}")
+            return self._error_response(
+                error_code="ORDER_CREATE_FAILED",
+                error_message=f"Failed to create order: {str(e)}",
+                request_id=request_id,
+            )
+
+    async def _handle_get_order(
+        self, data: dict[str, Any], request_id: str | None
+    ) -> dict[str, Any]:
+        """处理查询单个订单请求
+
+        使用 Pydantic 模型验证查询参数。
+
+        Args:
+            data: 请求数据
+            request_id: 请求 ID
+
+        Returns:
+            订单数据响应
+        """
+        if self._order_tasks_repo is None:
+            return self._error_response(
+                error_code="ORDER_REPO_NOT_INITIALIZED",
+                error_message="Order tasks repository not initialized",
+                request_id=request_id,
+            )
+
+        # 使用 Pydantic 模型验证查询参数
+        try:
+            validated_query = GetOrderRequest.model_validate(data)
+        except Exception as e:
+            return self._error_response(
+                error_code="INVALID_PARAMETERS",
+                error_message=f"Invalid query parameters: {str(e)}",
+                request_id=request_id,
+            )
+
+        # 获取 clientOrderId（可以是 None，但验证器会确保至少有一个）
+        client_order_id = validated_query.clientOrderId
+
+        try:
+            # 查询订单任务
+            task = await self._order_tasks_repo.find_by_request_id(
+                request_id=client_order_id,
+                task_type="order.create",
+            )
+
+            if task is None:
+                return self._error_response(
+                    error_code="ORDER_NOT_FOUND",
+                    error_message=f"Order not found: {client_order_id}",
+                    request_id=request_id,
+                )
+
+            return self._response(
+                msg_type="ORDER_DATA",
+                request_id=request_id,
+                data={
+                    "type": "order",
+                    "taskId": task.get("id"),
+                    "status": task.get("status"),
+                    "result": task.get("result"),
+                    "payload": task.get("payload"),
+                },
+            )
+        except Exception as e:
+            logger.error(f"查询订单失败: {e}")
+            return self._error_response(
+                error_code="ORDER_QUERY_FAILED",
+                error_message=f"Failed to query order: {str(e)}",
+                request_id=request_id,
+            )
+
+    async def _handle_list_orders(
+        self, data: dict[str, Any], request_id: str | None
+    ) -> dict[str, Any]:
+        """处理查询订单列表请求
+
+        Args:
+            data: 请求数据
+            request_id: 请求 ID
+
+        Returns:
+            订单列表响应
+        """
+        if self._order_tasks_repo is None:
+            return self._error_response(
+                error_code="ORDER_REPO_NOT_INITIALIZED",
+                error_message="Order tasks repository not initialized",
+            )
+
+        try:
+            # 解析过滤参数
+            task_type = data.get("taskType")  # order.create, order.cancel, order.query
+            status = data.get("status")
+            symbol = data.get("symbol")
+            limit = data.get("limit", 100)
+            offset = data.get("offset", 0)
+
+            # 查询订单任务列表
+            tasks = await self._order_tasks_repo.list_order_tasks(
+                task_type=task_type,
+                status=status,
+                symbol=symbol,
+                limit=limit,
+                offset=offset,
+            )
+
+            orders = []
+            for task in tasks:
+                orders.append({
+                    "taskId": task.get("id"),
+                    "type": task.get("type"),
+                    "status": task.get("status"),
+                    "payload": task.get("payload"),
+                    "result": task.get("result"),
+                    "createdAt": task.get("created_at"),
+                    "updatedAt": task.get("updated_at"),
+                })
+
+            return self._response(
+                msg_type="ORDER_LIST_DATA",
+                request_id=request_id,
+                data={
+                    "type": "order_list",
+                    "orders": orders,
+                    "count": len(orders),
+                },
+            )
+        except Exception as e:
+            logger.error(f"查询订单列表失败: {e}")
+            return self._error_response(
+                error_code="ORDER_LIST_FAILED",
+                error_message=f"Failed to list orders: {str(e)}",
+            )
+
+    async def _handle_cancel_order(
+        self, data: dict[str, Any], request_id: str | None
+    ) -> dict[str, Any]:
+        """处理取消订单请求
+
+        使用 Pydantic 模型验证取消订单参数。
+
+        Args:
+            data: 请求数据
+            request_id: 请求 ID
+
+        Returns:
+            订单数据响应
+        """
+        if self._order_tasks_repo is None:
+            return self._error_response(
+                error_code="ORDER_REPO_NOT_INITIALIZED",
+                error_message="Order tasks repository not initialized",
+                request_id=request_id,
+            )
+
+        # 使用 Pydantic 模型验证取消订单参数
+        try:
+            validated_cancel = CancelOrderRequest.model_validate(data)
+        except Exception as e:
+            return self._error_response(
+                error_code="INVALID_PARAMETERS",
+                error_message=f"Invalid cancel parameters: {str(e)}",
+                request_id=request_id,
+            )
+
+        client_order_id = validated_cancel.clientOrderId
+
+        try:
+            # 创建取消订单任务
+            task_id = await self._order_tasks_repo.create_order_task(
+                task_type="order.cancel",
+                payload={
+                    "requestId": request_id,
+                    **validated_cancel.model_dump(),
+                },
+            )
+
+            logger.info(f"Created cancel order task: id={task_id}, clientOrderId={client_order_id}")
+
+            return self._response(
+                msg_type="ORDER_DATA",
+                request_id=request_id,
+                data={
+                    "type": "order",
+                    "status": "PENDING",
+                    "taskId": task_id,
+                    "clientOrderId": client_order_id,
+                },
+            )
+        except Exception as e:
+            logger.error(f"创建取消订单任务失败: {e}")
+            return self._error_response(
+                error_code="ORDER_CANCEL_FAILED",
+                error_message=f"Failed to cancel order: {str(e)}",
+                request_id=request_id,
+            )
+
+    async def _handle_get_open_orders(
+        self, data: dict[str, Any], request_id: str | None
+    ) -> dict[str, Any]:
+        """处理查询当前挂单请求
+
+        Args:
+            data: 请求数据
+            request_id: 请求 ID
+
+        Returns:
+            订单列表响应
+        """
+        if self._order_tasks_repo is None:
+            return self._error_response(
+                error_code="ORDER_REPO_NOT_INITIALIZED",
+                error_message="Order tasks repository not initialized",
+            )
+
+        try:
+            # 查询 pending 或 processing 状态的订单
+            tasks = await self._order_tasks_repo.list_order_tasks(
+                task_type="order.create",
+                status="pending",
+                limit=100,
+                offset=0,
+            )
+
+            orders = []
+            for task in tasks:
+                orders.append({
+                    "taskId": task.get("id"),
+                    "type": task.get("type"),
+                    "status": task.get("status"),
+                    "payload": task.get("payload"),
+                    "result": task.get("result"),
+                    "createdAt": task.get("created_at"),
+                    "updatedAt": task.get("updated_at"),
+                })
+
+            return self._response(
+                msg_type="ORDER_LIST_DATA",
+                request_id=request_id,
+                data={
+                    "type": "order_list",
+                    "orders": orders,
+                    "count": len(orders),
+                },
+            )
+        except Exception as e:
+            logger.error(f"查询挂单失败: {e}")
+            return self._error_response(
+                error_code="ORDER_OPEN_LIST_FAILED",
+                error_message=f"Failed to get open orders: {str(e)}",
+            )
+
     def _response(
         self,
         msg_type: str,
@@ -837,6 +1250,8 @@ class TaskRouter:
         data: dict[str, Any],
     ) -> dict[str, Any]:
         """构建成功响应
+
+        使用 Pydantic 模型确保响应符合协议规范。
 
         严格遵循07-websocket-protocol.md规范：
         - 使用 type 字段表示数据类型（如 KLINES_DATA, CONFIG_DATA 等）
@@ -849,13 +1264,14 @@ class TaskRouter:
         Returns:
             响应消息字典
         """
-        return {
-            "protocolVersion": "2.0",
-            "type": msg_type,  # 遵循07-websocket-protocol.md规范
-            "requestId": request_id,
-            "timestamp": self._timestamp(),
-            "data": data,
-        }
+        response = MessageSuccess(
+            type=msg_type,
+            request_id=request_id or "",
+            protocol_version=PROTOCOL_VERSION,
+            timestamp=self._timestamp_ms(),
+            data=data,
+        )
+        return response.model_dump(by_alias=True)
 
     def _error_response(
         self,
@@ -864,6 +1280,8 @@ class TaskRouter:
         request_id: str | None = None,
     ) -> dict[str, Any]:
         """构建错误响应
+
+        使用 Pydantic 模型确保响应符合协议规范。
 
         严格遵循07-websocket-protocol.md规范：
         - type 字段值为 "ERROR"
@@ -876,16 +1294,17 @@ class TaskRouter:
         Returns:
             错误响应字典
         """
-        return {
-            "protocolVersion": "2.0",
-            "type": "ERROR",  # 遵循07-websocket-protocol.md规范
-            "requestId": request_id,
-            "timestamp": self._timestamp(),
-            "data": {
+        response = MessageError(
+            type="ERROR",
+            request_id=request_id or "",
+            protocol_version=PROTOCOL_VERSION,
+            timestamp=self._timestamp_ms(),
+            data={
                 "errorCode": error_code,
                 "errorMessage": error_message,
             },
-        }
+        )
+        return response.model_dump(by_alias=True)
 
     async def _create_async_task(
         self,
@@ -915,14 +1334,11 @@ class TaskRouter:
 
         try:
             # 将 requestId 添加到 payload 中（用于三阶段模式关联）
-            task_payload = payload.copy()
-            if request_id:
-                task_payload["requestId"] = request_id
-
-            # 创建任务
+            # 创建任务（request_id 已提升到 tasks 表顶层字段）
             task_id = await self._tasks_repo.create_task(
                 task_type=task_type,
-                payload=task_payload,
+                payload=payload,
+                request_id=request_id,
             )
 
             # 注册任务与客户端的映射（用于推送结果）
@@ -930,20 +1346,21 @@ class TaskRouter:
 
             logger.info(
                 f"创建异步任务: client_id={client_id}, "
-                f"task_type={task_type}, task_id={task_id}, store_result={store_result}"
+                f"task_type={task_type}, task_id={task_id}, request_id={request_id}, store_result={store_result}"
             )
 
             # 返回 ack 确认消息（三阶段模式第一阶段）
             # 严格遵循07-websocket-protocol.md规范：type 值为 "ACK"
             # 注意：taskId 不返回给客户端，仅在服务端内部使用
             # data 为空对象，无需额外信息
-            return {
-                "protocolVersion": "2.0",
-                "type": "ACK",  # 遵循07-websocket-protocol.md规范
-                "requestId": request_id,
-                "timestamp": self._timestamp_ms(),
-                "data": {}
-            }
+            ack = MessageSuccess(
+                type="ACK",
+                request_id=request_id or "",
+                protocol_version=PROTOCOL_VERSION,
+                timestamp=self._timestamp_ms(),
+                data={},
+            )
+            return ack.model_dump(by_alias=True)
 
         except Exception as e:
             logger.error(f"创建任务失败: {task_type}, {e}")
@@ -951,11 +1368,6 @@ class TaskRouter:
                 error_code="TASK_CREATION_FAILED",
                 error_message=f"Failed to create task: {str(e)}",
             )
-
-    def _timestamp(self) -> int:
-        """获取当前时间戳（秒）"""
-        import time
-        return int(time.time())
 
     def _timestamp_ms(self) -> int:
         """获取当前时间戳（毫秒）"""

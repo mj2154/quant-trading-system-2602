@@ -42,15 +42,20 @@ from clients import (
     BinanceFuturesWSClient,
     BinanceSpotPrivateHTTPClient,
     BinanceFuturesPrivateHTTPClient,
+    BinanceFuturesPrivateWSClient,
+    BinanceSpotPrivateWSClient,
 )
 from storage import ExchangeInfoRepository
 from db.tasks_repository import TasksRepository
 from db.realtime_data_repository import RealtimeDataRepository
+from db.order_tasks_repository import OrderTasksRepository
 from events import TaskListener, TaskPayload
 from events.exchange_info_handler import ExchangeInfoHandler
+from events.order_task_listener import OrderTaskListener
 from ws_subscription_manager import WSSubscriptionManager
 from models import KlineCreate, KlineResponse, Ticker24hrSpot
 from services.account_subscription_service import AccountSubscriptionService
+from services.order_task_handler import OrderTaskHandler
 from utils import resolution_to_interval
 
 logger = logging.getLogger(__name__)
@@ -99,11 +104,18 @@ class BinanceService:
         self._futures_private_http: Optional[BinanceFuturesPrivateHTTPClient] = None
         self._spot_ws: Optional[BinanceSpotWSClient] = None
         self._futures_ws: Optional[BinanceFuturesWSClient] = None
+        # 私有WebSocket客户端（用于订单功能）
+        self._spot_private_ws: Optional[BinanceSpotPrivateWSClient] = None
+        self._futures_private_ws: Optional[BinanceFuturesPrivateWSClient] = None
         self._exchange_repo: Optional[ExchangeInfoRepository] = None
         self._tasks_repo: Optional[TasksRepository] = None  # Tasks表仓储
         self._realtime_repo: Optional[RealtimeDataRepository] = (
             None  # RealtimeData表仓储
         )
+        # 订单任务相关
+        self._order_tasks_repo: Optional[OrderTasksRepository] = None
+        self._order_task_listener: Optional[OrderTaskListener] = None
+        self._order_task_handler: Optional[OrderTaskHandler] = None
         self._task_listener: Optional[TaskListener] = None
         self._exchange_handler: Optional[ExchangeInfoHandler] = None
         self._ws_manager: Optional[WSSubscriptionManager] = None
@@ -194,9 +206,36 @@ class BinanceService:
         self._spot_ws.set_reconnect_callback(self._on_ws_reconnect)
         self._futures_ws.set_reconnect_callback(self._on_ws_reconnect)
 
+        # 初始化私有WebSocket客户端（用于订单功能）
+        # 从环境变量读取配置
+        futures_api_key = os.environ.get("BINANCE_FUTURES_API_KEY", api_key)
+        if api_key and private_key_pem:
+            # 现货私有WebSocket客户端
+            self._spot_private_ws = BinanceSpotPrivateWSClient(
+                api_key=api_key,
+                private_key_pem=private_key_pem,
+                proxy_url=self._proxy_ws,
+            )
+            logger.info("现货私有WebSocket客户端已初始化")
+        else:
+            logger.warning("现货私有WebSocket客户端未初始化（缺少API Key或私钥）")
+
+        if futures_api_key and private_key_pem:
+            # 期货私有WebSocket客户端
+            self._futures_private_ws = BinanceFuturesPrivateWSClient(
+                api_key=futures_api_key,
+                private_key_pem=private_key_pem,
+                proxy_url=self._proxy_ws,
+            )
+            logger.info("期货私有WebSocket客户端已初始化")
+        else:
+            logger.warning("期货私有WebSocket客户端未初始化（缺少API Key或私钥）")
+
         # 初始化存储层
         self._exchange_repo = ExchangeInfoRepository(self._pool)
         self._tasks_repo = TasksRepository(self._pool)
+        # 订单任务仓储
+        self._order_tasks_repo = OrderTasksRepository(self._pool)
         self._realtime_repo = RealtimeDataRepository(self._pool)
 
         # 初始化交易所信息处理器
@@ -226,6 +265,31 @@ class BinanceService:
 
         # 启动任务监听
         await self._task_listener.start()
+
+        # 初始化订单任务监听器和处理器（订单功能）
+        self._order_task_handler = OrderTaskHandler(
+            futures_client=self._futures_private_ws,
+            spot_client=self._spot_private_ws,
+            futures_http_client=self._futures_private_http,
+            spot_http_client=self._spot_private_http,
+            order_tasks_repo=self._order_tasks_repo,
+        )
+        self._order_task_listener = OrderTaskListener(self._pool)
+
+        # 注册订单任务处理器
+        self._order_task_listener.register(
+            "order.create", self._order_task_handler.handle_task
+        )
+        self._order_task_listener.register(
+            "order.cancel", self._order_task_handler.handle_task
+        )
+        self._order_task_listener.register(
+            "order.query", self._order_task_handler.handle_task
+        )
+
+        # 启动订单任务监听
+        await self._order_task_listener.start()
+        logger.info("订单任务监听器已启动")
 
         # 初始化WS订阅管理器
         self._ws_manager = WSSubscriptionManager(self._pool)
@@ -269,11 +333,21 @@ class BinanceService:
         if self._task_listener:
             await self._task_listener.stop()
 
+        # 停止订单任务监听器
+        if self._order_task_listener:
+            await self._order_task_listener.stop()
+            logger.info("订单任务监听器已停止")
+
         # 断开WebSocket连接
         if self._spot_ws:
             await self._spot_ws.disconnect()
         if self._futures_ws:
             await self._futures_ws.disconnect()
+        # 断开私有WebSocket连接
+        if self._spot_private_ws:
+            await self._spot_private_ws.disconnect()
+        if self._futures_private_ws:
+            await self._futures_private_ws.disconnect()
 
         # 关闭HTTP客户端
         if self._spot_http:

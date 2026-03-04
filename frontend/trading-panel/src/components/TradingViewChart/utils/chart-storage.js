@@ -67,6 +67,8 @@ export const chartStorageAdapter = {
                 return null;
             }
 
+            console.log('💾 saveChart 接收到的 chartData:', chartData);
+
             // 如果没有提供名称，生成默认名称
             if (!chartData.name || typeof chartData.name !== 'string' || chartData.name.trim() === '') {
                 chartData.name = generateDefaultChartName();
@@ -75,6 +77,8 @@ export const chartStorageAdapter = {
             if (!chartData.symbol || typeof chartData.symbol !== 'string') {
                 return null;
             }
+
+            console.log('💾 saveChart symbol:', chartData.symbol);
 
             if (!chartData.resolution || typeof chartData.resolution !== 'string') {
                 return null;

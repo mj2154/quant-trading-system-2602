@@ -65,10 +65,11 @@ export const useStrategyStore = defineStore('strategy', () => {
   // ==================== 私有方法 ====================
 
   /**
-   * 生成请求ID
+   * requestId 生成器
+   * 格式: req_a1b2c3d4e5f6g7h8
    */
-  function generateRequestId(prefix: string): string {
-    return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+  function generateRequestId(): string {
+    return `req_${crypto.randomUUID().substring(0, 16)}`
   }
 
   /**
@@ -85,7 +86,7 @@ export const useStrategyStore = defineStore('strategy', () => {
     return {
       protocolVersion: '2.0',
       type: typeMap[dataType] || dataType,
-      requestId: generateRequestId('req_strategy'),
+      requestId: generateRequestId(),
       timestamp: Date.now(),
       data,
     }

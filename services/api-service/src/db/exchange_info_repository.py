@@ -23,15 +23,23 @@ class ExchangeInfoRepository:
         """解析交易对字符串
 
         Args:
-            symbol: 交易对字符串，如 "BINANCE:BTCUSDT" 或 "BTCUSDT"
+            symbol: 交易对字符串，如 "BINANCE:BTCUSDT" 或 "BINANCE:BTCUSDT.PERP"
 
         Returns:
             (exchange, ticker) 元组
         """
         if ":" in symbol:
             parts = symbol.split(":", 1)
-            return parts[0].upper(), parts[1].upper()
-        return "BINANCE", symbol.upper()
+            ticker = parts[1].upper()
+            # 移除 .PERP 等合约类型后缀（数据库中不存储这些后缀）
+            if "." in ticker:
+                ticker = ticker.split(".")[0]
+            return parts[0].upper(), ticker
+        ticker = symbol.upper()
+        # 移除 .PERP 等合约类型后缀
+        if "." in ticker:
+            ticker = ticker.split(".")[0]
+        return "BINANCE", ticker
 
     async def resolve_symbol(
         self,

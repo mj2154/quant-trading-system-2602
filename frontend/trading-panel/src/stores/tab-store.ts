@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 // 模块类型
-export type ModuleType = 'module-a' | 'module-b' | 'module-c' | 'alert-dashboard' | 'account-dashboard' | 'alert-test'
+export type ModuleType = 'module-a' | 'module-b' | 'module-c' | 'alert-dashboard' | 'account-dashboard' | 'alert-test' | 'trading-dashboard'
 
 // 标签页接口
 export interface Tab {
@@ -19,6 +19,7 @@ export const MODULE_CONFIG: Record<ModuleType, { title: string; color: string }>
   'alert-dashboard': { title: '告警管理', color: '#e67e22' },
   'account-dashboard': { title: '账户信息', color: '#9b59b6' },
   'alert-test': { title: '告警测试', color: '#f39c12' },
+  'trading-dashboard': { title: '交易面板', color: '#00cec9' },
 }
 
 // 生成唯一ID

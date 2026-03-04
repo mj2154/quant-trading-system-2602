@@ -7,6 +7,7 @@ import ModuleC from '../../views/ModuleC.vue'
 import AlertDashboard from '../../views/AlertDashboard.vue'
 import AccountDashboard from '../../views/AccountDashboard.vue'
 import AlertTest from '../../views/AlertTest.vue'
+import TradingDashboard from '../../views/TradingDashboard.vue'
 
 const tabStore = useTabStore()
 
@@ -23,6 +24,7 @@ const activeModuleType = computed(() => tabStore.activeTab?.type || null)
     <AccountDashboard v-show="activeModuleType === 'account-dashboard'" />
     <AlertDashboard v-show="activeModuleType === 'alert-dashboard'" />
     <AlertTest v-show="activeModuleType === 'alert-test'" />
+    <TradingDashboard v-show="activeModuleType === 'trading-dashboard'" />
   </main>
 </template>
 
@@ -33,8 +35,17 @@ const activeModuleType = computed(() => tabStore.activeTab?.type || null)
   position: relative;
 }
 
-/* 所有组件都占据全屏容器 */
-.app-content > :deep(*) {
+/* 大多数组件占据全屏容器 */
+.app-content > :deep(*:not(.trading-dashboard)) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* TradingDashboard 使用自己的滚动 - 移除绝对定位 */
+.app-content > :deep(.trading-dashboard) {
   position: absolute;
   top: 0;
   left: 0;

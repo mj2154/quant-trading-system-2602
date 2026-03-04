@@ -40,7 +40,7 @@ export function useTradingView(containerId = 'tv_chart_container') {
                 library_path: '../../src/components/TradingViewChart/library/',
                 locale: 'zh',
                 theme: 'dark', // 设置暗夜主题
-                symbol: 'BINANCE:BTCUSDT', // ✅ 保留：作为默认symbol（会被保存的图表覆盖）
+                // symbol: 依赖 load_last_chart 从 localStorage 恢复用户上次保存的图表
                 interval: '60',
                 autosize: true,
 
@@ -83,7 +83,7 @@ export function useTradingView(containerId = 'tv_chart_container') {
             });
 
             // 监听图表就绪事件
-            widget.value.onChartReady(() => {
+            widget.value.onChartReady(async () => {
                 isReady.value = true;
                 isLoading.value = false;
 
@@ -106,6 +106,47 @@ export function useTradingView(containerId = 'tv_chart_container') {
                     widget.value.resetCache();
                     chart.resetData();
                 });
+
+                // ✅ 修复：图表加载后检查并恢复正确的 symbol
+                // TradingView 的 load_last_chart 有时序问题，需要手动确保 symbol 正确
+                try {
+                    // 获取最后保存的图表信息
+                    const charts = await chartStorageAdapter.getAllCharts();
+                    let lastChartId = chartStorageAdapter.getLastChartId();
+
+                    // 修复：清理可能多余的引号
+                    if (lastChartId) {
+                        try {
+                            // 尝试解析 JSON（如果被 JSON 序列化过）
+                            lastChartId = JSON.parse(lastChartId);
+                        } catch {
+                            // 如果不是 JSON，直接使用
+                        }
+                        // 去除可能的额外引号
+                        lastChartId = lastChartId.replace(/^"|"$/g, '');
+                    }
+
+                    if (lastChartId && charts.length > 0) {
+                        const lastChart = charts.find(c => c.id === lastChartId);
+
+                        if (lastChart && lastChart.symbol) {
+                            // 获取当前图表的 symbol
+                            const currentSymbol = chart.symbol();
+
+                            // 如果当前 symbol 与保存的不一致，更新为正确的 symbol
+                            // 需要处理 TradingView 格式：BINANCE:BTCUSDT.PERP
+                            const savedSymbolWithPrefix = lastChart.symbol.includes(':')
+                                ? lastChart.symbol
+                                : `BINANCE:${lastChart.symbol}`;
+
+                            if (currentSymbol !== savedSymbolWithPrefix && currentSymbol !== lastChart.symbol) {
+                                chart.setSymbol(savedSymbolWithPrefix);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error('恢复图表 symbol 失败:', err);
+                }
 
                 // ✅ 移除：不再自动加载默认技术指标
                 // 让用户自己添加和保存技术指标

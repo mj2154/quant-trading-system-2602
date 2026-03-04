@@ -23,6 +23,7 @@ from .gateway import (
 )
 from .db.database import init_pool, close_pool, get_pool
 from .db.tasks_repository import TasksRepository
+from .db.order_tasks_repository import OrderTasksRepository
 from .db.strategy_signals_repository import StrategySignalsRepository
 from .db.alert_signal_repository import AlertSignalRepository
 from .models.db.task_models import UnifiedTaskPayload, TaskType
@@ -40,6 +41,7 @@ _task_router: TaskRouter | None = None
 _subscription_manager: SubscriptionManager | None = None
 _data_processor: DataProcessor | None = None
 _tasks_repo: TasksRepository | None = None
+_order_tasks_repo: OrderTasksRepository | None = None
 _strategy_signals_repo: StrategySignalsRepository | None = None
 _alert_repo: AlertSignalRepository | None = None
 
@@ -77,7 +79,7 @@ async def lifespan(app: FastAPI):
     """
     global _client_manager, _task_router, _subscription_manager
     global _data_processor
-    global _tasks_repo
+    global _tasks_repo, _order_tasks_repo
     global _strategy_signals_repo, _alert_repo
 
     # 启动阶段
@@ -94,7 +96,11 @@ async def lifespan(app: FastAPI):
     _tasks_repo = TasksRepository(pool)
     logger.info("TasksRepository initialized")
 
-    # 1.1 初始化信号仓储（告警服务需要）
+    # 1.1 初始化订单任务仓储（基于 order_tasks 表）
+    _order_tasks_repo = OrderTasksRepository(pool)
+    logger.info("OrderTasksRepository initialized")
+
+    # 1.2 初始化信号仓储（告警服务需要）
     _strategy_signals_repo = StrategySignalsRepository(pool)
     logger.info("StrategySignalsRepository initialized")
 
@@ -124,6 +130,8 @@ async def lifespan(app: FastAPI):
     )
     # 设置新任务仓储
     _task_router.set_tasks_repository(_tasks_repo)
+    # 设置订单任务仓储（交易功能）
+    _task_router.set_order_tasks_repository(_order_tasks_repo)
     # 设置交易所信息仓储
     _task_router.set_exchange_info_repository(_exchange_repo)
     # 设置告警仓储
@@ -289,6 +297,49 @@ async def ws_market(websocket: WebSocket) -> None:
             await websocket.close(code=1011)
         except Exception:
             pass  # 连接已关闭，静默忽略
+
+
+@app.websocket("/ws/trading")
+async def ws_trading(websocket: WebSocket) -> None:
+    """WebSocket 端点 /ws/trading
+
+    交易操作专用通道，处理订单创建、查询、取消等操作。
+
+    Args:
+        websocket: FastAPI WebSocket 连接
+    """
+    if _client_manager is None or _task_router is None:
+        await websocket.close(code=1011)
+        return
+
+    # 获取客户端 IP
+    client_host = (
+        websocket.headers.get("X-Forwarded-For", "")
+        or websocket.headers.get("X-Real-IP", "")
+        or "unknown"
+    )
+    logger.info(f"Trading WebSocket connection from {client_host}")
+
+    try:
+        # 使用 gateway 模块处理连接（复用 ws_market 逻辑）
+        from .gateway import ws_market as handle_ws
+
+        await handle_ws(
+            websocket=websocket,
+            client_manager=_client_manager,
+            task_router=_task_router,
+        )
+    except WebSocketDisconnect:
+        logger.info(f"Trading WebSocket disconnected from {client_host}")
+    except RuntimeError as e:
+        # 处理 WebSocket 相关运行时错误
+        logger.debug(f"Trading WebSocket runtime error: {e}")
+    except Exception as e:
+        logger.exception(f"Trading WebSocket error: {e}")
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
 
 
 # ========== 启动入口 ==========

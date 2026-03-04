@@ -7,14 +7,16 @@ import asyncio
 import json
 import sys
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 from contextlib import asynccontextmanager
 
 import pytest
 
-# 添加 src 目录到路径
-sys.path.insert(0, '/app/src')
+# 添加 src 目录到路径（支持本地和 Docker 环境）
+SRC_PATH = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(SRC_PATH))
 
 # 直接导入模块，绕过 services/__init__.py
 import importlib.util
@@ -29,16 +31,18 @@ def import_module_from_file(module_name, file_path):
 
 
 # 直接加载 account_subscription_service 模块
+ACCOUNT_SERVICE_PATH = SRC_PATH / "services" / "account_subscription_service.py"
 account_subscription_service = import_module_from_file(
     "account_subscription_service",
-    "/app/src/services/account_subscription_service.py"
+    str(ACCOUNT_SERVICE_PATH)
 )
 AccountSubscriptionService = account_subscription_service.AccountSubscriptionService
 
 # 导入常量
+CONSTANTS_PATH = SRC_PATH / "constants" / "__init__.py"
 constants = import_module_from_file(
     "constants",
-    "/app/src/constants/__init__.py"
+    str(CONSTANTS_PATH)
 )
 BinanceAccountSubscriptionKey = constants.BinanceAccountSubscriptionKey
 

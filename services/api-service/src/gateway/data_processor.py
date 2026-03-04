@@ -21,7 +21,7 @@ import asyncpg
 
 from ..converters import convert_binance_to_tv
 from ..models.protocol.constants import PROTOCOL_VERSION
-from ..models.protocol.ws_message import MessageSuccess
+from ..models.protocol.ws_message import MessageError, MessageSuccess, MessageUpdate
 from ..models.trading.kline_models import KlineBar, KlineBars
 from .client_manager import ClientManager
 
@@ -49,6 +49,12 @@ def _map_task_type_to_response_type(task_type: str) -> str:
 TASK_CHANNELS = [
     "task_completed",
     "task_failed",
+]
+
+# 订单任务事件频道列表
+ORDER_TASK_CHANNELS = [
+    "order_task_completed",
+    "order_task_failed",
 ]
 
 # 实时数据事件频道列表
@@ -124,6 +130,13 @@ class DataProcessor:
                 channel, self._on_task_notification
             )
             logger.info(f"Subscribed to task channel: {channel}")
+
+        # 订阅订单任务事件频道
+        for channel in ORDER_TASK_CHANNELS:
+            await self._connection.add_listener(
+                channel, self._on_order_task_notification
+            )
+            logger.info(f"Subscribed to order task channel: {channel}")
 
         # 订阅实时数据事件频道
         for channel in REALTIME_CHANNELS:
@@ -207,18 +220,18 @@ class DataProcessor:
             event_data = self._convert_uuids_to_str(event_data)
 
             # 构建推送消息
-            # 严格遵循07-websocket-protocol.md规范：使用type字段
+            # 使用 MessageUpdate 模型确保符合协议规范
             subscription_key = self._get_subscription_key(event_type, event_data)
-            message = {
-                "protocolVersion": "2.0",
-                "type": "UPDATE",  # 遵循07-websocket-protocol.md规范
-                "timestamp": self._timestamp_ms(),
-                "data": {
+            message = MessageUpdate(
+                type="UPDATE",
+                protocol_version=PROTOCOL_VERSION,
+                timestamp=self._timestamp_ms(),
+                data={
                     "eventType": event_type,
                     "subscriptionKey": subscription_key,
-                    "content": event_data,  # 使用 content 避免与数据库 payload 混淆
+                    "content": event_data,
                 },
-            }
+            ).model_dump(by_alias=True)
 
             logger.info(
                 f"[Notification] channel={channel}, event_type={event_type}, "
@@ -352,20 +365,22 @@ class DataProcessor:
                 payload_data = json.loads(payload_data)
 
             result = data.get("result")
+            # 从通知的顶层 data 字段提取 request_id（已从 payload 提升到顶层）
+            request_id = data.get("request_id")
 
             # 根据任务类型处理
             if task_type == "get_klines":
                 # get_klines 的 result 为空，需查询 klines_history 表
-                await self._handle_klines_result(client_id, task_id, payload_data)
+                await self._handle_klines_result(client_id, task_id, payload_data, request_id)
             elif task_type in ("get_futures_account", "get_spot_account"):
                 # 账户信息任务：result 为空，需查询 account_info 表
-                await self._handle_account_info_result(client_id, task_id, task_type, payload_data)
+                await self._handle_account_info_result(client_id, task_id, task_type, payload_data, request_id)
             elif status == "failed":
                 # 任务失败处理
-                await self._handle_task_error(client_id, task_type, data, payload_data)
+                await self._handle_task_error(client_id, task_type, data, payload_data, request_id)
             else:
                 # 其他任务成功处理（result 已包含在通知中）
-                await self._handle_task_success(client_id, task_id, task_type, payload_data, result)
+                await self._handle_task_success(client_id, task_id, task_type, payload_data, result, request_id)
 
         except json.JSONDecodeError as e:
             logger.error(f"解析任务通知载荷失败: {e}, payload={payload}")
@@ -373,7 +388,7 @@ class DataProcessor:
             logger.exception(f"处理任务通知失败: {e}")
 
     async def _handle_klines_result(
-        self, client_id: str, task_id: int, payload: dict[str, Any]
+        self, client_id: str, task_id: int, payload: dict[str, Any], request_id: str | None = None
     ) -> None:
         """处理 get_klines 任务结果
 
@@ -383,14 +398,15 @@ class DataProcessor:
         Args:
             client_id: 客户端 ID
             task_id: 任务 ID
-            payload: 通知中的 payload（包含 requestId 和请求参数）
+            payload: 通知中的 payload（包含请求参数）
+            request_id: 请求 ID（从通知顶层获取）
         """
         try:
             symbol = payload.get("symbol", "")
             interval = payload.get("interval", "60")
             from_time = payload.get("from_time")
             to_time = payload.get("to_time")
-            request_id = payload.get("requestId")
+            # request_id 从方法参数获取（通知顶层）
 
             if not all([symbol, interval, from_time, to_time]):
                 logger.error(f"任务 {task_id} payload 不完整: {payload}")
@@ -467,7 +483,7 @@ class DataProcessor:
             )
 
     async def _handle_account_info_result(
-        self, client_id: str, task_id: int, task_type: str, payload: dict[str, Any]
+        self, client_id: str, task_id: int, task_type: str, payload: dict[str, Any], request_id: str | None = None
     ) -> None:
         """处理账户信息任务结果
 
@@ -477,10 +493,11 @@ class DataProcessor:
             client_id: 客户端 ID
             task_id: 任务 ID
             task_type: 任务类型 (get_futures_account / get_spot_account)
-            payload: 通知中的 payload（包含 requestId）
+            payload: 通知中的 payload
+            request_id: 请求 ID（从通知顶层获取）
         """
         try:
-            request_id = payload.get("requestId")
+            # request_id 从方法参数获取（通知顶层）
 
             if not self._tasks_repo:
                 logger.error("任务仓储未设置，无法查询 account_info")
@@ -536,7 +553,7 @@ class DataProcessor:
             )
 
     async def _handle_task_success(
-        self, client_id: str, task_id: int, task_type: str, payload: dict[str, Any], result: dict[str, Any]
+        self, client_id: str, task_id: int, task_type: str, payload: dict[str, Any], result: dict[str, Any], request_id: str | None = None
     ) -> None:
         """处理任务成功结果
 
@@ -544,11 +561,12 @@ class DataProcessor:
             client_id: 客户端 ID
             task_id: 任务 ID
             task_type: 任务类型
-            payload: 通知中的 payload（包含 requestId）
+            payload: 通知中的 payload
             result: 通知中的任务结果
+            request_id: 请求 ID（从通知顶层获取）
         """
         try:
-            request_id = payload.get("requestId")
+            # request_id 从方法参数获取（通知顶层）
             response_type = _map_task_type_to_response_type(task_type)
 
             # 根据任务类型构建 data
@@ -590,8 +608,117 @@ class DataProcessor:
                 client_id, "RESULT_ERROR", str(e)
             )
 
+    async def _on_order_task_notification(
+        self,
+        connection: asyncpg.Connection,
+        pid: int,
+        channel: str,
+        payload: str,
+    ) -> None:
+        """处理订单任务完成/失败通知回调
+
+        监听 order_task_completed 和 order_task_failed 通知，
+        通过 task_id 查找客户端，将订单结果推送给相关客户端。
+
+        Args:
+            connection: 数据库连接
+            pid: 后端进程 ID
+            channel: 通知频道 (order_task_completed 或 order_task_failed)
+            payload: 通知载荷（JSON 字符串）
+
+        数据库通知格式（已更新）：
+        {
+            "event_id": "...",
+            "event_type": "order_task_completed" 或 "order_task_failed",
+            "timestamp": "...",
+            "data": {
+                "id": 123,
+                "type": "order.create",
+                "request_id": "req_xxx",
+                "payload": {...},
+                "result": {...},
+                "status": "completed" 或 "failed",
+                "updated_at": "..."
+            }
+        }
+        """
+        try:
+            raw_data = json.loads(payload)
+
+            # 解析 data 字段获取任务信息
+            data = raw_data.get("data", {})
+
+            task_id = data.get("id")
+            task_type = data.get("type")
+            request_id = data.get("request_id")  # 新的顶层字段
+            status = data.get("status")
+
+            if not task_id:
+                logger.warning(f"订单任务通知中缺少 task_id: {payload}")
+                return
+
+            logger.debug(
+                f"收到订单任务通知: channel={channel}, task_id={task_id}, "
+                f"task_type={task_type}, request_id={request_id}, status={status}"
+            )
+
+            # 通过 task_id 查找客户端（TaskRouter 创建任务时已注册）
+            client_id = self._client_manager.get_client_by_task(task_id)
+            if not client_id:
+                logger.debug(f"未找到订单任务 {task_id} 对应的客户端，跳过推送")
+                return
+
+            # 取消注册任务映射
+            self._client_manager.unregister_task(task_id)
+
+            # 提取结果数据
+            payload_data = data.get("payload", {})
+            if isinstance(payload_data, str):
+                payload_data = json.loads(payload_data)
+
+            result = data.get("result")
+
+            # 构建响应消息 - 使用模型确保符合协议规范
+            if status == "completed":
+                # 订单创建成功
+                message = MessageSuccess(
+                    type="ORDER_DATA",
+                    request_id=request_id,
+                    protocol_version=PROTOCOL_VERSION,
+                    timestamp=self._timestamp_ms(),
+                    data={
+                        "type": "order",
+                        "status": "COMPLETED",
+                        "taskId": task_id,
+                        "result": result,
+                        "payload": payload_data,
+                    },
+                ).model_dump(by_alias=True)
+            else:
+                # 订单失败
+                error_message = result.get("error", "Unknown error") if isinstance(result, dict) else str(result)
+                message = MessageError(
+                    type="ERROR",
+                    request_id=request_id,
+                    protocol_version=PROTOCOL_VERSION,
+                    timestamp=self._timestamp_ms(),
+                    data={
+                        "errorCode": "ORDER_FAILED",
+                        "errorMessage": f"Order failed: {error_message}",
+                    },
+                ).model_dump(by_alias=True)
+
+            # 发送给特定客户端（通过 task_id 找到的客户端）
+            await self._client_manager.send(client_id, message)
+            logger.info(f"已推送订单任务通知: task_id={task_id}, request_id={request_id}, status={status}")
+
+        except json.JSONDecodeError as e:
+            logger.error(f"解析订单任务通知载荷失败: {e}, payload={payload}")
+        except Exception as e:
+            logger.exception(f"处理订单任务通知失败: {e}")
+
     async def _handle_task_error(
-        self, client_id: str, task_type: str, data: dict[str, Any], payload: dict[str, Any]
+        self, client_id: str, task_type: str, data: dict[str, Any], payload: dict[str, Any], request_id: str | None = None
     ) -> None:
         """处理任务错误结果
 
@@ -599,25 +726,26 @@ class DataProcessor:
             client_id: 客户端 ID
             task_type: 任务类型
             data: 通知数据
-            payload: 通知中的 payload（包含 requestId）
+            payload: 通知中的 payload
+            request_id: 请求 ID（从通知顶层获取）
         """
         _task_id = data.get("id")  # 保留以备将来使用
-        request_id = payload.get("requestId")
+        # request_id 从方法参数获取（通知顶层）
 
         result = data.get("result")
         error_message = result if isinstance(result, str) else result.get("error", "Unknown error") if result else "Unknown error"
 
-        # 严格遵循07-websocket-protocol.md规范：使用type字段
-        message = {
-            "protocolVersion": PROTOCOL_VERSION,
-            "type": "ERROR",  # 遵循07-websocket-protocol.md规范
-            "requestId": request_id,
-            "timestamp": self._timestamp_ms(),
-            "data": {
+        # 严格遵循07-websocket-protocol.md规范：使用模型确保符合协议
+        message = MessageError(
+            type="ERROR",
+            request_id=request_id or "",
+            protocol_version=PROTOCOL_VERSION,
+            timestamp=self._timestamp_ms(),
+            data={
                 "errorCode": "TASK_FAILED",
                 "errorMessage": f"Task failed: {error_message}",
             },
-        }
+        ).model_dump(by_alias=True)
 
         await self._client_manager.send(client_id, message)
         logger.info(f"已发送任务失败通知给客户端 {client_id}: {error_message}")
@@ -635,16 +763,17 @@ class DataProcessor:
             error_code: 错误代码
             error_message: 错误消息
         """
-        message = {
-            "protocolVersion": PROTOCOL_VERSION,
-            "type": "ERROR",  # 遵循07-websocket-protocol.md规范
-            "requestId": None,
-            "timestamp": self._timestamp_ms(),
-            "data": {
+        # 使用 MessageError 模型确保符合协议规范
+        message = MessageError(
+            type="ERROR",
+            request_id="",
+            protocol_version=PROTOCOL_VERSION,
+            timestamp=self._timestamp_ms(),
+            data={
                 "errorCode": error_code,
                 "errorMessage": error_message,
             },
-        }
+        ).model_dump(by_alias=True)
 
         await self._client_manager.send(client_id, message)
 
@@ -692,15 +821,16 @@ class DataProcessor:
                 if parsed and parsed.symbol:
                     tv_content["n"] = f"BINANCE:{parsed.symbol}"
 
-            message = {
-                "protocolVersion": "2.0",
-                "type": "UPDATE",  # 遵循07-websocket-protocol.md规范
-                "timestamp": self._timestamp_ms(),
-                "data": {
+            # 使用 MessageUpdate 模型确保符合协议规范
+            message = MessageUpdate(
+                type="UPDATE",
+                protocol_version=PROTOCOL_VERSION,
+                timestamp=self._timestamp_ms(),
+                data={
                     "subscriptionKey": subscription_key,
-                    "content": tv_content,  # 使用 content 避免与数据库 payload 混淆
+                    "content": tv_content,
                 },
-            }
+            ).model_dump(by_alias=True)
 
             # 调试：获取订阅的客户端
             clients: list[str] = self._client_manager._subscription_manager.get_subscribed_clients(subscription_key) if self._client_manager._subscription_manager else []

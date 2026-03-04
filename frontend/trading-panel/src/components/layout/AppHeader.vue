@@ -39,6 +39,10 @@ const dropdownOptions = [
     label: '告警测试',
     key: 'alert-test',
   },
+  {
+    label: '交易面板',
+    key: 'trading-dashboard',
+  },
 ]
 
 const handleSelect = (key: ModuleType) => {

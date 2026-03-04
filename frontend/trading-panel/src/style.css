@@ -1,4 +1,6 @@
 /* 全局样式重置 */
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700&display=swap');
+
 * {
   margin: 0;
   padding: 0;
@@ -6,16 +8,34 @@
 }
 
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Exo 2', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color-scheme: dark;
-  color: #ffffff;
-  background-color: #1e1e1e;
+  color: #F8FAFC;
+  background-color: #0F172A;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Trading Dashboard Theme Colors */
+:root {
+  --trading-primary: #F59E0B;
+  --trading-primary-light: #FBBF24;
+  --trading-secondary: #8B5CF6;
+  --trading-bg-dark: #0F172A;
+  --trading-bg-card: #1E293B;
+  --trading-bg-card-hover: #334155;
+  --trading-text: #F8FAFC;
+  --trading-text-muted: #94A3B8;
+  --trading-border: rgba(245, 158, 11, 0.15);
+  --trading-border-hover: rgba(245, 158, 11, 0.3);
+  --trading-success: #22C55E;
+  --trading-error: #EF4444;
+  --trading-warning: #F59E0B;
+  --trading-info: #3B82F6;
 }
 
 html, body {
@@ -27,4 +47,29 @@ html, body {
 #app {
   width: 100%;
   height: 100%;
+}
+
+/* Global scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(245, 158, 11, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 158, 11, 0.5);
+}
+
+/* Selection color */
+::selection {
+  background: rgba(245, 158, 11, 0.3);
+  color: #F8FAFC;
 }

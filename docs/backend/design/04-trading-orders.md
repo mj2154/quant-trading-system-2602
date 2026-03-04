@@ -46,13 +46,57 @@
 
 ## 3. 表结构
 
-> **重要**: order_tasks 是 tasks 表的完全复制，仅表名和保留策略不同。
+> **重要**: order_tasks 是 tasks 表的扩展，增加了 request_id 顶层字段。
+
+### 3.1 tasks 表结构（基础任务表）
+
+```sql
+-- -----------------------------------------------------------------------------
+-- tasks 基础任务表
+-- 设计: 存储通用任务，request_id 提升到顶层便于查询
+-- 参考文档: docs/backend/design/01-task-subscription.md
+-- -----------------------------------------------------------------------------
+CREATE TABLE tasks (
+    id BIGSERIAL PRIMARY KEY,
+
+    -- 任务类型: get_klines, get_server_time, get_quotes, system.fetch_exchange_info
+    type VARCHAR(50) NOT NULL,
+
+    -- 请求ID（前端生成，用于关联请求和响应）
+    -- 提升到顶层字段，可建索引优化查询
+    request_id VARCHAR(50),
+
+    -- 任务参数（JSON格式）
+    payload JSONB NOT NULL DEFAULT '{}',
+
+    -- 任务结果（币安服务填写）
+    result JSONB,
+
+    -- 任务状态: pending, processing, completed, failed
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+
+    -- 时间戳
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks (type);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);
+CREATE INDEX IF NOT EXISTS idx_tasks_request_id ON tasks (request_id);  -- 新增：request_id 索引
+
+-- 转换为 Hypertable
+SELECT create_hypertable('tasks', 'created_at');
+```
+
+### 3.2 order_tasks 表结构（订单任务表）
 
 ```sql
 -- -----------------------------------------------------------------------------
 -- order_tasks 订单任务表
--- 设计: 存储订单操作任务，完全复用 tasks 表结构
+-- 设计: 存储订单操作任务，复用 tasks 表结构并扩展
 -- INSERT 触发 order_task_new 通知
+-- UPDATE 触发 order_task_completed / order_task_failed 通知
 -- 数据保留: 永久保留（用于分析和追溯）
 -- 参考文档: docs/backend/design/04-trading-orders.md
 -- -----------------------------------------------------------------------------
@@ -65,7 +109,13 @@ CREATE TABLE order_tasks (
     -- order.cancel - 取消订单
     -- order.query  - 查询订单状态
 
+    -- 请求ID（前端生成，用于关联请求和响应）
+    -- 提升到顶层字段，可建索引优化查询
+    -- 贯穿整个数据流：前端 → API → 币安 → 结果推送
+    request_id VARCHAR(50),
+
     -- 任务参数（JSON格式）
+    -- 注意：不再包含 requestId，从顶层字段获取
     -- order.create: {symbol, side, type, quantity, price, timeInForce, clientOrderId, marketType, ...}
     -- order.cancel: {symbol, orderId, clientOrderId}
     -- order.query:  {symbol, orderId, clientOrderId}
@@ -97,12 +147,10 @@ ALTER TABLE order_tasks ADD PRIMARY KEY (id, created_at);
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_order_tasks_status ON order_tasks (status);
 CREATE INDEX IF NOT EXISTS idx_order_tasks_type ON order_tasks (type);
+CREATE INDEX IF NOT EXISTS idx_order_tasks_request_id ON order_tasks (request_id);  -- 新增：request_id 索引
 
 -- 复合索引
 CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, status);
-
--- 转换为 Hypertable（时间分区）
-SELECT create_hypertable('order_tasks', 'created_at');
 ```
 
 ## 4. 字段说明
@@ -115,15 +163,41 @@ SELECT create_hypertable('order_tasks', 'created_at');
 | `order.cancel` | 取消订单 | 前端请求 |
 | `order.query` | 查询订单状态 | 前端请求 / 定时任务 |
 
-### 4.2 payload 参数格式
+### 4.2 request_id 请求ID（重要）
 
-> **重要**：所有 payload 必须包含 `requestId` 字段，用于前端关联请求和响应。
+> **设计决策**: `request_id` 从 payload 提升到顶层字段，原因：
+> 1. **贯穿整个数据流**: 前端生成 → API写入 → 币安API调用 → 结果推送
+> 2. **可建索引优化**: 顶层字段可建索引，查询效率高
+> 3. **语义更清晰**: 顶层字段表示"请求身份"，payload 表示"请求参数"
+> 4. **与 tasks 表统一**: 保持两张表结构一致
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `requestId` | string | 请求ID（前端生成，用于关联 ack/response） |
+| `request_id` | VARCHAR(50) | 请求ID（前端生成，格式: req_xxx，用于关联 ack/response） |
 
-#### order.create 参数
+**数据流示例**:
+```
+1. 前端生成 request_id: "req_a1b2c3d4e5f6g7h8"
+2. 前端发送请求: { type: "CREATE_ORDER", requestId: "req_a1b2c3d4e5f6g7h8", ... }
+3. API写入数据库: request_id = "req_a1b2c3d4e5f6g7h8", payload = {...}
+4. 币安API调用: request_id 作为 clientOrderId 的一部分
+5. 结果推送: 通知携带 request_id，前端匹配请求和响应
+```
+
+### 4.3 payload 参数格式
+
+> **注意**: payload 不再包含 requestId 字段，从顶层 request_id 获取。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `symbol` | string | 交易对符号 |
+| `side` | string | 买卖方向 (BUY/SELL) |
+| `orderType` | string | 订单类型 (LIMIT/MARKET) |
+| `quantity` | number | 数量 |
+| `price` | number | 价格（限价单必需） |
+| `timeInForce` | string | 有效期 (GTC/IOC/FOK) |
+| `clientOrderId` | string | 客户端订单ID（可选） |
+| `marketType` | string | 市场类型 (SPOT/FUTURES) |
 
 #### order.create 参数
 
@@ -131,14 +205,16 @@ SELECT create_hypertable('order_tasks', 'created_at');
 {
     "symbol": "BTCUSDT",
     "side": "BUY",
-    "type": "LIMIT",
+    "orderType": "LIMIT",
     "quantity": 0.002,
     "price": 50000.0,
     "timeInForce": "GTC",
     "positionSide": "BOTH",
-    "reduceOnly": false
+    "reduceOnly": false,
+    "clientOrderId": "my_order_001"
 }
 ```
+> 顶层字段: request_id = "req_a1b2c3d4e5f6g7h8"
 
 #### order.cancel 参数
 
@@ -149,6 +225,7 @@ SELECT create_hypertable('order_tasks', 'created_at');
     "clientOrderId": "testOrder"
 }
 ```
+> 顶层字段: request_id = "req_i9j0k1l2m3n4o5p6"
 
 #### order.query 参数
 
@@ -159,6 +236,7 @@ SELECT create_hypertable('order_tasks', 'created_at');
     "clientOrderId": "testOrder"
 }
 ```
+> 顶层字段: request_id = "req_q7r8s9t0u1v2w3x4"
 
 ### 4.3 status 状态流转
 
@@ -265,28 +343,28 @@ pending → processing → completed (成功)
 | 表结构 | 专用设计 | 复用 tasks 表 |
 | 数据保留 | 未明确 | 永久保留 |
 
-## 8. 使用示例
+## 9. 使用示例
 
-### 8.1 创建订单任务
+### 9.1 创建订单任务
 
 ```python
 # 前端或 API 创建订单任务
-request_id = f"req_{uuid.uuid4().hex[:12]}"
+# request_id 格式: req_a1b2c3d4e5f6g7h8 (UUID前16位)
 
-# 写入数据库（type 字段区分任务类型，参数放入 payload）
+# 写入数据库（request_id 提升到顶层字段）
 await pool.execute("""
     INSERT INTO order_tasks (
-        type, payload, status
-    ) VALUES ($1, $2, $3)
+        type, request_id, payload, status
+    ) VALUES ($1, $2, $3, $4)
 """,
     "order.create",
+    "req_a1b2c3d4e5f6g7h8",  # 顶层字段 request_id
     {
-        "requestId": request_id,
         "clientOrderId": "my_order_001",
         "marketType": "FUTURES",
         "symbol": "BTCUSDT",
         "side": "BUY",
-        "type": "LIMIT",
+        "orderType": "LIMIT",
         "quantity": 0.002,
         "price": 50000.0,
         "timeInForce": "GTC"
@@ -295,15 +373,15 @@ await pool.execute("""
 )
 ```
 
-### 8.2 查询订单任务结果
+### 9.2 查询订单任务结果
 
 ```python
-# 通过 requestId 在 payload 中查询
-request_id = "req_abc123..."
+# 通过 request_id 顶层字段查询（可建索引，查询高效）
+request_id = "req_a1b2c3d4e5f6g7h8"
 
 row = await pool.fetchrow("""
     SELECT * FROM order_tasks
-    WHERE payload->>'requestId' = $1
+    WHERE request_id = $1
     ORDER BY created_at DESC
     LIMIT 1
 """, request_id)
@@ -314,20 +392,20 @@ elif row["status"] == "failed":
     error_info = row["result"]
 ```
 
-### 8.3 查询订单状态（向交易所查询）
+### 9.3 查询订单状态（向交易所查询）
 
 ```python
 # 创建查询任务
-request_id = f"req_{uuid.uuid4().hex[:12]}"
+# request_id 格式: req_a1b2c3d4e5f6g7h8
 
 await pool.execute("""
     INSERT INTO order_tasks (
-        type, payload, status
-    ) VALUES ($1, $2, $3)
+        type, request_id, payload, status
+    ) VALUES ($1, $2, $3, $4)
 """,
     "order.query",
+    "req_i9j0k1l2m3n4o5p6",  # 顶层字段 request_id
     {
-        "requestId": request_id,
         "marketType": "FUTURES",
         "symbol": "BTCUSDT",
         "orderId": binance_order_id
@@ -338,7 +416,7 @@ await pool.execute("""
 # 等待处理完成后查询结果
 row = await pool.fetchrow("""
     SELECT * FROM order_tasks
-    WHERE payload->>'requestId' = $1 AND type = 'order.query'
+    WHERE request_id = $1 AND type = 'order.query'
     ORDER BY created_at DESC
     LIMIT 1
 """, request_id)
@@ -356,5 +434,5 @@ current_status = row["result"]["status"]
 
 ---
 
-**版本**: v2.1
-**更新**: 2026-03-03 - 修复字段名错误：task_type → type；添加 requestId 说明；修正使用示例
+**版本**: v2.2
+**更新**: 2026-03-04 - request_id 从 payload 提升到顶层字段；tasks 表也添加 request_id 字段保持统一
