@@ -18,6 +18,8 @@ wheels/
 
 # API Keys and secrets
 services/binance-service/keys/
+services/binance-service/.env
+docker/clash-proxy/config/config.yaml
 
 # Frontend (Electron + Vue)
 frontend/trading-panel/node_modules/
