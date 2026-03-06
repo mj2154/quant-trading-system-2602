@@ -3,11 +3,29 @@
 
 测试 OrderTasksRepository 对 order_tasks 表的操作。
 遵循 TDD 流程：先编写测试，再实现功能。
+
+ID格式规范 (参考 docs/backend/design/04-trading-orders.md 和 07-websocket-protocol.md):
+- requestId: UUID v4 hex 格式 (32字符)
+- newClientOrderId: UUID v4 hex 格式 (32字符)
+- orderId: 币安返回的数字ID
+
+注意：requestId 存储在顶层字段，不在 payload 中
 """
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 import json
+import uuid
+
+
+def generate_request_id() -> str:
+    """生成 requestId: UUID v4 hex 格式 (32字符)"""
+    return uuid.uuid4().hex
+
+
+def generate_client_order_id() -> str:
+    """生成 newClientOrderId: UUID v4 hex 格式 (32字符)"""
+    return uuid.uuid4().hex
 
 
 class TestOrderTasksRepository:
@@ -36,11 +54,15 @@ class TestOrderTasksRepository:
         mock_conn.fetchval = AsyncMock(return_value=123)
 
         repo = OrderTasksRepository(mock_pool)
+        request_id = generate_request_id()
+        client_order_id = generate_client_order_id()
 
+        # requestId 存储在顶层字段，不在 payload 中
         task_id = await repo.create_order_task(
             task_type="order.create",
+            request_id=request_id,
             payload={
-                "requestId": "req_test_001",
+                "newClientOrderId": client_order_id,
                 "symbol": "BTCUSDT",
                 "side": "BUY",
                 "type": "LIMIT",
@@ -57,11 +79,13 @@ class TestOrderTasksRepository:
         from src.db.order_tasks_repository import OrderTasksRepository
 
         mock_pool, mock_conn = self._create_mock_pool()
+        request_id = generate_request_id()
 
         mock_row = {
             "id": 123,
             "type": "order.create",
-            "payload": {"requestId": "req_test_001", "symbol": "BTCUSDT"},
+            "request_id": request_id,
+            "payload": {"symbol": "BTCUSDT"},
             "result": {"orderId": "456", "status": "NEW"},
             "status": "completed",
             "created_at": "2026-03-01T00:00:00Z",
@@ -152,11 +176,13 @@ class TestOrderTasksRepository:
         from src.db.order_tasks_repository import OrderTasksRepository
 
         mock_pool, mock_conn = self._create_mock_pool()
+        request_id = generate_request_id()
 
         mock_row = {
             "id": 123,
             "type": "order.create",
-            "payload": {"requestId": "req_abc123", "symbol": "BTCUSDT"},
+            "request_id": request_id,
+            "payload": {"symbol": "BTCUSDT"},
             "result": {"orderId": "456"},
             "status": "completed",
             "created_at": "2026-03-01T00:00:00Z",
@@ -166,10 +192,10 @@ class TestOrderTasksRepository:
 
         repo = OrderTasksRepository(mock_pool)
 
-        result = await repo.find_by_request_id("req_abc123")
+        result = await repo.find_by_request_id(request_id)
 
         assert result is not None
-        assert result["payload"]["requestId"] == "req_abc123"
+        assert result["request_id"] == request_id
 
     @pytest.mark.asyncio
     async def test_find_by_request_id_with_type(self):
@@ -177,11 +203,13 @@ class TestOrderTasksRepository:
         from src.db.order_tasks_repository import OrderTasksRepository
 
         mock_pool, mock_conn = self._create_mock_pool()
+        request_id = generate_request_id()
 
         mock_row = {
             "id": 123,
             "type": "order.create",
-            "payload": {"requestId": "req_abc123", "symbol": "BTCUSDT"},
+            "request_id": request_id,
+            "payload": {"symbol": "BTCUSDT"},
             "result": {"orderId": "456"},
             "status": "completed",
             "created_at": "2026-03-01T00:00:00Z",
@@ -191,7 +219,7 @@ class TestOrderTasksRepository:
 
         repo = OrderTasksRepository(mock_pool)
 
-        result = await repo.find_by_request_id("req_abc123", "order.create")
+        result = await repo.find_by_request_id(request_id, "order.create")
 
         assert result is not None
         mock_conn.fetchrow.assert_called_once()
@@ -278,10 +306,11 @@ class TestTaskRouterOrderHandling:
         )
         router.set_order_tasks_repository(mock_order_tasks_repo)
 
+        request_id = generate_request_id()
         request = {
             "protocolVersion": "2.0",
             "type": "CREATE_ORDER",
-            "requestId": "req_order_001",
+            "requestId": request_id,
             "timestamp": 1704067200000,
             "data": {
                 "symbol": "BTCUSDT",
@@ -301,11 +330,11 @@ class TestTaskRouterOrderHandling:
         calls = client_manager.send.call_args_list
         ack_msg = calls[0][0][1]
         assert ack_msg["type"] == "ACK"
-        assert ack_msg["requestId"] == "req_order_001"
+        assert ack_msg["requestId"] == request_id
 
     @pytest.mark.asyncio
-    async def test_handle_get_order(self):
-        """测试处理 GET_ORDER 请求"""
+    async def test_handle_get_order_by_order_id(self):
+        """测试使用 orderId 查询订单（通过币安 API）"""
         from src.gateway.task_router import TaskRouter
         from src.gateway.subscription_manager import SubscriptionManager
         from src.gateway.client_manager import ClientManager
@@ -323,10 +352,11 @@ class TestTaskRouterOrderHandling:
         )
         router.set_order_tasks_repository(mock_order_tasks_repo)
 
+        request_id = generate_request_id()
         request = {
             "protocolVersion": "2.0",
             "type": "GET_ORDER",
-            "requestId": "req_order_002",
+            "requestId": request_id,
             "timestamp": 1704067200000,
             "data": {
                 "symbol": "BTCUSDT",
@@ -336,8 +366,54 @@ class TestTaskRouterOrderHandling:
 
         await router.handle("client_001", request)
 
+        # 创建 order.query 任务，通过币安 API 查询
+        mock_order_tasks_repo.create_order_task.assert_called_once()
         call_args = mock_order_tasks_repo.create_order_task.call_args
         assert call_args[1]["task_type"] == "order.query"
+        assert call_args[1]["payload"]["orderId"] == 123456  # Pydantic 转换为 int
+        assert call_args[1]["payload"]["symbol"] == "BTCUSDT"
+
+    @pytest.mark.asyncio
+    async def test_handle_get_order_by_orig_client_order_id(self):
+        """测试使用 origClientOrderId 查询订单（通过币安 API）"""
+        from src.gateway.task_router import TaskRouter
+        from src.gateway.subscription_manager import SubscriptionManager
+        from src.gateway.client_manager import ClientManager
+
+        subscription_manager = MagicMock(spec=SubscriptionManager)
+        client_manager = MagicMock(spec=ClientManager)
+        client_manager.send = AsyncMock()
+
+        mock_order_tasks_repo = MagicMock()
+        mock_order_tasks_repo.create_order_task = AsyncMock(return_value=1)
+
+        router = TaskRouter(
+            subscription_manager=subscription_manager,
+            client_manager=client_manager,
+        )
+        router.set_order_tasks_repository(mock_order_tasks_repo)
+
+        request_id = generate_request_id()
+        # 使用 origClientOrderId 查询
+        request = {
+            "protocolVersion": "2.0",
+            "type": "GET_ORDER",
+            "requestId": request_id,
+            "timestamp": 1704067200000,
+            "data": {
+                "symbol": "BTCUSDT",
+                "origClientOrderId": generate_client_order_id(),
+            },
+        }
+
+        await router.handle("client_001", request)
+
+        # 统一创建 order.query 任务，通过币安 API 查询
+        mock_order_tasks_repo.create_order_task.assert_called_once()
+        call_args = mock_order_tasks_repo.create_order_task.call_args
+        assert call_args[1]["task_type"] == "order.query"
+        assert "origClientOrderId" in call_args[1]["payload"]
+        assert call_args[1]["payload"]["symbol"] == "BTCUSDT"
 
     @pytest.mark.asyncio
     async def test_handle_cancel_order(self):
@@ -359,10 +435,11 @@ class TestTaskRouterOrderHandling:
         )
         router.set_order_tasks_repository(mock_order_tasks_repo)
 
+        request_id = generate_request_id()
         request = {
             "protocolVersion": "2.0",
             "type": "CANCEL_ORDER",
-            "requestId": "req_order_004",
+            "requestId": request_id,
             "timestamp": 1704067200000,
             "data": {
                 "symbol": "BTCUSDT",
@@ -376,8 +453,8 @@ class TestTaskRouterOrderHandling:
         assert call_args[1]["task_type"] == "order.cancel"
 
     @pytest.mark.asyncio
-    async def test_create_order_payload_contains_request_id(self):
-        """测试创建订单时 payload 包含 requestId"""
+    async def test_create_order_request_id_as_top_level_field(self):
+        """测试创建订单时 requestId 作为顶层字段传递（不在 payload 中）"""
         from src.gateway.task_router import TaskRouter
         from src.gateway.subscription_manager import SubscriptionManager
         from src.gateway.client_manager import ClientManager
@@ -395,10 +472,11 @@ class TestTaskRouterOrderHandling:
         )
         router.set_order_tasks_repository(mock_order_tasks_repo)
 
+        request_id = generate_request_id()
         request = {
             "protocolVersion": "2.0",
             "type": "CREATE_ORDER",
-            "requestId": "req_order_006",
+            "requestId": request_id,
             "timestamp": 1704067200000,
             "data": {
                 "symbol": "BTCUSDT",
@@ -413,13 +491,15 @@ class TestTaskRouterOrderHandling:
 
         call_args = mock_order_tasks_repo.create_order_task.call_args
         assert call_args is not None
+        # requestId 应该作为 request_id 顶层字段传递
+        assert call_args[1]["request_id"] == request_id
+        # payload 中不应该包含 requestId
         payload = call_args[1]["payload"]
-        assert "requestId" in payload
-        assert payload["requestId"] == "req_order_006"
+        assert "requestId" not in payload
 
     @pytest.mark.asyncio
-    async def test_create_order_adds_market_type(self):
-        """测试创建订单时自动添加 marketType"""
+    async def test_create_order_payload_without_market_type(self):
+        """测试创建订单时不再包含 marketType（通过 symbol 前缀区分）"""
         from src.gateway.task_router import TaskRouter
         from src.gateway.subscription_manager import SubscriptionManager
         from src.gateway.client_manager import ClientManager
@@ -427,6 +507,7 @@ class TestTaskRouterOrderHandling:
         subscription_manager = MagicMock(spec=SubscriptionManager)
         client_manager = MagicMock(spec=ClientManager)
         client_manager.send = AsyncMock()
+        client_manager.register_task = MagicMock()
 
         mock_order_tasks_repo = MagicMock()
         mock_order_tasks_repo.create_order_task = AsyncMock(return_value=1)
@@ -437,10 +518,11 @@ class TestTaskRouterOrderHandling:
         )
         router.set_order_tasks_repository(mock_order_tasks_repo)
 
+        request_id = generate_request_id()
         request = {
             "protocolVersion": "2.0",
             "type": "CREATE_ORDER",
-            "requestId": "req_order_007",
+            "requestId": request_id,
             "timestamp": 1704067200000,
             "data": {
                 "symbol": "BTCUSDT",
@@ -454,8 +536,8 @@ class TestTaskRouterOrderHandling:
 
         call_args = mock_order_tasks_repo.create_order_task.call_args
         payload = call_args[1]["payload"]
-        assert "marketType" in payload
-        assert payload["marketType"] == "FUTURES"
+        # marketType 已被移除，通过 symbol 前缀区分期货/现货
+        assert "marketType" not in payload
 
     @pytest.mark.asyncio
     async def test_order_tasks_repository_not_initialized(self):
@@ -473,10 +555,11 @@ class TestTaskRouterOrderHandling:
             client_manager=client_manager,
         )
 
+        request_id = generate_request_id()
         request = {
             "protocolVersion": "2.0",
             "type": "CREATE_ORDER",
-            "requestId": "req_order_009",
+            "requestId": request_id,
             "timestamp": 1704067200000,
             "data": {
                 "symbol": "BTCUSDT",
@@ -510,6 +593,7 @@ class TestTaskRouterOrderHandling:
 
         mock_order_tasks_repo = MagicMock()
         mock_order_tasks_repo.create_order_task = AsyncMock(return_value=1)
+        mock_order_tasks_repo.list_order_tasks = AsyncMock(return_value=[])
 
         router = TaskRouter(
             subscription_manager=subscription_manager,
@@ -517,10 +601,11 @@ class TestTaskRouterOrderHandling:
         )
         router.set_order_tasks_repository(mock_order_tasks_repo)
 
+        request_id = generate_request_id()
         request = {
             "protocolVersion": "2.0",
             "type": "LIST_ORDERS",
-            "requestId": "req_order_010",
+            "requestId": request_id,
             "timestamp": 1704067200000,
             "data": {
                 "symbol": "BTCUSDT",
@@ -552,10 +637,11 @@ class TestTaskRouterOrderHandling:
         )
         router.set_order_tasks_repository(mock_order_tasks_repo)
 
+        request_id = generate_request_id()
         request = {
             "protocolVersion": "2.0",
             "type": "GET_OPEN_ORDERS",
-            "requestId": "req_order_011",
+            "requestId": request_id,
             "timestamp": 1704067200000,
             "data": {
                 "symbol": "BTCUSDT",

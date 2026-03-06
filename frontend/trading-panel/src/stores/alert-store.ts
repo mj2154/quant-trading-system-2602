@@ -128,11 +128,11 @@ export const DEFAULT_PARAMS = {
 }
 
 /**
- * requestId 生成器
- * 格式: req_a1b2c3d4e5f6g7h8
+ * requestId 生成器 (UUID v4 hex 格式，32字符，符合 WS 协议规范)
+ * 格式: 550e8400e29b41d4a716446655440000
  */
 function generateRequestId(): string {
-  return `req_${crypto.randomUUID().substring(0, 16)}`
+  return crypto.randomUUID().replace(/-/g, '')
 }
 
 /**

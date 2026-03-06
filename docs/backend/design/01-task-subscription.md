@@ -101,7 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks (created_at DESC);
             "interval": "1",
             "from_time": 1700000000000,
             "to_time": 1700001000000,
-            "requestId": "req_1700123456789_001"
+            "requestId": "550e8400e29b41d4a716446655440000"
         },
         "result": null,
         "status": "completed",
@@ -129,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks (created_at DESC);
         "payload": {
             "symbol": "BTCUSDT",
             "interval": "1",
-            "requestId": "req_1700123456789_001"
+            "requestId": "550e8400e29b41d4a716446655440000"
         },
         "result": {
             "error": "Binance API error",
@@ -781,18 +781,18 @@ $$ LANGUAGE plpgsql;
     "interval": "60",
     "from_time": 1703123456000,
     "to_time": 1703209856000,
-    "requestId": "req_1703123456789_004"
+    "requestId": "550e8400e29b41d4a716446655440000"
 }
 
 // get_server_time
 {
-    "requestId": "req_1703123456789_005"
+    "requestId": "550e8400e29b41d4a716446655440000"
 }
 
 // get_quotes
 {
     "symbols": ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT"],
-    "requestId": "req_1703123456789_006"
+    "requestId": "550e8400e29b41d4a716446655440000"
 }
 ```
 

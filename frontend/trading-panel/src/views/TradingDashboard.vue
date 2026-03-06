@@ -39,11 +39,15 @@ function connectWebSocket() {
 
     ws.onopen = () => {
       log('log', 'WebSocket connected')
-      // Subscribe to order updates
+      // Subscribe to order updates (遵循 07-websocket-protocol.md 订阅消息格式)
       ws?.send(
         JSON.stringify({
+          protocolVersion: '2.0',
           type: 'SUBSCRIBE',
-          subscriptions: ['TRADING:ORDER'],
+          timestamp: Date.now(),
+          data: {
+            subscriptions: ['TRADING:ORDER'],
+          },
         })
       )
     }

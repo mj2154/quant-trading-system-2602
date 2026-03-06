@@ -55,7 +55,7 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
         self,
         api_key: str,
         private_key_pem: bytes,
-        timeout: float = 30.0,
+        timeout: float = 5.0,
         proxy_url: Optional[str] = None,
         use_testnet: bool = True,
     ) -> None:
@@ -176,10 +176,10 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
                     logger.info(f"[{self.CLIENT_ID}] 认证成功")
                 else:
                     logger.error(f"[{self.CLIENT_ID}] 认证失败: {ws_response.error}")
-                    await self.disconnect()
+                    await self._force_disconnect()
             except Exception as e:
                 logger.error(f"[{self.CLIENT_ID}] 认证响应处理失败: {e}")
-                await self.disconnect()
+                await self._force_disconnect()
             finally:
                 auth_completed.set()
 
@@ -203,12 +203,38 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
                 await asyncio.wait_for(auth_completed.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 logger.error(f"[{self.CLIENT_ID}] 认证超时")
-                await self.disconnect()
+                await self._force_disconnect()
 
         except Exception as e:
             logger.error(f"[{self.CLIENT_ID}] 认证失败: {e}")
             self._auth_callback = None
-            await self.disconnect()
+            await self._force_disconnect()
+
+    async def _force_disconnect(self) -> None:
+        """强制断开连接（保持_running状态，让基类自动重连）
+
+        认证失败时调用此方法断开连接，但保持运行状态。
+        关闭WebSocket后，基类的接收循环会检测到连接关闭并触发自动重连。
+        """
+        logger.info(f"[{self.CLIENT_ID}] 强制断开连接，准备重连...")
+        self._authenticated = False
+        self._state.connected = False
+
+        # 取消接收任务，防止它继续运行
+        if self._receive_task and not self._receive_task.done():
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+            self._receive_task = None
+
+        if self._websocket:
+            try:
+                await self._websocket.close()
+            except Exception as e:
+                logger.warning(f"[{self.CLIENT_ID}] 关闭连接时出错: {e}")
+            self._websocket = None
 
     def _create_auth_request(self, timestamp: int) -> dict[str, Any]:
         """创建认证请求

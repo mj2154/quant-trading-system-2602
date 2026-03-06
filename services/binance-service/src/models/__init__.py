@@ -45,6 +45,21 @@ from .ws_message import (
     WSSubscribeRequest,
     WSUnsubscribeRequest,
 )
+from .trading_order import (
+    SpotWsOrderRequest,
+    FuturesWsOrderRequest,
+    WsQueryOrderRequest,
+    WsCancelOrderRequest,
+    SpotWsOrderResponse,
+    FuturesWsOrderResponse,
+    WsCancelOrderResponse,
+    OrderType,
+    OrderSide,
+    PositionSide,
+    TimeInForce,
+    OrderResponseType,
+    OrderStatus,
+)
 
 __all__ = [
     # 基类
@@ -86,4 +101,18 @@ __all__ = [
     "WSRequest",
     "WSSubscribeRequest",
     "WSUnsubscribeRequest",
+    # 订单模型
+    "SpotWsOrderRequest",
+    "FuturesWsOrderRequest",
+    "WsQueryOrderRequest",
+    "WsCancelOrderRequest",
+    "SpotWsOrderResponse",
+    "FuturesWsOrderResponse",
+    "WsCancelOrderResponse",
+    "OrderType",
+    "OrderSide",
+    "PositionSide",
+    "TimeInForce",
+    "OrderResponseType",
+    "OrderStatus",
 ]

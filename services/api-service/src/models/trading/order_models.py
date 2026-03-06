@@ -20,7 +20,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from ..base import SnakeCaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -67,62 +69,79 @@ class MarketType(str, Enum):
     FUTURES = "FUTURES"
 
 
-class CreateOrderRequest(BaseModel):
+class CreateOrderRequest(SnakeCaseModel):
     """创建订单请求
 
-    必填字段：symbol, side, type, quantity
-    可选字段：price, timeInForce, positionSide, reduceOnly, clientOrderId
+    必填字段：symbol, side, type, quantity, new_client_order_id
+    可选字段根据 order type 不同而变化
 
-    设计参考：04-trading-orders.md order.create 参数
+    设计参考：
+    - 现货: https://binance-docs.github.io/apidocs/spot/cn/#trade
+    - 期货: https://binance-docs.github.io/apidocs/futures/cn/#trade
+
+    完全采用币安蛇形命名，前端发送camelCase后端自动转换
     """
 
     # 必填字段
     symbol: str = Field(..., description="交易对符号，如 BTCUSDT")
-    side: OrderSide = Field(..., description="订单方向：BUY 或 SELL")
-    type: OrderType = Field(..., description="订单类型：LIMIT, MARKET 等")
+    side: str = Field(..., description="订单方向：BUY 或 SELL")
+    type: str = Field(..., description="订单类型：LIMIT, MARKET 等")
     quantity: float = Field(..., gt=0, description="订单数量，必须大于0")
 
-    # 可选字段
+    # 必填：订单标识（UUID格式）
+    new_client_order_id: str = Field(..., description="客户端订单ID（UUID格式，必填）")
+
+    # 可选字段（蛇形命名与币安一致）
     price: float | None = Field(None, description="限价价格")
-    timeInForce: OrderTimeInForce | None = Field(None, description="订单有效时间")
-    positionSide: str | None = Field(None, description="持仓方向：BOTH, LONG, SHORT")
-    reduceOnly: bool = Field(False, description="是否只减仓")
-    clientOrderId: str | None = Field(None, description="客户端自定义订单ID")
-    marketType: MarketType = Field(MarketType.FUTURES, description="市场类型")
+    time_in_force: str | None = Field(None, description="订单有效时间：GTC, IOC, FOK")
+    position_side: str | None = Field("BOTH", description="持仓方向：BOTH, LONG, SHORT")
+    reduce_only: bool = Field(False, description="是否只减仓")
+    stop_price: float | None = Field(None, description="止损价格")
+    activation_price: float | None = Field(None, description="触发价格（追踪止损）")
+    callback_rate: float | None = Field(None, description="回调比例（0.1-10）")
+    working_type: str | None = Field("CONTRACT_PRICE", description="触发价格类型")
+    price_protect: bool = Field(False, description="价格保护")
+    close_position: bool = Field(False, description="是否全平仓")
+    price_match: str | None = Field(None, description="价格匹配")
+    good_till_date: int | None = Field(None, description="GTD订单取消时间")
 
-    @field_validator("price", mode="before")
-    @classmethod
-    def validate_price_for_market_order(cls, v, info):
-        """市价单不应该有价格字段"""
-        if info.data.get("type") == OrderType.MARKET and v is not None:
-            logger.warning("Market order should not have price, ignoring price field")
-            return None
-        return v
+    # 现货可选字段
+    quote_order_qty: float | None = Field(None, description="报价数量（市价买单时指定支付金额）")
+    iceberg_qty: float | None = Field(None, description="冰山订单数量")
+    self_trade_prevention_mode: str | None = Field(None, description="自成交防止模式")
+    new_order_resp_type: str | None = Field("FULL", description="响应格式：ACK, RESULT, FULL")
 
-    def model_post_init(self, __context) -> None:
-        """验证逻辑"""
+    @model_validator(mode="after")
+    def validate_order(self) -> "CreateOrderRequest":
+        """验证订单必填字段"""
+
         # 限价单必须有价格
-        if self.type == OrderType.LIMIT and self.price is None:
+        if self.type == "LIMIT" and self.price is None:
             raise ValueError("Limit order requires price field")
 
-    class Config:
-        use_enum_values = True
+        # LIMIT 订单必须有 time_in_force
+        if self.type == "LIMIT" and self.time_in_force is None:
+            raise ValueError("Limit order requires timeInForce field")
+
+        return self
 
 
-class GetOrderRequest(BaseModel):
+class GetOrderRequest(SnakeCaseModel):
     """查询订单请求
 
-    至少需要提供 orderId 或 clientOrderId 之一
+    至少需要提供 order_id 或 orig_client_order_id 之一
 
     设计参考：04-trading-orders.md order.query 参数
+    - 前端发送 camelCase，后端自动转换为 snake_case
+    - 通过 symbol 前缀区分期货/现货（.PERP 为期货）
+    - 现货和期货参数完全一致
     """
 
     symbol: str = Field(..., description="交易对符号")
-    orderId: int | str | None = Field(None, description="币安订单ID")
-    clientOrderId: str | None = Field(None, description="客户端自定义订单ID")
-    marketType: MarketType = Field(MarketType.FUTURES, description="市场类型")
+    order_id: int | str | None = Field(None, description="币安订单ID")
+    orig_client_order_id: str | None = Field(None, description="客户端自定义订单ID")
 
-    @field_validator("orderId", mode="before")
+    @field_validator("order_id", mode="before")
     @classmethod
     def convert_order_id(cls, v):
         """允许字符串形式的数字"""
@@ -130,47 +149,55 @@ class GetOrderRequest(BaseModel):
             return int(v)
         return v
 
-    def validate(self) -> bool:
+    @model_validator(mode="after")
+    def validate_required_fields(self) -> "GetOrderRequest":
         """验证必填字段"""
-        if not self.orderId and not self.clientOrderId:
-            raise ValueError("Either orderId or clientOrderId is required")
-        return True
-
-    class Config:
-        use_enum_values = True
+        if not self.order_id and not self.orig_client_order_id:
+            raise ValueError("Either orderId or origClientOrderId is required")
+        return self
 
 
-class ListOrdersRequest(BaseModel):
+class ListOrdersRequest(SnakeCaseModel):
     """查询订单列表请求
 
     可选过滤条件
+
+    设计参考：04-trading-orders.md
+    - 前端发送 camelCase，后端自动转换为 snake_case
+    - 通过 symbol 前缀区分期货/现货（.PERP 为期货）
     """
 
     symbol: str | None = Field(None, description="交易对符号")
     status: str | None = Field(None, description="订单状态过滤")
-    startTime: int | None = Field(None, description="起始时间（毫秒）")
-    endTime: int | None = Field(None, description="结束时间（毫秒）")
+    start_time: int | None = Field(None, description="起始时间（毫秒）")
+    end_time: int | None = Field(None, description="结束时间（毫秒）")
     limit: int = Field(100, ge=1, le=1000, description="返回数量限制")
-    marketType: MarketType = Field(MarketType.FUTURES, description="市场类型")
-
-    class Config:
-        use_enum_values = True
 
 
-class CancelOrderRequest(BaseModel):
+class CancelOrderRequest(SnakeCaseModel):
     """撤销订单请求
 
-    至少需要提供 orderId 或 clientOrderId 之一
+    至少需要提供 order_id 或 orig_client_order_id 之一
 
     设计参考：04-trading-orders.md order.cancel 参数
+    - 前端发送 camelCase，后端自动转换为 snake_case
+    - 通过 symbol 前缀区分期货/现货（.PERP 为期货）
+    - 现货特有可选参数：new_client_order_id, cancel_restrictions
     """
 
     symbol: str = Field(..., description="交易对符号")
-    orderId: int | str | None = Field(None, description="币安订单ID")
-    clientOrderId: str | None = Field(None, description="客户端自定义订单ID")
-    marketType: MarketType = Field(MarketType.FUTURES, description="市场类型")
+    order_id: int | str | None = Field(None, description="币安订单ID")
+    orig_client_order_id: str | None = Field(None, description="客户端自定义订单ID")
 
-    @field_validator("orderId", mode="before")
+    # 现货特有可选参数（期货不支持）
+    new_client_order_id: str | None = Field(
+        None, description="用于唯一标识此次取消操作（仅现货支持）"
+    )
+    cancel_restrictions: str | None = Field(
+        None, description="取消限制条件：ONLY_NEW, ONLY_PARTIALLY_FILLED（仅现货支持）"
+    )
+
+    @field_validator("order_id", mode="before")
     @classmethod
     def convert_order_id(cls, v):
         """允许字符串形式的数字"""
@@ -178,24 +205,23 @@ class CancelOrderRequest(BaseModel):
             return int(v)
         return v
 
-    def validate(self) -> bool:
+    @model_validator(mode="after")
+    def validate_required_fields(self) -> "CancelOrderRequest":
         """验证必填字段"""
-        if not self.orderId and not self.clientOrderId:
-            raise ValueError("Either orderId or clientOrderId is required")
-        return True
-
-    class Config:
-        use_enum_values = True
+        if not self.order_id and not self.orig_client_order_id:
+            raise ValueError("Either orderId or origClientOrderId is required")
+        return self
 
 
-class GetOpenOrdersRequest(BaseModel):
-    """查询当前挂单请求"""
+class GetOpenOrdersRequest(SnakeCaseModel):
+    """查询当前挂单请求
+
+    设计参考：04-trading-orders.md
+    - 前端发送 camelCase，后端自动转换为 snake_case
+    - 通过 symbol 前缀区分期货/现货（.PERP 为期货）
+    """
 
     symbol: str | None = Field(None, description="交易对符号，不传则返回所有")
-    marketType: MarketType = Field(MarketType.FUTURES, description="市场类型")
-
-    class Config:
-        use_enum_values = True
 
 
 class OrderData(BaseModel):

@@ -114,11 +114,11 @@ CREATE TABLE order_tasks (
     -- 贯穿整个数据流：前端 → API → 币安 → 结果推送
     request_id VARCHAR(50),
 
-    -- 任务参数（JSON格式）
+    -- 任务参数（JSON格式，蛇形命名与币安一致）
     -- 注意：不再包含 requestId，从顶层字段获取
-    -- order.create: {symbol, side, type, quantity, price, timeInForce, clientOrderId, marketType, ...}
-    -- order.cancel: {symbol, orderId, clientOrderId}
-    -- order.query:  {symbol, orderId, clientOrderId}
+    -- order.create: {symbol, side, type, quantity, new_client_order_id, price, time_in_force, position_side, ...}
+    -- order.cancel: {symbol, orderId, new_client_order_id}
+    -- order.query:  {symbol, orderId, new_client_order_id}
     payload JSONB NOT NULL DEFAULT '{}',
 
     -- 任务结果（API响应或错误信息）
@@ -166,38 +166,66 @@ CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, sta
 ### 4.2 request_id 请求ID（重要）
 
 > **设计决策**: `request_id` 从 payload 提升到顶层字段，原因：
-> 1. **贯穿整个数据流**: 前端生成 → API写入 → 币安API调用 → 结果推送
+> 1. **贯穿整个数据流**: 前端生成 → API写入 → 结果推送
 > 2. **可建索引优化**: 顶层字段可建索引，查询效率高
-> 3. **语义更清晰**: 顶层字段表示"请求身份"，payload 表示"请求参数"
+> 3. **语义更清晰**: 顶层字段表示"WS请求身份"，用于关联请求与响应
 > 4. **与 tasks 表统一**: 保持两张表结构一致
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `request_id` | VARCHAR(50) | 请求ID（前端生成，格式: req_xxx，用于关联 ack/response） |
+| `request_id` | VARCHAR(50) | WS请求追踪ID（前端生成，UUID v4 hex 格式，32字符），用于关联请求与响应 |
+
+> **requestId vs newClientOrderId 区分**：
+> - `requestId`: WS请求追踪ID，用于前端判断请求是否成功送达
+> - `newClientOrderId`: 订单标识ID，用于在前端和交易所层面追踪订单状态
+> - 两者独立生成，各自有不同的用途
 
 **数据流示例**:
 ```
-1. 前端生成 request_id: "req_a1b2c3d4e5f6g7h8"
-2. 前端发送请求: { type: "CREATE_ORDER", requestId: "req_a1b2c3d4e5f6g7h8", ... }
-3. API写入数据库: request_id = "req_a1b2c3d4e5f6g7h8", payload = {...}
-4. 币安API调用: request_id 作为 clientOrderId 的一部分
-5. 结果推送: 通知携带 request_id，前端匹配请求和响应
+1. 前端生成 request_id: "550e8400e29b41d4a716446655440000"
+2. 前端生成 new_client_order_id: "660e8400e29b41d4a716446655440001"
+3. 前端发送请求: { type: "CREATE_ORDER", requestId: "550e8400...", data: {newClientOrderId: "660e8400..."} }
+4. API写入数据库: request_id = "550e8400...", payload包含 new_client_order_id = "660e8400..."
+5. 币安API调用: 使用 new_client_order_id 作为 clientOrderId
+6. 结果推送: 通知携带 request_id，前端匹配请求和响应
 ```
 
-### 4.3 payload 参数格式
+### 4.3 payload 参数格式（蛇形命名）
 
-> **注意**: payload 不再包含 requestId 字段，从顶层 request_id 获取。
+> **重要变更**：
+> - 完全采用币安蛇形命名，与币安API格式完全一致
+> - 不再使用 `marketType` 字段区分期货/现货，通过 symbol 前缀识别
+> - `new_client_order_id` 为必填字段
 
-| 字段 | 类型 | 说明 |
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `symbol` | string | 是 | 交易对符号（如 BTCUSDT） |
+| `side` | string | 是 | 买卖方向 (BUY/SELL) |
+| `type` | string | 是 | 订单类型 |
+| `quantity` | float | 是 | 数量 |
+| `new_client_order_id` | string | 是 | 客户端订单ID（UUID格式） |
+| `price` | float | 条件 | 价格（限价单必需） |
+| `time_in_force` | string | 条件 | 有效期 (GTC/IOC/FOK) |
+| `position_side` | string | 否 | 持仓方向（期货：BOTH/LONG/SHORT） |
+| `reduce_only` | bool | 否 | 是否只减仓 |
+| `stop_price` | float | 条件 | 止损价格 |
+| `activation_price` | float | 否 | 触发价格（追踪止损） |
+| `callback_rate` | float | 条件 | 回调比例（追踪止损） |
+| `quote_order_qty` | float | 否 | 报价数量（现货市价单可用） |
+| `iceberg_qty` | float | 否 | 冰山订单数量（LIMIT订单可用） |
+| `self_trade_prevention_mode` | string | 否 | 自成交防止模式 |
+| `new_order_resp_type` | string | 否 | 响应格式：ACK/RESULT/FULL（默认FULL） |
+
+#### 期货 vs 现货区分
+
+通过交易对符号前缀区分：
+
+| 前缀 | 市场 | 示例 |
 |------|------|------|
-| `symbol` | string | 交易对符号 |
-| `side` | string | 买卖方向 (BUY/SELL) |
-| `orderType` | string | 订单类型 (LIMIT/MARKET) |
-| `quantity` | number | 数量 |
-| `price` | number | 价格（限价单必需） |
-| `timeInForce` | string | 有效期 (GTC/IOC/FOK) |
-| `clientOrderId` | string | 客户端订单ID（可选） |
-| `marketType` | string | 市场类型 (SPOT/FUTURES) |
+| `BINANCE:` | 现货 | `BINANCE:BTCUSDT` |
+| `BINANCE:` + `.PERP` 后缀 | U本位永续合约 | `BINANCE:BTCUSDT.PERP` |
+
+后端根据 symbol 前缀自动识别市场类型，payload 中不再包含 `marketType` 字段。
 
 #### order.create 参数
 
@@ -205,38 +233,57 @@ CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, sta
 {
     "symbol": "BTCUSDT",
     "side": "BUY",
-    "orderType": "LIMIT",
+    "type": "LIMIT",
     "quantity": 0.002,
+    "new_client_order_id": "660e8400e29b41d4a716446655440001",
     "price": 50000.0,
-    "timeInForce": "GTC",
-    "positionSide": "BOTH",
-    "reduceOnly": false,
-    "clientOrderId": "my_order_001"
+    "time_in_force": "GTC",
+    "position_side": "BOTH",
+    "reduce_only": false
 }
 ```
-> 顶层字段: request_id = "req_a1b2c3d4e5f6g7h8"
+> 顶层字段: request_id = "550e8400e29b41d4a716446655440000"
 
-#### order.cancel 参数
+#### order.cancel 参数（取消订单）
+
+**命名规则**：前端发送 camelCase，后端自动转换为 snake_case 存储
 
 ```json
 {
     "symbol": "BTCUSDT",
     "orderId": 22542179,
-    "clientOrderId": "testOrder"
+    "origClientOrderId": "660e8400e29b41d4a716446655440001",
+    "newClientOrderId": "770e8400e29b41d4a716446655440002",
+    "cancelRestrictions": "ONLY_NEW"
 }
 ```
-> 顶层字段: request_id = "req_i9j0k1l2m3n4o5p6"
+> 顶层字段: request_id = "660e8400e29b41d4a716446655440001"
+> **必填**：`symbol`，以及 `orderId` 或 `origClientOrderId`（二选一）
 
-#### order.query 参数
+##### 现货特有可选参数（前端 camelCase，后端自动转换）
+
+| 前端字段 (camelCase) | 后端字段 (snake_case) | 类型 | 说明 |
+|---------------------|----------------------|------|------|
+| `newClientOrderId` | `new_client_order_id` | string | 用于唯一标识此次取消操作，自动生成 |
+| `cancelRestrictions` | `cancel_restrictions` | string | 取消限制条件：`ONLY_NEW`、`ONLY_PARTIALLY_FILLED` |
+
+> **注意**：期货 (fapi) 不支持 `newClientOrderId` 和 `cancelRestrictions` 参数，仅现货 (api) 支持。
+
+#### order.query 参数（查询订单）
+
+**命名规则**：前端发送 camelCase，后端自动转换为 snake_case 存储
 
 ```json
 {
     "symbol": "BTCUSDT",
     "orderId": 22542179,
-    "clientOrderId": "testOrder"
+    "origClientOrderId": "660e8400e29b41d4a716446655440001"
 }
 ```
-> 顶层字段: request_id = "req_q7r8s9t0u1v2w3x4"
+> 顶层字段: request_id = "770e8400e29b41d4a716446655440002"
+> **必填**：`symbol`，以及 `orderId` 或 `origClientOrderId`（二选一）
+
+> **说明**：查询订单 API 现货和期货参数完全一致，无额外可选参数。
 
 ### 4.3 status 状态流转
 
@@ -349,7 +396,7 @@ pending → processing → completed (成功)
 
 ```python
 # 前端或 API 创建订单任务
-# request_id 格式: req_a1b2c3d4e5f6g7h8 (UUID前16位)
+# request_id 格式: 550e8400e29b41d4a716446655440000 (UUID前16位)
 
 # 写入数据库（request_id 提升到顶层字段）
 await pool.execute("""
@@ -358,16 +405,15 @@ await pool.execute("""
     ) VALUES ($1, $2, $3, $4)
 """,
     "order.create",
-    "req_a1b2c3d4e5f6g7h8",  # 顶层字段 request_id
+    "550e8400e29b41d4a716446655440000",  # 顶层字段 request_id
     {
-        "clientOrderId": "my_order_001",
-        "marketType": "FUTURES",
+        "new_client_order_id": "660e8400e29b41d4a716446655440001",
         "symbol": "BTCUSDT",
         "side": "BUY",
-        "orderType": "LIMIT",
+        "type": "LIMIT",
         "quantity": 0.002,
         "price": 50000.0,
-        "timeInForce": "GTC"
+        "time_in_force": "GTC"
     },
     "pending"
 )
@@ -377,7 +423,7 @@ await pool.execute("""
 
 ```python
 # 通过 request_id 顶层字段查询（可建索引，查询高效）
-request_id = "req_a1b2c3d4e5f6g7h8"
+request_id = "550e8400e29b41d4a716446655440000"
 
 row = await pool.fetchrow("""
     SELECT * FROM order_tasks
@@ -396,7 +442,7 @@ elif row["status"] == "failed":
 
 ```python
 # 创建查询任务
-# request_id 格式: req_a1b2c3d4e5f6g7h8
+# request_id 格式: 550e8400e29b41d4a716446655440000
 
 await pool.execute("""
     INSERT INTO order_tasks (
@@ -404,9 +450,8 @@ await pool.execute("""
     ) VALUES ($1, $2, $3, $4)
 """,
     "order.query",
-    "req_i9j0k1l2m3n4o5p6",  # 顶层字段 request_id
+    "660e8400e29b41d4a716446655440001",  # 顶层字段 request_id
     {
-        "marketType": "FUTURES",
         "symbol": "BTCUSDT",
         "orderId": binance_order_id
     },
@@ -434,5 +479,8 @@ current_status = row["result"]["status"]
 
 ---
 
-**版本**: v2.2
-**更新**: 2026-03-04 - request_id 从 payload 提升到顶层字段；tasks 表也添加 request_id 字段保持统一
+**版本**: v2.5
+**更新**: 2026-03-06 - 补充现货特有可选参数：取消订单支持newClientOrderId和cancelRestrictions
+
+**版本**: v2.4
+**更新**: 2026-03-06 - 采用币安蛇形命名；newClientOrderId改为必填；去掉marketType字段，通过symbol前缀区分期货/现货；requestId与newClientOrderId区分；取消/查询使用origClientOrderId

@@ -6,6 +6,16 @@
 
 本系统不仅为 TradingView 图表库提供数据服务，还支持账户实时订阅、告警管理、信号查询等多种功能。
 
+**v2.5 核心改进** (2026-03-06):
+- 🚀 **补充现货特有可选参数** - 取消订单支持 newClientOrderId 和 cancelRestrictions 参数
+
+**v2.4 核心改进** (2026-03-06):
+- 🚀 **订单数据模型重构** - 完全采用币安蛇形命名，与币安API格式完全一致
+- 🚀 **newClientOrderId改为必填** - 前端独立生成，用于订单追踪
+- 🚀 **requestId与newClientOrderId区分** - requestId用于WS请求追踪，newClientOrderId用于订单追踪
+- 🚀 **去掉marketType字段** - 通过symbol前缀区分期货/现货（.PERP后缀为期货）
+- 🚀 **取消/查询订单使用origClientOrderId** - 按币安规范，取消和查询时使用origClientOrderId字段
+
 **v2.3 核心改进** (2026-03-02):
 - 🚀 **交易功能支持** - 新增交易消息类型 (CREATE_ORDER, GET_ORDER, LIST_ORDERS, CANCEL_ORDER, GET_OPEN_ORDERS)
 - 🚀 **订单数据推送** - 新增 ORDER_UPDATE 订阅类型，支持订单状态实时推送
@@ -222,6 +232,230 @@ class KlineResponse(BaseModel):
 **数据存储**：
 - 交易请求写入 `order_tasks` 表（而非 `tasks` 表）
 - 触发 `order_task_new` 通知给 binance-service 执行
+
+### 订单数据模型设计
+
+> **设计原则**：完全采用币安官方格式，避免参数命名混乱
+> - data 字段完全采用币安蛇形命名（与币安API完全一致）
+> - 前端发送 camelCase，后端 SnakeCaseModel 基类自动转换
+> - 期货与现货完全分开建模，结构清晰不混淆
+> - 区分 requestId（请求追踪）和 newClientOrderId（订单标识）
+
+#### 1. 期货 vs 现货区分
+
+通过交易对符号前缀区分：
+
+| 前缀 | 市场 | 示例 |
+|------|------|------|
+| `BINANCE:` | 现货 | `BINANCE:BTCUSDT` |
+| `BINANCE:` + `.PERP` 后缀 | U本位永续合约 | `BINANCE:BTCUSDT.PERP` |
+
+> **注意**：不再使用 `marketType` 字段区分，通过 symbol 前缀自动识别
+
+#### 2. 请求ID说明
+
+| 字段 | 说明 | 格式 |
+|------|------|------|
+| `requestId` | WS请求追踪ID | UUID v4 hex (32字符)，前端生成，用于关联请求/响应 |
+| `newClientOrderId` | 订单标识ID | UUID v4 hex (32字符)，前端生成，用于关联订单与推送 |
+
+```
+requestId: 用于前端追踪WS请求是否成功送达
+newClientOrderId: 用于在前端和交易所层面追踪订单状态
+```
+
+#### 3. CREATE_ORDER 请求格式（期货）
+
+采用币安 U本位合约 API 格式，蛇形命名：
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "CREATE_ORDER",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "type": "LIMIT",
+        "quantity": 0.002,
+        "newClientOrderId": "660e8400e29b41d4a716446655440001",
+        "price": 50000.0,
+        "timeInForce": "GTC",
+        "positionSide": "BOTH",
+        "reduceOnly": false
+    }
+}
+```
+
+**必填字段**：`symbol`, `side`, `type`, `quantity`, `newClientOrderId`
+
+#### 4. CREATE_ORDER 请求格式（现货）
+
+采用币安现货 API 格式，蛇形命名：
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "CREATE_ORDER",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "type": "LIMIT",
+        "quantity": 0.002,
+        "newClientOrderId": "660e8400e29b41d4a716446655440001",
+        "price": 50000.0,
+        "timeInForce": "GTC"
+    }
+}
+```
+
+**必填字段**：`symbol`, `side`, `type`, `quantity`, `newClientOrderId`
+
+#### 5. Order Type 强制参数（期货）
+
+| Order Type | 强制必填参数 |
+|------------|-------------|
+| `LIMIT` | `quantity`, `price`, `timeInForce` |
+| `MARKET` | `quantity` |
+| `STOP` / `TAKE_PROFIT` | `quantity`, `stopPrice`, `price` |
+| `STOP_MARKET` / `TAKE_PROFIT_MARKET` | `stopPrice` |
+| `TRAILING_STOP_MARKET` | `callbackRate` |
+
+#### 6. Order Type 强制参数（现货）
+
+| Order Type | 强制必填参数 |
+|------------|-------------|
+| `LIMIT` | `quantity`, `price`, `timeInForce` |
+| `LIMIT_MAKER` | `quantity`, `price` |
+| `MARKET` | `quantity` 或 `quoteOrderQty` |
+| `STOP_LOSS` / `TAKE_PROFIT` | `quantity`, `stopPrice` 或 `trailingDelta` |
+| `STOP_LOSS_LIMIT` / `TAKE_PROFIT_LIMIT` | `quantity`, `price`, `timeInForce`, `stopPrice` 或 `trailingDelta` |
+
+#### 7. 期货特有参数
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `positionSide` | string | 持仓方向：`BOTH`(默认), `LONG`, `SHORT` |
+| `reduceOnly` | bool | 是否只减仓，默认 `false` |
+| `priceMatch` | string | 价格匹配：`OPPONENT`, `QUEUE` 等 |
+| `closePosition` | bool | 是否全平仓 |
+| `activationPrice` | float | 触发价格（追踪止损） |
+| `callbackRate` | float | 回调比例（0.1-10） |
+| `workingType` | string | 触发价格类型：`MARK_PRICE`, `CONTRACT_PRICE` |
+| `priceProtect` | bool | 价格保护 |
+
+#### 8. 现货特有参数
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `quoteOrderQty` | float | 报价数量（以USDT计价） |
+| `icebergQty` | float | 冰山数量 |
+| `trailingDelta` | int | 追踪Delta |
+| `strategyId` | int | 策略ID |
+| `strategyType` | int | 策略类型 |
+| `selfTradePreventionMode` | string | 自成交预防模式 |
+| `newOrderRespType` | string | 响应格式：ACK/RESULT/FULL（默认FULL） |
+
+#### 10. 订单ID说明
+
+| 字段 | 说明 | 用途 |
+|------|------|------|
+| `requestId` | WS请求追踪ID（UUID格式） | 用于关联请求与响应 |
+| `newClientOrderId` | 订单标识ID（UUID格式） | 创建订单时设置，用于追踪订单 |
+| `origClientOrderId` | 客户端订单ID（原值） | 查询/取消订单时使用 |
+
+> **重要**：取消和查询订单时使用 `origClientOrderId`（下单时传入的客户端订单ID），而非 `newClientOrderId`。
+
+#### 11. GET_ORDER 请求格式（查询订单）
+
+采用币安 API 格式，**前端发送 camelCase，后端自动转换为 snake_case**：
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "GET_ORDER",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "symbol": "BTCUSDT",
+        "orderId": 22542179,
+        "origClientOrderId": "660e8400e29b41d4a716446655440001"
+    }
+}
+```
+
+**必填字段**：`symbol`，以及 `orderId` 或 `origClientOrderId`（二选一）
+
+> **说明**：查询订单 API 现货和期货参数完全一致，无额外可选参数。
+
+#### 12. CANCEL_ORDER 请求格式（取消订单）
+
+采用币安 API 格式，**前端发送 camelCase，后端自动转换为 snake_case**：
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "CANCEL_ORDER",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "symbol": "BTCUSDT",
+        "orderId": 22542179,
+        "origClientOrderId": "660e8400e29b41d4a716446655440001",
+        "newClientOrderId": "770e8400e29b41d4a716446655440002",
+        "cancelRestrictions": "ONLY_NEW"
+    }
+}
+```
+
+**必填字段**：`symbol`，以及 `orderId` 或 `origClientOrderId`（二选一）
+
+##### 现货特有可选参数（前端 camelCase，后端自动转换）
+
+| 前端字段 (camelCase) | 后端字段 (snake_case) | 类型 | 说明 |
+|---------------------|----------------------|------|------|
+| `newClientOrderId` | `new_client_order_id` | string | 用于唯一标识此次取消操作，自动生成 |
+| `cancelRestrictions` | `cancel_restrictions` | string | 取消限制条件：`ONLY_NEW`、`ONLY_PARTIALLY_FILLED` |
+
+> **注意**：期货 (fapi) 不支持 `newClientOrderId` 和 `cancelRestrictions` 参数，仅现货 (api) 支持。
+
+#### 13. LIST_ORDERS 请求格式（查询订单列表）
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "LIST_ORDERS",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "symbol": "BTCUSDT",
+        "startTime": 1704067200000,
+        "endTime": 1706745600000,
+        "limit": 100
+    }
+}
+```
+
+**可选字段**：`symbol`, `startTime`, `endTime`, `limit`
+
+#### 14. GET_OPEN_ORDERS 请求格式（查询当前挂单）
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "GET_OPEN_ORDERS",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "symbol": "BTCUSDT"
+    }
+}
+```
+
+**可选字段**：`symbol`（不传则返回所有）
 
 ### 心跳机制（Ping-Pong）
 
@@ -488,7 +722,7 @@ v2.0 完全不兼容 v1.0 格式。前端需要使用新的订阅键格式。
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_i9j0k1l2m3n4o5p6",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "type": "search_symbols",
@@ -623,7 +857,7 @@ const subscribeRequest = {
 |------|------|-----|------|
 | `protocolVersion` | string | 是 | 协议版本（如 `2.0`） |
 | `type` | string | 是 | 消息类型，如 `GET_KLINES`, `SUCCESS`, `ACK`, `UPDATE` |
-| `requestId` | string | 否 | 请求ID，请求/响应必填，推送可省略 |
+| `requestId` | string | 否 | 请求ID（UUID v4 hex 格式，32字符，如 `550e8400e29b41d4a716446655440000`），可直接作为币安 clientOrderId，请求/响应必填，推送可省略 |
 | `timestamp` | long | 是 | Unix 时间戳（**毫秒**，13位数字，如 `1704067200000`） |
 | `data` | object | 是 | 消息数据内容 |
 
@@ -633,7 +867,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_KLINES",
-    "requestId": "req_a1b2c3d4e5f6g7h8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1234567890,
     "data": {
         "symbol": "BTCUSDT",
@@ -649,7 +883,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "ACK",
-    "requestId": "req_a1b2c3d4e5f6g7h8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1234567890,
     "data": {}
 }
@@ -660,7 +894,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "KLINES_DATA",
-    "requestId": "req_a1b2c3d4e5f6g7h8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1234567890,
     "data": {
         "symbol": "BTCUSDT",
@@ -676,7 +910,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "ERROR",
-    "requestId": "req_a1b2c3d4e5f6g7h8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1234567890,
     "data": {
         "errorCode": "INVALID_SYMBOL",
@@ -832,7 +1066,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_CONFIG",
-    "requestId": "req_a1b2c3d4e5f6g7h8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {}
 }
@@ -851,7 +1085,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_SEARCH_SYMBOLS",
-    "requestId": "req_i9j0k1l2m3n4o5p6",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {
         "query": "BTC",
@@ -885,7 +1119,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_RESOLVE_SYMBOL",
-    "requestId": "req_q7r8s9t0u1v2w3x4",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {
         "symbol": "BINANCE:BTCUSDT"
@@ -908,7 +1142,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "SYMBOL_DATA",
-    "requestId": "req_q7r8s9t0u1v2w3x4",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "symbol": "BTCUSDT",
@@ -970,7 +1204,7 @@ const subscribeRequest = {
 {
     "protocolVersion": "2.0",
     "type": "GET_KLINES",
-    "requestId": "req_y5z6a7b8c9d0e1f2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {
         "symbol": "BINANCE:BTCUSDT",
@@ -1113,7 +1347,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACK",
-    "requestId": "req_y5z6a7b8c9d0e1f2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {}
 }
@@ -1126,7 +1360,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "KLINES_DATA",
-    "requestId": "req_y5z6a7b8c9d0e1f2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456800,
     "data": {
         "symbol": "BINANCE:BTCUSDT",
@@ -1147,7 +1381,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_SERVER_TIME",
-    "requestId": "req_g3h4i5j6k7l8m9n0",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {}
     }
@@ -1167,7 +1401,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_FUTURES_ACCOUNT",
-    "requestId": "req_a1b2c3d4e5f6g7h8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {}
 }
@@ -1183,7 +1417,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACCOUNT_DATA",
-    "requestId": "req_a1b2c3d4e5f6g7h8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "account": {
@@ -1223,7 +1457,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_SPOT_ACCOUNT",
-    "requestId": "req_i9j0k1l2m3n4o5p6",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {}
 }
@@ -1239,7 +1473,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACCOUNT_DATA",
-    "requestId": "req_i9j0k1l2m3n4o5p6",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "account": {
@@ -1271,7 +1505,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_SUBSCRIPTIONS",
-    "requestId": "req_o1p2q3r4s5t6u7v8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {}
 }
@@ -1291,7 +1525,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_QUOTES",
-    "requestId": "req_o1p2q3r4s5t6u7v8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {
         "symbols": ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT"]
@@ -1322,7 +1556,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SUBSCRIBE",
-    "requestId": "req_w9x0y1z2a3b4c5d6",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {
         "subscriptions": [
@@ -1370,7 +1604,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "UNSUBSCRIBE",
-    "requestId": "req_e7f8g9h0i1j2k3l4",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {
         "subscriptions": [
@@ -1386,7 +1620,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "UNSUBSCRIBE",
-    "requestId": "req_m5n6o7p8q9r0s1t2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456789,
     "data": {
         "all": true
@@ -1411,7 +1645,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_a1b2c3d4e5f6g7h8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "supports_search": true,
@@ -1438,7 +1672,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SEARCH_SYMBOLS_DATA",
-    "requestId": "req_i9j0k1l2m3n4o5p6",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "symbols": [
@@ -1484,7 +1718,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_q7r8s9t0u1v2w3x4",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "type": "resolve_symbol",
@@ -1526,7 +1760,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_y5z6a7b8c9d0e1f2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "type": "klines",
@@ -1569,7 +1803,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_g3h4i5j6k7l8m9n0",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "type": "server_time",
@@ -1588,7 +1822,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_o1p2q3r4s5t6u7v8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "type": "subscriptions",
@@ -1664,7 +1898,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_o1p2q3r4s5t6u7v8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "type": "subscriptions",
@@ -1685,7 +1919,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CONFIG_DATA",
-    "requestId": "req_o1p2q3r4s5t6u7v8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "type": "quotes",
@@ -1769,7 +2003,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "CREATE_ALERT_CONFIG",
-    "requestId": "req_q7r8s9t0u1v2w3x4",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "name": "macd_resonance_btcusdt",
@@ -1810,7 +2044,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ALERT_CONFIG_DATA",
-    "requestId": "req_q7r8s9t0u1v2w3x4",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
         "type": "create_alert_config",
@@ -1845,7 +2079,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "LIST_ALERT_CONFIGS",
-    "requestId": "req_y5z6a7b8c9d0e1f2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "page": 1,
@@ -1861,7 +2095,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ALERT_CONFIG_DATA",
-    "requestId": "req_y5z6a7b8c9d0e1f2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
         "items": [
@@ -1902,7 +2136,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "LIST_SIGNALS",
-    "requestId": "req_g3h4i5j6k7l8m9n0",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "page": 1,
@@ -1920,7 +2154,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SIGNAL_DATA",
-    "requestId": "req_g3h4i5j6k7l8m9n0",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
         "items": [
@@ -1938,10 +2172,29 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
         ],
         "total": 1,
         "page": 1,
-        "page_size": 20
+        "pageSize": 20
     }
 }
 ```
+
+**响应字段说明**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | number | 信号数据库自增ID |
+| alertId | string | 关联的告警配置ID (UUID) |
+| configId | string | 关联的配置ID（可选） |
+| strategyName | string | 策略名称（如 MACDResonanceStrategyV5） |
+| symbol | string | 交易对（如 BINANCE:BTCUSDT） |
+| interval | string | K线周期（如 60, 240） |
+| triggerType | string | 触发类型 |
+| signalValue | boolean | 信号值：true=做多, false=做空, null=无信号 |
+| signalReason | string | 信号原因（如 建仓信号、清仓信号、无信号） |
+| computedAt | string | 信号计算时间（ISO8601格式） |
+| sourceSubscriptionKey | string | 触发该信号的订阅键 |
+| metadata | object | 附加元数据 |
+
+> **重要**：API 服务必须使用 `CamelCaseModel` 基类自动将所有响应字段转换为 camelCase，详见 [DATABASE_COORDINATED_ARCHITECTURE.md](./DATABASE_COORDINATED_ARCHITECTURE.md#44-数据命名规范)
 
 **信号值说明**:
 | 值 | 说明 |
@@ -1974,7 +2227,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "UPDATE_ALERT_CONFIG",
-    "requestId": "req_o1p2q3r4s5t6u7v8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
@@ -1997,7 +2250,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ALERT_CONFIG_DATA",
-    "requestId": "req_o1p2q3r4s5t6u7v8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
         "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
@@ -2036,7 +2289,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "DELETE_ALERT_CONFIG",
-    "requestId": "req_w9x0y1z2a3b4c5d6",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678"
@@ -2053,7 +2306,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ENABLE_ALERT_CONFIG",
-    "requestId": "req_e7f8g9h0i1j2k3l4",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678"
@@ -2079,7 +2332,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_STRATEGY_METADATA",
-    "requestId": "req_m5n6o7p8q9r0s1t2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {}
 }
@@ -2090,7 +2343,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "STRATEGY_METADATA_DATA",
-    "requestId": "req_m5n6o7p8q9r0s1t2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
         "strategies": [
@@ -2324,7 +2577,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "GET_STRATEGY_METADATA_BY_TYPE",
-    "requestId": "req_u3v4w5x6y7z8a9b0",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "strategyType": "MACDResonanceStrategyV5"
@@ -2337,7 +2590,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "STRATEGY_METADATA_DATA",
-    "requestId": "req_u3v4w5x6y7z8a9b0",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
         "strategy": {
@@ -2373,7 +2626,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACK",
-    "requestId": "req_w9x0y1z2a3b4c5d6",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {}
 }
@@ -2382,7 +2635,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SUBSCRIPTION_DATA",
-    "requestId": "req_w9x0y1z2a3b4c5d6",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "subscriptions": [...]
@@ -2415,7 +2668,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ACK",
-    "requestId": "req_e7f8g9h0i1j2k3l4",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {}
 }
@@ -2424,7 +2677,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SUBSCRIPTION_DATA",
-    "requestId": "req_e7f8g9h0i1j2k3l4",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {}
 }
@@ -2670,7 +2923,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "SUBSCRIBE",
-    "requestId": "req_c1d2e3f4g5h6i7j8",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "subscriptions": [
@@ -2694,7 +2947,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 {
     "protocolVersion": "2.0",
     "type": "ERROR",
-    "requestId": "req_y5z6a7b8c9d0e1f2",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
         "errorCode": "INVALID_SYMBOL",

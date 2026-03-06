@@ -111,7 +111,7 @@ sequenceDiagram
 
     Note over Front, BN: 场景: 前端请求K线历史数据
 
-    Front->>GW: {"type": "GET_KLINES", "requestId": "req_xxx", "data": {"symbol": "BTCUSDT", ...}}
+    Front->>GW: {"type": "GET_KLINES", "requestId": "550e8400e29b41d4a716446655440000", "data": {"symbol": "BTCUSDT", ...}}
 
     GW->>DB: INSERT INTO tasks (type, payload)
     DB->>DB: TRIGGER: pg_notify('task_new', {...})
@@ -126,7 +126,7 @@ sequenceDiagram
     Note right of DB: 任务完成通知
     DB-->>GW: task_completed 通知
     GW->>GW: 解析任务结果
-    GW->>Front: {"type": "KLINES_DATA", "requestId": "req_xxx", "data": {...}}
+    GW->>Front: {"type": "KLINES_DATA", "requestId": "550e8400e29b41d4a716446655440000", "data": {...}}
 ```
 
 **任务失败流程**（当币安服务处理异常时）：
@@ -140,7 +140,7 @@ sequenceDiagram
 
     Note over Front, BN: 场景: 任务处理异常
 
-    Front->>GW: {"type": "GET_KLINES", "requestId": "req_xxx", "data": {"symbol": "BTCUSDT", ...}}
+    Front->>GW: {"type": "GET_KLINES", "requestId": "550e8400e29b41d4a716446655440000", "data": {"symbol": "BTCUSDT", ...}}
 
     GW->>DB: INSERT INTO tasks (type, payload)
     DB->>DB: TRIGGER: pg_notify('task_new', {...})
@@ -154,7 +154,7 @@ sequenceDiagram
     Note right of DB: 任务失败通知
     DB-->>GW: task_failed 通知
     GW->>GW: 解析错误信息
-    GW->>Front: {"type": "ERROR", "requestId": "req_xxx", "data": {"errorCode": "...", "errorMessage": "..."}}
+    GW->>Front: {"type": "ERROR", "requestId": "550e8400e29b41d4a716446655440000", "data": {"errorCode": "...", "errorMessage": "..."}}
 ```
 
 ## 5. 实时订阅详细流程
@@ -170,7 +170,7 @@ sequenceDiagram
     Note over Front, BWS: 场景: 前端订阅K线实时更新
 
     %% 订阅阶段
-    Front->>GW: {"type": "SUBSCRIBE", "requestId": "req_xxx", "data": {"subscriptions": ["BINANCE:BTCUSDT@KLINE_1"]}}
+    Front->>GW: {"type": "SUBSCRIBE", "requestId": "550e8400e29b41d4a716446655440000", "data": {"subscriptions": ["BINANCE:BTCUSDT@KLINE_1"]}}
     GW->>GW: 检查内存字典，判断新增订阅
     GW->>DB: INSERT INTO realtime_data (subscription_key, data_type)
     DB->>DB: TRIGGER: pg_notify('subscription_add', {...})
@@ -179,7 +179,7 @@ sequenceDiagram
     BN->>BN: 0.25秒批处理窗口
     BN->>BWS: {"method": "SUBSCRIBE", "params": ["btcusdt@kline_1m"]}
 
-    GW->>Front: {"type": "ACK", "requestId": "req_xxx", "data": {}}
+    GW->>Front: {"type": "ACK", "requestId": "550e8400e29b41d4a716446655440000", "data": {}}
 
     %% 数据推送阶段
     BWS->>BN: K线数据更新
@@ -478,10 +478,10 @@ sequenceDiagram
     Note over Front, BN: 场景: 前端请求K线历史数据
 
     %% 步骤1: 接收请求
-    Front->>GW: {"type": "GET_KLINES", "requestId": "req_123", "data": {"symbol": "BINANCE:BTCUSDT", "interval": "60", "fromTime": 1704067200000, "toTime": 1706745600000}}
+    Front->>GW: {"type": "GET_KLINES", "requestId": "550e8400e29b41d4a716446655440000", "data": {"symbol": "BINANCE:BTCUSDT", "interval": "60", "fromTime": 1704067200000, "toTime": 1706745600000}}
 
     Note over GW: 阶段1: 立即返回 ACK 确认收到请求
-    GW->>Front: {"type": "ACK", "requestId": "req_123", "data": {}}
+    GW->>Front: {"type": "ACK", "requestId": "550e8400e29b41d4a716446655440000", "data": {}}
 
     %% 步骤2: 检查端点
     GW->>DB: SELECT * FROM klines_history WHERE symbol=? AND interval=? AND open_time=from_time/to_time
@@ -492,11 +492,11 @@ sequenceDiagram
         GW->>DB: 查询 klines_history 获取数据
         DB-->>GW: K线数据列表
         Note over GW: 阶段3: 返回 SUCCESS 响应
-        GW->>Front: {"type": "KLINES_DATA", "requestId": "req_123", "data": {"bars": [...], "count": 100}}
+        GW->>Front: {"type": "KLINES_DATA", "requestId": "550e8400e29b41d4a716446655440000", "data": {"bars": [...], "count": 100}}
 
     else 任一端点不存在（缓存未命中）
         Note over GW: 决策：创建异步任务
-        GW->>DB: INSERT INTO tasks (type, payload) VALUES ('get_klines', {...requestId: "req_123"...})
+        GW->>DB: INSERT INTO tasks (type, payload) VALUES ('get_klines', {...requestId: "550e8400e29b41d4a716446655440000"...})
         DB-->>GW: task_id
         GW->>DB: 注册任务-客户端映射 (task_id -> client_id)
 
@@ -525,7 +525,7 @@ sequenceDiagram
         DB-->>GW: K线数据列表
 
         Note over GW: 阶段3: 返回 SUCCESS 响应
-        GW->>Front: {"type": "KLINES_DATA", "requestId": "req_123", "data": {"bars": [...], "count": 100}}
+        GW->>Front: {"type": "KLINES_DATA", "requestId": "550e8400e29b41d4a716446655440000", "data": {"bars": [...], "count": 100}}
     end
 ```
 

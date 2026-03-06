@@ -100,10 +100,11 @@ const pendingRequestsQueue = [];
 const requestHistory = new Map();
 
 /**
- * 生成唯一请求ID
+ * 生成唯一请求ID (UUID v4 hex 格式，32字符，符合 WS 协议规范)
+ * 格式: 550e8400e29b41d4a716446655440000
  */
 function generateRequestId() {
-    return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    return crypto.randomUUID().replace(/-/g, '');
 }
 
 /**

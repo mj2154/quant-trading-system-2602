@@ -26,6 +26,7 @@ class SignalRecord:
     interval: str
     trigger_type: str | None
     signal_value: bool | None
+    signal_reason: str | None  # 信号原因：如"建仓信号"、"清仓信号"、"无信号"
     computed_at: datetime
     source_subscription_key: str | None
     metadata: dict[str, Any]
@@ -76,7 +77,7 @@ class StrategySignalsRepository:
         query = """
             SELECT
                 id, alert_id, strategy_type, symbol, interval,
-                trigger_type, signal_value, computed_at,
+                trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals
             WHERE id = $1
@@ -171,7 +172,7 @@ class StrategySignalsRepository:
         list_query = f"""
             SELECT
                 id, alert_id, strategy_type, symbol, interval,
-                trigger_type, signal_value, computed_at,
+                trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals
             {where_clause}
@@ -213,7 +214,7 @@ class StrategySignalsRepository:
         query = f"""
             SELECT
                 id, alert_id, strategy_type, symbol, interval,
-                trigger_type, signal_value, computed_at,
+                trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals
             {where_clause}
@@ -252,7 +253,7 @@ class StrategySignalsRepository:
         query = """
             SELECT
                 id, alert_id, strategy_type, symbol, interval,
-                trigger_type, signal_value, computed_at,
+                trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals
             WHERE alert_id = $1
@@ -282,7 +283,7 @@ class StrategySignalsRepository:
         query = """
             SELECT
                 id, alert_id, strategy_type, symbol, interval,
-                trigger_type, signal_value, computed_at,
+                trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals
             WHERE strategy_type = $1

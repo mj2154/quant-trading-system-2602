@@ -53,7 +53,7 @@ class BinanceSpotPrivateWSClient(BaseWSClient):
         self,
         api_key: str,
         private_key_pem: bytes,
-        timeout: float = 30.0,
+        timeout: float = 5.0,
         proxy_url: Optional[str] = None,
     ) -> None:
         """初始化私有WebSocket客户端
@@ -163,10 +163,10 @@ class BinanceSpotPrivateWSClient(BaseWSClient):
                     logger.info(f"[{self.CLIENT_ID}] 认证成功")
                 else:
                     logger.error(f"[{self.CLIENT_ID}] 认证失败: {ws_response.error}")
-                    await self.disconnect()
+                    await self._force_disconnect()
             except Exception as e:
                 logger.error(f"[{self.CLIENT_ID}] 认证响应处理失败: {e}")
-                await self.disconnect()
+                await self._force_disconnect()
             finally:
                 auth_completed.set()
 
@@ -183,12 +183,38 @@ class BinanceSpotPrivateWSClient(BaseWSClient):
                 await asyncio.wait_for(auth_completed.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 logger.error(f"[{self.CLIENT_ID}] 认证超时")
-                await self.disconnect()
+                await self._force_disconnect()
 
         except Exception as e:
             logger.error(f"[{self.CLIENT_ID}] 认证失败: {e}")
             self._auth_callback = None
-            await self.disconnect()
+            await self._force_disconnect()
+
+    async def _force_disconnect(self) -> None:
+        """强制断开连接（保持_running状态，让基类自动重连）
+
+        认证失败时调用此方法断开连接，但保持运行状态。
+        关闭WebSocket后，基类的接收循环会检测到连接关闭并触发自动重连。
+        """
+        logger.info(f"[{self.CLIENT_ID}] 强制断开连接，准备重连...")
+        self._authenticated = False
+        self._state.connected = False
+
+        # 取消接收任务，防止它继续运行
+        if self._receive_task and not self._receive_task.done():
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+            self._receive_task = None
+
+        if self._websocket:
+            try:
+                await self._websocket.close()
+            except Exception as e:
+                logger.warning(f"[{self.CLIENT_ID}] 关闭连接时出错: {e}")
+            self._websocket = None
 
     def _create_auth_request(self, timestamp: int) -> dict[str, Any]:
         """创建认证请求"""
@@ -228,6 +254,7 @@ class BinanceSpotPrivateWSClient(BaseWSClient):
         time_in_force: Optional[str] = None,
         stop_price: Optional[float] = None,
         quote_order_qty: Optional[float] = None,
+        iceberg_qty: Optional[float] = None,
         new_client_order_id: Optional[str] = None,
         recv_window: Optional[int] = None,
     ) -> dict[str, Any]:
@@ -254,6 +281,9 @@ class BinanceSpotPrivateWSClient(BaseWSClient):
 
         if quote_order_qty is not None:
             params["quoteOrderQty"] = str(quote_order_qty)
+
+        if iceberg_qty is not None:
+            params["icebergQty"] = str(iceberg_qty)
 
         if new_client_order_id is not None:
             params["newClientOrderId"] = new_client_order_id
@@ -354,5 +384,76 @@ class BinanceSpotPrivateWSClient(BaseWSClient):
             return
 
         logger.debug(f"[{self.CLIENT_ID}] 收到其他消息: {message.get('e', 'unknown')}")
+
+    async def _reconnect(self) -> None:
+        """断线重连
+
+        覆盖基类方法，重连后需要重新认证。
+        """
+        if not self._running:
+            return
+
+        logger.info(f"[{self.CLIENT_ID}] 尝试重新连接...")
+
+        # 1. 正确关闭旧连接
+        old_websocket = self._websocket
+        self._websocket = None
+        self._state.connected = False
+        self._authenticated = False
+
+        if old_websocket:
+            try:
+                await old_websocket.close()
+                logger.debug(f"[{self.CLIENT_ID}] 旧连接已关闭")
+            except Exception as e:
+                logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
+
+        # 2. 尝试创建新连接
+        success = await self._try_reconnect()
+
+        if not success and self._running:
+            # 调度持续重试任务
+            if self._reconnect_task and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
+            self._reconnect_task = asyncio.create_task(self._schedule_reconnect())
+
+    async def _try_reconnect(self) -> bool:
+        """尝试重连，返回是否成功"""
+        try:
+            # 关闭旧连接
+            old_websocket = self._websocket
+            self._websocket = None
+            self._state.connected = False
+            self._authenticated = False
+
+            if old_websocket:
+                try:
+                    await old_websocket.close()
+                except Exception as e:
+                    logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
+
+            # 创建新连接
+            connect_kwargs = {}
+            if self._proxy_url:
+                connect_kwargs["proxy"] = self._proxy_url
+
+            self._websocket = await connect(self.WS_URI, **connect_kwargs)
+            self._state.connected = True
+            logger.info(f"[{self.CLIENT_ID}] 已重新连接")
+
+            # 重新认证
+            await self._authenticate()
+
+            if self._reconnect_callback:
+                await self._reconnect_callback()
+
+            self._receive_task = asyncio.create_task(self._receive_loop())
+            self._reconnect_task = None
+            return True
+
+        except Exception as e:
+            logger.error(f"[{self.CLIENT_ID}] 重连失败: {e}")
+            self._state.connected = False
+            return False
 
 

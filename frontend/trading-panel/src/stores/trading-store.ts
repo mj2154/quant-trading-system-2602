@@ -20,9 +20,10 @@ function log(level: 'log' | 'error', message: string, ...args: unknown[]) {
   }
 }
 
-// Generate unique client order ID
-function generateClientOrderId(): string {
-  return `ord_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+// Generate unique request ID (UUID v4 hex 格式，32字符，符合 WS 协议规范)
+// 格式: 550e8400e29b41d4a716446655440000
+function generateRequestId(): string {
+  return crypto.randomUUID().replace(/-/g, '')
 }
 
 // WebSocket connection management
@@ -71,9 +72,14 @@ function connectWebSocket(): Promise<WebSocket> {
       wsConnection.onmessage = (event) => {
         try {
           const message: TradingMessage = JSON.parse(event.data)
-          const handler = messageHandlers.get(message.type)
-          if (handler) {
-            handler(message.data)
+          // 协议格式：响应消息通过 requestId 关联请求
+          // ACK 和 SUCCESS/ERROR 都带有 requestId 字段
+          const requestId = message.requestId
+          if (requestId && messageHandlers.has(requestId)) {
+            const handler = messageHandlers.get(requestId)
+            if (handler) {
+              handler(message.data)
+            }
           }
         } catch (e) {
           log('error', 'Failed to parse message:', e)
@@ -89,17 +95,21 @@ function sendMessage<T>(type: string, data?: unknown): Promise<T> {
   return new Promise(async (resolve, reject) => {
     try {
       const ws = await connectWebSocket()
-      const correlationId = generateClientOrderId()
+      // 协议格式：requestId 使用随机字符串，符合 07-websocket-protocol.md 规范
+      const requestId = generateRequestId()
 
-      // Set up one-time handler for response
-      messageHandlers.set(correlationId, (responseData) => {
-        messageHandlers.delete(correlationId)
+      // Set up one-time handler for response (根据 requestId 匹配)
+      messageHandlers.set(requestId, (responseData) => {
+        messageHandlers.delete(requestId)
         resolve(responseData as T)
       })
 
+      // 协议格式：严格遵循 07-websocket-protocol.md 规定的请求消息格式
       const message = {
+        protocolVersion: '2.0',
         type,
-        correlationId,
+        requestId,
+        timestamp: Date.now(),
         data,
       }
 
@@ -107,8 +117,8 @@ function sendMessage<T>(type: string, data?: unknown): Promise<T> {
 
       // Timeout after 30 seconds
       setTimeout(() => {
-        if (messageHandlers.has(correlationId)) {
-          messageHandlers.delete(correlationId)
+        if (messageHandlers.has(requestId)) {
+          messageHandlers.delete(requestId)
           reject(new Error(`Request ${type} timed out`))
         }
       }, 30000)
@@ -197,7 +207,7 @@ export const useTradingStore = defineStore('trading', () => {
         throw new Error('goodTillDate is required for GTD orders')
       }
 
-      const clientOrderId = generateClientOrderId()
+      const clientOrderId = generateRequestId()
 
       // Create order locally first (optimistic update)
       const newOrder: Order = {
@@ -315,12 +325,19 @@ export const useTradingStore = defineStore('trading', () => {
       // Fetch from server
       const response = await sendMessage<OrderListResponse>('LIST_ORDERS', filters || {})
 
+      // 解析响应: 后端返回 { type: "order_list", orders: [...], count: N }
+      // 需要从 response.data 中提取 orders 和 count
+      const responseData = response as { type?: string; orders?: Order[]; count?: number } | undefined
+      const ordersArray = Array.isArray(responseData?.orders) ? responseData.orders : []
+      const count = typeof responseData?.count === 'number' ? responseData.count : ordersArray.length
+
       // Update local cache
-      orders.value = response.orders
+      orders.value = ordersArray
       lastUpdate.value = new Date()
 
-      return response
+      return { orders: ordersArray, count }
     } catch (e) {
+      log('error', 'Failed to fetch orders:', e)
       error.value = e instanceof Error ? e.message : 'Failed to fetch orders'
       return { orders: [], count: 0 }
     } finally {
@@ -336,12 +353,18 @@ export const useTradingStore = defineStore('trading', () => {
       // Fetch from server
       const response = await sendMessage<Order[]>('GET_OPEN_ORDERS', { marketType })
 
+      // 解析响应: 后端返回 { type: "open_orders", orders: [...] }
+      // 需要从 response 中提取 orders 数组
+      const responseData = response as { type?: string; orders?: Order[] } | undefined
+      const ordersArray = Array.isArray(responseData?.orders) ? responseData.orders : []
+
       // Update local cache
-      openOrders.value = response
+      openOrders.value = ordersArray
       lastUpdate.value = new Date()
 
-      return response
+      return ordersArray
     } catch (e) {
+      log('error', 'Failed to fetch open orders:', e)
       error.value = e instanceof Error ? e.message : 'Failed to fetch open orders'
       return []
     } finally {

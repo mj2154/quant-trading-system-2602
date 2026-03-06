@@ -217,6 +217,13 @@ class BinanceService:
                 proxy_url=self._proxy_ws,
             )
             logger.info("现货私有WebSocket客户端已初始化")
+            # 连接私有WebSocket并进行认证
+            try:
+                await self._spot_private_ws.connect()
+                logger.info("现货私有WebSocket已连接并认证")
+            except Exception as e:
+                logger.error(f"现货私有WebSocket连接失败: {e}")
+                self._spot_private_ws = None
         else:
             logger.warning("现货私有WebSocket客户端未初始化（缺少API Key或私钥）")
 
@@ -228,6 +235,13 @@ class BinanceService:
                 proxy_url=self._proxy_ws,
             )
             logger.info("期货私有WebSocket客户端已初始化")
+            # 连接私有WebSocket并进行认证
+            try:
+                await self._futures_private_ws.connect()
+                logger.info("期货私有WebSocket已连接并认证")
+            except Exception as e:
+                logger.error(f"期货私有WebSocket连接失败: {e}")
+                self._futures_private_ws = None
         else:
             logger.warning("期货私有WebSocket客户端未初始化（缺少API Key或私钥）")
 

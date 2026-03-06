@@ -48,15 +48,15 @@ class OrderTasksRepository:
     async def create_order_task(
         self,
         task_type: str,
-        payload: dict[str, Any],
+        request_id: str | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> int:
         """创建订单任务并返回任务ID
 
-        从 payload 中提取 request_id 存入顶层字段。
-
         Args:
             task_type: 任务类型 (order.create, order.cancel, order.query)
-            payload: 任务参数（从 payload 中提取 request_id）
+            request_id: 请求ID（必须提供，作为顶层字段）
+            payload: 任务参数
 
         Returns:
             任务ID
@@ -68,13 +68,12 @@ class OrderTasksRepository:
         # 参数验证
         if not task_type:
             raise ValueError("task_type cannot be empty")
+        if not request_id:
+            raise ValueError("request_id cannot be empty")
         if not payload:
             raise ValueError("payload cannot be empty")
         if task_type not in ("order.create", "order.cancel", "order.query"):
             logger.warning(f"Unknown task_type: {task_type}")
-
-        # 从 payload 中提取 request_id（用于顶层字段）
-        request_id = payload.pop("requestId", None)
 
         query = f"""
             INSERT INTO {self._table_name} (type, request_id, payload)

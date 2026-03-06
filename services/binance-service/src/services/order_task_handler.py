@@ -15,6 +15,17 @@
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
+from pydantic import ValidationError
+
+from models.trading_order import (
+    SpotWsOrderRequest,
+    FuturesWsOrderRequest,
+    SpotWsOrderResponse,
+    FuturesWsOrderResponse,
+    WsQueryOrderRequest,
+    WsCancelOrderRequest,
+)
+
 if TYPE_CHECKING:
     from clients.futures_private_ws_client import BinanceFuturesPrivateWSClient
     from clients.spot_private_ws_client import BinanceSpotPrivateWSClient
@@ -89,6 +100,37 @@ class OrderTaskHandler:
             return self._spot_ws_client
         return self._spot_http_client
 
+    def _parse_symbol(self, symbol: str) -> tuple[str, str]:
+        """解析语义化交易对符号，返回 (干净symbol, 市场类型)
+
+        根据设计文档：
+        - BINANCE:BTCUSDT → (BTCUSDT, SPOT)
+        - BINANCE:BTCUSDT.PERP → (BTCUSDT, FUTURES)
+        - BTCUSDT (无前缀) → (BTCUSDT, 默认为FUTURES)
+
+        Args:
+            symbol: 语义化符号，如 BINANCE:BTCUSDT 或 BTCUSDT
+
+        Returns:
+            (干净的交易对符号, 市场类型)
+        """
+        if not symbol:
+            return symbol, "FUTURES"
+
+        # 检查是否有 BINANCE: 前缀
+        if symbol.upper().startswith("BINANCE:"):
+            # 去掉前缀
+            clean_symbol = symbol[len("BINANCE:"):]
+
+            # 检查是否为期货（.PERP 后缀）
+            if clean_symbol.upper().endswith(".PERP"):
+                return clean_symbol[:-5], "FUTURES"  # 去掉 .PERP
+
+            return clean_symbol, "SPOT"
+
+        # 无前缀，默认当作期货处理（向后兼容）
+        return symbol, "FUTURES"
+
     async def handle_task(self, payload: dict[str, Any]) -> None:
         """处理订单任务
 
@@ -108,13 +150,18 @@ class OrderTaskHandler:
         # 标记为处理中
         await self._repo.set_processing(task_id)
 
+        # 从数据库获取任务的 request_id（顶层字段）
+        task = await self._repo.get_task_by_id(task_id)
+        request_id = task.get("request_id") if task else None
+        logger.info(f"任务 {task_id} 的 request_id: {request_id}")
+
         try:
             if task_type == "order.create":
-                await self._handle_create_order(task_id, params)
+                await self._handle_create_order(task_id, params, request_id)
             elif task_type == "order.cancel":
-                await self._handle_cancel_order(task_id, params)
+                await self._handle_cancel_order(task_id, params, request_id)
             elif task_type == "order.query":
-                await self._handle_query_order(task_id, params)
+                await self._handle_query_order(task_id, params, request_id)
             else:
                 logger.warning(f"未知的订单任务类型: {task_type}")
                 await self._repo.fail(task_id, f"未知的任务类型: {task_type}")
@@ -124,53 +171,71 @@ class OrderTaskHandler:
             await self._repo.fail(task_id, str(e))
 
     async def _handle_create_order(
-        self, task_id: int, params: dict[str, Any]
+        self, task_id: int, params: dict[str, Any], request_id: str | None = None
     ) -> None:
         """处理订单创建任务
 
+        使用 Pydantic 模型验证参数，自动处理 camelCase/snake_case 转换。
+
         Args:
             task_id: 任务ID
-            params: 订单参数
+            params: 订单参数（蛇形或驼峰命名均可）
+            request_id: 请求ID（从数据库顶层字段获取，用于发送给币安作为 clientOrderId）
         """
-        # 验证必需字段
-        if not params.get("symbol"):
-            await self._repo.fail(task_id, "Missing required field: symbol")
-            return
-        if not params.get("side"):
-            await self._repo.fail(task_id, "Missing required field: side")
+        # 解析语义化symbol，根据前缀自动判断市场类型
+        # BINANCE:BTCUSDT → 现货
+        # BINANCE:BTCUSDT.PERP → 期货
+        raw_symbol = params.get("symbol", "") or params.get("symbol", "")
+        symbol, market_type = self._parse_symbol(raw_symbol)
+
+        # 使用 Pydantic 模型验证参数（自动 camelCase → snake_case 转换）
+        try:
+            if market_type == "SPOT":
+                # 现货订单模型验证
+                order_request = SpotWsOrderRequest.model_validate(params)
+            else:
+                # 期货订单模型验证
+                order_request = FuturesWsOrderRequest.model_validate(params)
+        except ValidationError as e:
+            await self._repo.fail(task_id, f"参数验证失败: {e}")
             return
 
-        # 市价单不需要 quantity 和 price，但限价单需要 price
-        order_type = params.get("type", "LIMIT")
-        if order_type == "LIMIT" and not params.get("price"):
-            await self._repo.fail(task_id, "Missing required field: price for LIMIT order")
-            return
+        # 从验证后的模型中提取参数（通用字段）
+        side = order_request.side
+        order_type = order_request.type
+        quantity = order_request.quantity
+        price = order_request.price
+        time_in_force = order_request.time_in_force
+        stop_price = order_request.stop_price
+        new_client_order_id = order_request.new_client_order_id
 
-        # 获取市场类型
-        market_type = params.get("marketType", "FUTURES").upper()
-        symbol = params.get("symbol", "")
-        side = params.get("side", "")
-        quantity = params.get("quantity")
-        price = params.get("price")
-        time_in_force = params.get("timeInForce")
-        stop_price = params.get("stopPrice")
-        reduce_only = params.get("reduceOnly", False)
-        position_side = params.get("positionSide")
-        new_client_order_id = params.get("clientOrderId")
+        # 根据市场类型提取特有参数
+        if market_type == "FUTURES":
+            # 期货模型才有这些字段
+            reduce_only = order_request.reduce_only
+            position_side = order_request.position_side
+        else:
+            # 现货模型没有这些字段
+            reduce_only = False
+            position_side = None
 
         logger.info(
             f"创建订单: {symbol} {side} {order_type} qty={quantity} price={price} market={market_type}"
         )
 
-        # 使用requestId关联请求和响应
-        request_id = params.get("requestId", str(task_id))
+        # 使用requestId关联请求和响应（从任务记录的顶层request_id字段获取）
+        # 设计文档要求: request_id 从 payload 提升到顶层字段
+        # request_id 已作为参数传入，直接使用（如果为 None 则使用 task_id 作为后备）
+        if not request_id:
+            request_id = str(task_id)
 
         if market_type == "FUTURES":
             # 优先使用WS客户端回调模式
             if self._futures_ws_client:
                 try:
-                    # 构建订单参数
-                    order_params = self._futures_ws_client._build_order_params(
+                    # 使用 _build_order_params 构建带签名的参数
+                    # 注意：不再使用 to_binance_params()，因为它不包含 timestamp 和 signature
+                    binance_params = self._futures_ws_client._build_order_params(
                         symbol=symbol,
                         side=side,
                         order_type=order_type,
@@ -182,8 +247,9 @@ class OrderTaskHandler:
                         position_side=position_side,
                         new_client_order_id=new_client_order_id,
                     )
+
                     # 发送请求（不等待响应，通过回调处理）
-                    await self._futures_ws_client.send_request("order.place", order_params, request_id)
+                    await self._futures_ws_client.send_request("order.place", binance_params, request_id)
                     logger.info(f"订单创建请求已发送: requestId={request_id}")
                     # 注意：任务状态将在回调中更新
                     return
@@ -209,71 +275,48 @@ class OrderTaskHandler:
                 position_side=position_side,
                 new_client_order_id=new_client_order_id,
             )
-        else:
-            # 现货
-            # 优先使用WS客户端回调模式
-            if self._spot_ws_client:
-                try:
-                    # 现货市价单可能使用 quoteOrderQty
-                    quote_order_qty = params.get("quoteOrderQty")
-                    iceberg_qty = params.get("icebergQty")
-
-                    # 构建订单参数
-                    order_params = self._spot_ws_client._build_order_params(
-                        symbol=symbol,
-                        side=side,
-                        order_type=order_type,
-                        quantity=quantity,
-                        price=price,
-                        time_in_force=time_in_force,
-                        stop_price=stop_price,
-                        quote_order_qty=quote_order_qty,
-                        iceberg_qty=iceberg_qty,
-                        new_client_order_id=new_client_order_id,
-                    )
-                    # 发送请求（不等待响应，通过回调处理）
-                    await self._spot_ws_client.send_request("order.place", order_params, request_id)
-                    logger.info(f"订单创建请求已发送: requestId={request_id}")
-                    # 注意：任务状态将在回调中更新
-                    return
-                except Exception as e:
-                    logger.error(f"现货WS客户端发送请求失败: {e}")
-                    # 降级到HTTP客户端
-
-            # 使用HTTP客户端或旧版WS客户端（等待响应）
-            client = self._get_spot_client()
-            if not client:
-                await self._repo.fail(task_id, "现货客户端未初始化")
+        elif market_type == "SPOT":
+            # 现货 - 必须使用WS客户端
+            if not self._spot_ws_client:
+                await self._repo.fail(task_id, "现货WS客户端未初始化")
                 return
 
-            # 现货市价单可能使用 quoteOrderQty
-            quote_order_qty = params.get("quoteOrderQty")
-            iceberg_qty = params.get("icebergQty")
+            try:
+                # 使用 _build_order_params 构建带签名的参数
+                # 注意：不再使用 to_binance_params()，因为它不包含 timestamp 和 signature
+                binance_params = self._spot_ws_client._build_order_params(
+                    symbol=symbol,
+                    side=side,
+                    order_type=order_type,
+                    quantity=quantity,
+                    price=price,
+                    time_in_force=time_in_force,
+                    stop_price=stop_price,
+                    new_client_order_id=new_client_order_id,
+                )
 
-            result = await client.create_order(
-                symbol=symbol,
-                side=side,
-                order_type=order_type,
-                quantity=quantity,
-                quote_order_qty=quote_order_qty,
-                price=price,
-                time_in_force=time_in_force,
-                stop_price=stop_price,
-                iceberg_qty=iceberg_qty,
-                new_client_order_id=new_client_order_id,
-            )
+                # 发送请求（不等待响应，通过回调处理）
+                await self._spot_ws_client.send_request("order.place", binance_params, request_id)
+                logger.info(f"订单创建请求已发送(现货): requestId={request_id}")
+                # 注意：任务状态将在回调中更新
+                return
+            except Exception as e:
+                logger.error(f"现货WS客户端发送请求失败: {e}")
+                await self._repo.fail(task_id, f"现货WS客户端发送请求失败: {e}")
+                return
 
-        await self._repo.complete(task_id, result)
-        logger.info(f"订单创建成功: {result.get('orderId')}")
+        else:
+            await self._repo.fail(task_id, f"未知的市场类型: {market_type}")
 
     async def _handle_cancel_order(
-        self, task_id: int, params: dict[str, Any]
+        self, task_id: int, params: dict[str, Any], request_id: str | None = None
     ) -> None:
         """处理订单取消任务
 
         Args:
             task_id: 任务ID
             params: 取消参数
+            request_id: 请求ID（从数据库顶层字段获取）
         """
         # 验证必需字段
         if not params.get("symbol"):
@@ -283,15 +326,20 @@ class OrderTaskHandler:
             await self._repo.fail(task_id, "Missing required field: orderId or clientOrderId")
             return
 
-        market_type = params.get("marketType", "FUTURES").upper()
-        symbol = params.get("symbol", "")
+        # 解析语义化symbol，根据前缀自动判断市场类型
+        raw_symbol = params.get("symbol", "")
+        symbol, market_type = self._parse_symbol(raw_symbol)
+
         order_id = params.get("orderId")
-        client_order_id = params.get("clientOrderId")
+        client_order_id = params.get("origClientOrderId") or params.get("clientOrderId")
 
         logger.info(f"取消订单: {symbol} orderId={order_id} clientOrderId={client_order_id} market={market_type}")
 
-        # 使用requestId关联请求和响应
-        request_id = params.get("requestId", str(task_id))
+        # 使用requestId关联请求和响应（从任务记录的顶层request_id字段获取）
+        # 设计文档要求: request_id 从 payload 提升到顶层字段
+        # request_id 已作为参数传入，直接使用（如果为 None 则使用 task_id 作为后备）
+        if not request_id:
+            request_id = str(task_id)
 
         if market_type == "FUTURES":
             # 优先使用WS客户端回调模式
@@ -350,13 +398,14 @@ class OrderTaskHandler:
         logger.info(f"订单取消成功: {result.get('orderId')}")
 
     async def _handle_query_order(
-        self, task_id: int, params: dict[str, Any]
+        self, task_id: int, params: dict[str, Any], request_id: str | None = None
     ) -> None:
         """处理订单查询任务
 
         Args:
             task_id: 任务ID
             params: 查询参数
+            request_id: 请求ID（从数据库顶层字段获取）
         """
         # 验证必需字段
         if not params.get("symbol"):
@@ -366,15 +415,20 @@ class OrderTaskHandler:
             await self._repo.fail(task_id, "Missing required field: orderId or clientOrderId")
             return
 
-        market_type = params.get("marketType", "FUTURES").upper()
-        symbol = params.get("symbol", "")
+        # 解析语义化symbol，根据前缀自动判断市场类型
+        raw_symbol = params.get("symbol", "")
+        symbol, market_type = self._parse_symbol(raw_symbol)
+
         order_id = params.get("orderId")
-        client_order_id = params.get("clientOrderId")
+        client_order_id = params.get("origClientOrderId") or params.get("clientOrderId")
 
         logger.info(f"查询订单: {symbol} orderId={order_id} clientOrderId={client_order_id} market={market_type}")
 
-        # 使用requestId关联请求和响应
-        request_id = params.get("requestId", str(task_id))
+        # 使用requestId关联请求和响应（从任务记录的顶层request_id字段获取）
+        # 设计文档要求: request_id 从 payload 提升到顶层字段
+        # request_id 已作为参数传入，直接使用（如果为 None 则使用 task_id 作为后备）
+        if not request_id:
+            request_id = str(task_id)
 
         if market_type == "FUTURES":
             # 优先使用WS客户端回调模式

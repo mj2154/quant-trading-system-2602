@@ -88,6 +88,9 @@ class BaseWSClient:
         if self._state.connected:
             return
 
+        # 调用connect()意味着客户端想要运行，设置_running=True
+        self._running = True
+
         logger.info(f"[{self.CLIENT_ID}] 正在连接...")
         try:
             connect_kwargs: dict[str, str] = {}
@@ -95,8 +98,15 @@ class BaseWSClient:
                 connect_kwargs["proxy"] = self._proxy_url
 
             self._websocket = await connect(self.WS_URI, **connect_kwargs)
+
+            # 再次检查运行状态（防止在连接过程中被断开）
+            if not self._running:
+                logger.info(f"[{self.CLIENT_ID}] 连接完成但已停止，关闭连接")
+                await self._websocket.close()
+                self._websocket = None
+                return
+
             self._state.connected = True
-            self._running = True
             logger.info(f"[{self.CLIENT_ID}] 已连接")
 
             self._receive_task = asyncio.create_task(self._receive_loop())
@@ -175,6 +185,14 @@ class BaseWSClient:
         """接收数据循环"""
         logger.info(f"[{self.CLIENT_ID}] 接收循环启动")
         reconnect_needed = False
+
+        # 防御性检查：确保 WebSocket 已创建
+        if not self._websocket:
+            logger.warning(f"[{self.CLIENT_ID}] WebSocket 为 None，跳过接收循环")
+            if self._running:
+                await self._reconnect()
+            return
+
         try:
             async for message in self._websocket:
                 logger.debug(f"[{self.CLIENT_ID}] 收到原始消息")

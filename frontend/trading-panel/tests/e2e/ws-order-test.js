@@ -10,6 +10,12 @@ import WebSocket from 'ws';
 const WS_URL = 'ws://127.0.0.1:8000/ws/trading';
 const TIMEOUT = 30000;
 
+// Generate unique request ID (UUID v4 格式，不包含时间戳，符合 WS 协议规范)
+// 格式: req_xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+function generateRequestId() {
+  return `req_${crypto.randomUUID()}`;
+}
+
 // Test data factory
 const testOrders = {
   validLimitOrder: {
@@ -131,7 +137,7 @@ async function runTests() {
         const request = {
           protocolVersion: '2.0',
           type: 'CREATE_ORDER',
-          requestId: `req_limit_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: testOrders.validLimitOrder
         };
@@ -146,7 +152,7 @@ async function runTests() {
         const request = {
           protocolVersion: '2.0',
           type: 'CREATE_ORDER',
-          requestId: `req_market_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: testOrders.validMarketOrder
         };
@@ -160,7 +166,7 @@ async function runTests() {
         const request = {
           protocolVersion: '2.0',
           type: 'CREATE_ORDER',
-          requestId: `req_invalid_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: {
             symbol: 'BTCUSDT',
@@ -187,7 +193,7 @@ async function runTests() {
         const createRequest = {
           protocolVersion: '2.0',
           type: 'CREATE_ORDER',
-          requestId: `req_setup_get_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: testOrders.validLimitOrder
         };
@@ -199,7 +205,7 @@ async function runTests() {
         const request = {
           protocolVersion: '2.0',
           type: 'GET_ORDER',
-          requestId: `req_get_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: {
             symbol: 'BTCUSDT',
@@ -221,7 +227,7 @@ async function runTests() {
         const request = {
           protocolVersion: '2.0',
           type: 'LIST_ORDERS',
-          requestId: `req_list_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: {
             symbol: 'BTCUSDT',
@@ -245,7 +251,7 @@ async function runTests() {
         const request = {
           protocolVersion: '2.0',
           type: 'GET_OPEN_ORDERS',
-          requestId: `req_open_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: {
             symbol: 'BTCUSDT',
@@ -266,7 +272,7 @@ async function runTests() {
         const cancelRequest = {
           protocolVersion: '2.0',
           type: 'CANCEL_ORDER',
-          requestId: `req_cancel_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: {
             symbol: 'BTCUSDT',
@@ -286,7 +292,7 @@ async function runTests() {
         const request = {
           protocolVersion: '2.0',
           type: 'CREATE_ORDER',
-          requestId: `req_error_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: {}
         };
@@ -301,7 +307,7 @@ async function runTests() {
         const request = {
           protocolVersion: '2.0',
           type: 'GET_ORDER',
-          requestId: `req_notfound_${Date.now()}`,
+          requestId: generateRequestId()`,
           timestamp: Date.now(),
           data: {
             symbol: 'BTCUSDT',

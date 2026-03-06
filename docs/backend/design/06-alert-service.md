@@ -155,7 +155,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
 {
     "protocolVersion": "2.0",
     "action": "get",
-    "requestId": "req_strategy_001",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "type": "get_strategy_metadata"
@@ -168,7 +168,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
 {
     "protocolVersion": "2.0",
     "action": "success",
-    "requestId": "req_strategy_001",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
         "type": "get_strategy_metadata",
@@ -255,7 +255,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
 {
     "protocolVersion": "2.0",
     "action": "get",
-    "requestId": "req_create_001",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "type": "create_alert_config",
@@ -299,7 +299,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
 {
     "protocolVersion": "2.0",
     "action": "success",
-    "requestId": "req_create_001",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
         "type": "create_alert_config",
@@ -330,7 +330,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
 {
     "protocolVersion": "2.0",
     "action": "subscribe",
-    "requestId": "req_sub_001",
+    "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
         "subscriptions": [

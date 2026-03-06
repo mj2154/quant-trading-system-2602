@@ -24,6 +24,7 @@ from ..models.db.alert_config_models import (
     AlertSignalCreate,
     AlertSignalUpdate,
 )
+from ..models.db.signal_models import SignalListResponse, SignalRecordResponse
 from .protocol import format_success_response, format_error_response
 
 logger = logging.getLogger(__name__)
@@ -484,21 +485,34 @@ class AlertHandler:
                 end_time=end_time,
             )
 
-            # Convert SignalRecord objects to dicts
+            # 使用 Pydantic 模型自动转换字段名为 camelCase
+            # 响应模型使用 CamelCaseModel 基类，序列化时自动转为 camelCase
             items = []
             for signal in signals:
-                items.append({
-                    "id": signal.id,
-                    "alert_id": signal.alert_id,
-                    "strategy_type": signal.strategy_type,
-                    "symbol": signal.symbol,
-                    "interval": signal.interval,
-                    "trigger_type": signal.trigger_type,
-                    "signal_value": signal.signal_value,
-                    "computed_at": signal.computed_at.isoformat() if signal.computed_at else None,
-                    "source_subscription_key": signal.source_subscription_key,
-                    "metadata": signal.metadata,
-                })
+                signal_record = SignalRecordResponse(
+                    id=signal.id,
+                    alert_id=signal.alert_id or "",
+                    config_id=None,
+                    strategy_type=signal.strategy_type,
+                    symbol=signal.symbol,
+                    interval=signal.interval,
+                    trigger_type=signal.trigger_type,
+                    signal_value=signal.signal_value,
+                    signal_reason=signal.signal_reason,
+                    computed_at=signal.computed_at,
+                    source_subscription_key=signal.source_subscription_key,
+                    metadata=signal.metadata,
+                )
+                # model_dump() 自动将字段转换为 camelCase
+                items.append(signal_record.model_dump())
+
+            # 构建响应模型
+            response = SignalListResponse(
+                items=items,  # items 已是 camelCase 格式
+                total=total,
+                page=page,
+                page_size=page_size,
+            )
 
             return format_success_response(
                 request_id=request_id,

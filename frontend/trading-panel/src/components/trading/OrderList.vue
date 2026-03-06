@@ -73,7 +73,9 @@ const sideOptions = [
 
 // Computed
 const filteredOrders = computed(() => {
-  let result = [...tradingStore.orders]
+  // 防御性检查: 确保 orders 是数组
+  const orders = Array.isArray(tradingStore.orders) ? tradingStore.orders : []
+  let result = [...orders]
 
   if (marketFilter.value) {
     result = result.filter((o) => o.marketType === marketFilter.value)

@@ -18,7 +18,6 @@ from models.trading_order import (
     OrderResponseType,
     PositionSide,
     TimeInForce,
-    FuturesOrderRequest,
 )
 from utils.ed25519_signer import Ed25519Signer
 from utils.rsa_signer import RSASigner

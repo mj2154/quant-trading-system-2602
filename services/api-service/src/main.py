@@ -25,6 +25,7 @@ from .db.database import init_pool, close_pool, get_pool
 from .db.tasks_repository import TasksRepository
 from .db.order_tasks_repository import OrderTasksRepository
 from .db.strategy_signals_repository import StrategySignalsRepository
+from .db.strategy_metadata_repository import StrategyMetadataRepository
 from .db.alert_signal_repository import AlertSignalRepository
 from .models.db.task_models import UnifiedTaskPayload, TaskType
 
@@ -43,6 +44,7 @@ _data_processor: DataProcessor | None = None
 _tasks_repo: TasksRepository | None = None
 _order_tasks_repo: OrderTasksRepository | None = None
 _strategy_signals_repo: StrategySignalsRepository | None = None
+_strategy_metadata_repo: StrategyMetadataRepository | None = None
 _alert_repo: AlertSignalRepository | None = None
 
 
@@ -113,6 +115,10 @@ async def lifespan(app: FastAPI):
     _exchange_repo = ExchangeInfoRepository(pool)
     logger.info("ExchangeInfoRepository initialized")
 
+    # 2.3 初始化策略元数据仓储
+    _strategy_metadata_repo = StrategyMetadataRepository(pool)
+    logger.info("StrategyMetadataRepository initialized")
+
     # 3. 初始化订阅管理器（必须在最前面，因为TaskRouter依赖它）
     _subscription_manager = SubscriptionManager(pool)
     await _subscription_manager.start()
@@ -136,6 +142,7 @@ async def lifespan(app: FastAPI):
     _task_router.set_exchange_info_repository(_exchange_repo)
     # 设置告警仓储
     _task_router.set_alert_repository(_alert_repo, _strategy_signals_repo)
+    _task_router.set_strategy_metadata_repository(_strategy_metadata_repo)
     logger.info("TaskRouter initialized")
 
     # 5. 启动时清空订阅表并发送clean通知

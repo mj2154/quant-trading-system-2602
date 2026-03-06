@@ -18,6 +18,12 @@ import WebSocket from 'ws';
 const WS_URL = 'ws://127.0.0.1:8000/ws/trading';
 const TIMEOUT = 30000; // 30 seconds
 
+// Generate unique request ID (UUID v4 hex 格式，32字符，符合 WS 协议规范)
+// 格式: 550e8400e29b41d4a716446655440000
+function generateRequestId(): string {
+  return crypto.randomUUID().replace(/-/g, '')
+}
+
 // Test data factory
 const testOrders = {
   validLimitOrder: {
@@ -144,7 +150,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: `req_create_limit_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: testOrders.validLimitOrder
       };
@@ -172,7 +178,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: `req_create_market_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: testOrders.validMarketOrder
       };
@@ -197,7 +203,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: `req_create_invalid_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -230,7 +236,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: `req_setup_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: testOrders.validLimitOrder
       };
@@ -243,7 +249,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'GET_ORDER',
-        requestId: `req_get_order_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -270,7 +276,7 @@ describe('WebSocket Trading Order E2E', () => {
       const createRequest = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: `req_create_client_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           ...testOrders.validLimitOrder,
@@ -284,7 +290,7 @@ describe('WebSocket Trading Order E2E', () => {
       const queryRequest = {
         protocolVersion: '2.0',
         type: 'GET_ORDER',
-        requestId: `req_get_client_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -306,7 +312,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'LIST_ORDERS',
-        requestId: `req_list_orders_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -331,7 +337,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'LIST_ORDERS',
-        requestId: `req_list_filter_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -354,7 +360,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'GET_OPEN_ORDERS',
-        requestId: `req_open_orders_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -378,7 +384,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'GET_OPEN_ORDERS',
-        requestId: `req_all_open_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           marketType: 'FUTURES'
@@ -398,7 +404,7 @@ describe('WebSocket Trading Order E2E', () => {
       const createRequest = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: `req_cancel_setup_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: testOrders.validLimitOrder
       };
@@ -410,7 +416,7 @@ describe('WebSocket Trading Order E2E', () => {
       const cancelRequest = {
         protocolVersion: '2.0',
         type: 'CANCEL_ORDER',
-        requestId: `req_cancel_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -438,7 +444,7 @@ describe('WebSocket Trading Order E2E', () => {
       const createRequest = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: `req_cancel_setup2_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           ...testOrders.validLimitOrder,
@@ -452,7 +458,7 @@ describe('WebSocket Trading Order E2E', () => {
       const cancelRequest = {
         protocolVersion: '2.0',
         type: 'CANCEL_ORDER',
-        requestId: `req_cancel_client_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -474,7 +480,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: `req_error_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           // Missing required fields: symbol, side, type, quantity
@@ -492,7 +498,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: `req_unknown_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -513,7 +519,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'GET_ORDER',
-        requestId: `req_notfound_${Date.now()}`,
+        requestId: generateRequestId()`,
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',

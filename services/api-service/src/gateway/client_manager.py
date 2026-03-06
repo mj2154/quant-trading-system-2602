@@ -113,7 +113,7 @@ class ClientManager:
             msg_type = message.get('data', {}).get('type') if message.get('data') else message.get('type')
             request_id = message.get('requestId', 'N/A')
             import json
-            logger.info(f"→ [ClientManager.send] 发送给 client_id={client_id}, requestId={request_id}, type={msg_type}")
+            logger.debug(f"[ClientManager.send] 发送给 client_id={client_id}, requestId={request_id}, type={msg_type}")
             # 手动序列化以确保 UUID 被正确转换为字符串
             json_str = json.dumps(message, default=str, ensure_ascii=False)
             logger.debug(f"ClientManager.send: 完整消息: {json_str}")

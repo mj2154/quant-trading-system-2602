@@ -65,11 +65,11 @@ export const useStrategyStore = defineStore('strategy', () => {
   // ==================== 私有方法 ====================
 
   /**
-   * requestId 生成器
-   * 格式: req_a1b2c3d4e5f6g7h8
+   * requestId 生成器 (UUID v4 hex 格式，32字符，符合 WS 协议规范)
+   * 格式: 550e8400e29b41d4a716446655440000
    */
   function generateRequestId(): string {
-    return `req_${crypto.randomUUID().substring(0, 16)}`
+    return crypto.randomUUID().replace(/-/g, '')
   }
 
   /**
@@ -132,6 +132,12 @@ export const useStrategyStore = defineStore('strategy', () => {
           const response = JSON.parse(event.data)
           // 检查是否是目标请求的响应
           if (response.requestId === requestId) {
+            // v2.0 协议: 三阶段模式 - ACK 只是确认，需要继续等待最终响应
+            if (response.type === 'ACK') {
+              // 不设置 resolved，不移除监听器，继续等待最终响应
+              return
+            }
+            // ACK 之外的响应是最终响应
             resolved = true
             window.clearTimeout(timeoutId)
             removeMessageListener()

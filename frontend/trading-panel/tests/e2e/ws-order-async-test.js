@@ -15,6 +15,12 @@ import WebSocket from 'ws';
 const WS_URL = 'ws://127.0.0.1:8000/ws/trading';
 const TIMEOUT = 60000; // 60 seconds for async operations
 
+// Generate unique request ID (UUID v4 格式，不包含时间戳，符合 WS 协议规范)
+// 格式: req_xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+function generateRequestId() {
+  return `req_${crypto.randomUUID()}`;
+}
+
 // Test results tracking
 let passed = 0;
 let failed = 0;
@@ -118,7 +124,7 @@ async function runTests() {
 
     // Test: Create LIMIT order and wait for full async response
     await test('CREATE_ORDER: Create LIMIT order - full async flow', async () => {
-      const requestId = `req_async_limit_${Date.now()}`;
+      const requestId = generateRequestId()`;
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
@@ -163,7 +169,7 @@ async function runTests() {
 
     // Test: Create MARKET order
     await test('CREATE_ORDER: Create MARKET order - full async flow', async () => {
-      const requestId = `req_async_market_${Date.now()}`;
+      const requestId = generateRequestId()`;
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
@@ -190,7 +196,7 @@ async function runTests() {
 
     // Test: Invalid order (validation error)
     await test('CREATE_ORDER: Invalid order - should get ERROR', async () => {
-      const requestId = `req_async_invalid_${Date.now()}`;
+      const requestId = generateRequestId()`;
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
