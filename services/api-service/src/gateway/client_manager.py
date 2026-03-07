@@ -16,7 +16,6 @@ WebSocket 客户端管理器 - 集成新任务机制
 import asyncio
 import logging
 import uuid
-from typing import Optional
 
 from fastapi import WebSocket
 
@@ -74,7 +73,8 @@ class ClientManager:
 
             # 清理请求映射
             self._requests = {
-                req_id: cid for req_id, cid in self._requests.items()
+                req_id: cid
+                for req_id, cid in self._requests.items()
                 if cid != client_id
             }
 
@@ -82,7 +82,7 @@ class ClientManager:
         if self._subscription_manager:
             await self._subscription_manager.on_client_disconnect(client_id)
 
-    def get_websocket(self, client_id: str) -> Optional[WebSocket]:
+    def get_websocket(self, client_id: str) -> WebSocket | None:
         """获取客户端的 WebSocket 连接
 
         Args:
@@ -110,15 +110,22 @@ class ClientManager:
 
         try:
             # v2.1规范：type 在 data 内部
-            msg_type = message.get('data', {}).get('type') if message.get('data') else message.get('type')
-            request_id = message.get('requestId', 'N/A')
+            msg_type = (
+                message.get("data", {}).get("type")
+                if message.get("data")
+                else message.get("type")
+            )
+            request_id = message.get("requestId", "N/A")
             import json
-            logger.debug(f"[ClientManager.send] 发送给 client_id={client_id}, requestId={request_id}, type={msg_type}")
+
+            logger.debug(
+                f"[ClientManager.send] 发送给 client_id={client_id}, requestId={request_id}, type={msg_type}"
+            )
             # 手动序列化以确保 UUID 被正确转换为字符串
             json_str = json.dumps(message, default=str, ensure_ascii=False)
             logger.debug(f"ClientManager.send: 完整消息: {json_str}")
             await websocket.send_text(json_str)
-            logger.debug(f"ClientManager.send: 发送成功")
+            logger.debug("ClientManager.send: 发送成功")
             return True
         except Exception as e:
             logger.warning(f"ClientManager.send: 发送失败 {client_id}: {e}")
@@ -149,8 +156,12 @@ class ClientManager:
         logger.debug(f"[Broadcast] 所有订阅键: {all_keys}")
 
         # 1. 精确匹配
-        exact_clients = self._subscription_manager.get_subscribed_clients(subscription_key)
-        logger.debug(f"[Broadcast] 精确匹配 {subscription_key}: {len(exact_clients)} 客户端")
+        exact_clients = self._subscription_manager.get_subscribed_clients(
+            subscription_key
+        )
+        logger.debug(
+            f"[Broadcast] 精确匹配 {subscription_key}: {len(exact_clients)} 客户端"
+        )
         clients.update(exact_clients)
 
         # 2. 通配符匹配：检查 subscription_key 是否是订阅键的前缀
@@ -161,12 +172,18 @@ class ClientManager:
                 # 将 "SIGNAL:*" 转换为前缀 "SIGNAL:"
                 wildcard_prefix = key.replace("*", "")
                 if subscription_key.startswith(wildcard_prefix):
-                    wildcard_clients = self._subscription_manager.get_subscribed_clients(key)
-                    logger.debug(f"[广播] 通配符匹配: {key} 匹配 {subscription_key}, 客户端数: {len(wildcard_clients)}")
+                    wildcard_clients = (
+                        self._subscription_manager.get_subscribed_clients(key)
+                    )
+                    logger.debug(
+                        f"[广播] 通配符匹配: {key} 匹配 {subscription_key}, 客户端数: {len(wildcard_clients)}"
+                    )
                     clients.update(wildcard_clients)
             # 处理普通前缀匹配，如 "BINANCE:" 匹配 "BINANCE:BTCUSDT"
             elif key.endswith(":") and subscription_key.startswith(key):
-                wildcard_clients = self._subscription_manager.get_subscribed_clients(key)
+                wildcard_clients = self._subscription_manager.get_subscribed_clients(
+                    key
+                )
                 clients.update(wildcard_clients)
 
         # 3. 检查通配符订阅 "*" 匹配所有
@@ -177,18 +194,15 @@ class ClientManager:
             logger.debug(f"[Broadcast] 没有客户端订阅 key={subscription_key}")
             return
 
-        logger.debug(f"[Broadcast] Broadcasting to {len(clients)} clients for key: {subscription_key}")
+        logger.debug(
+            f"[Broadcast] Broadcasting to {len(clients)} clients for key: {subscription_key}"
+        )
 
         # 并发发送，不等待完成
-        tasks = [
-            self.send(client_id, message)
-            for client_id in clients
-        ]
+        tasks = [self.send(client_id, message) for client_id in clients]
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def broadcast_pattern(
-        self, pattern: str, message: dict, symbol: str
-    ) -> None:
+    async def broadcast_pattern(self, pattern: str, message: dict, symbol: str) -> None:
         """按模式广播消息给匹配的订阅客户端
 
         支持通配符匹配，如 `BINANCE:*` 匹配所有 BINANCE 订阅。
@@ -208,8 +222,13 @@ class ClientManager:
                 all_keys = self._subscription_manager.get_all_subscription_keys()
                 exchange_clients: set[str] = set()
                 for sub_key in all_keys:
-                    if sub_key.startswith(prefix + ":") and ":" in sub_key[len(prefix) + 1:]:
-                        clients = self._subscription_manager.get_subscribed_clients(sub_key)
+                    if (
+                        sub_key.startswith(prefix + ":")
+                        and ":" in sub_key[len(prefix) + 1 :]
+                    ):
+                        clients = self._subscription_manager.get_subscribed_clients(
+                            sub_key
+                        )
                         exchange_clients.update(clients)
 
                 for client_id in exchange_clients:
@@ -224,7 +243,7 @@ class ClientManager:
         """
         self._requests[request_id] = client_id
 
-    def get_client_by_request(self, request_id: str) -> Optional[str]:
+    def get_client_by_request(self, request_id: str) -> str | None:
         """根据请求 ID 获取客户端 ID
 
         Args:
@@ -246,7 +265,7 @@ class ClientManager:
         """
         self._tasks[task_id] = client_id
 
-    def get_client_by_task(self, task_id: int) -> Optional[str]:
+    def get_client_by_task(self, task_id: int) -> str | None:
         """根据任务ID获取客户端ID
 
         Args:

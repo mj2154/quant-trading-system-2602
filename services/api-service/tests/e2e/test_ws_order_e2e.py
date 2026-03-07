@@ -1,7 +1,7 @@
 """
 WebSocket 订单交易 E2E 测试
 
-测试通过 WebSocket 连接 API 服务并发送买入现货订单请求。
+测试通过 WebSocket 连接 API 服务并发送买入期货订单请求。
 所有测试共享一个 WebSocket 连接，直到测试结束才断开。
 """
 
@@ -32,7 +32,7 @@ async def wait_for_message(ws, timeout=10):
     """等待接收消息"""
     try:
         return await asyncio.wait_for(ws.recv(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return None
 
 
@@ -50,10 +50,10 @@ async def main():
             # 测试 1: 创建订单并等待完成
             # ============================================================
             logger.info("=" * 60)
-            logger.info("开始测试: 创建现货买入订单")
+            logger.info("开始测试: 创建期货买入订单")
             logger.info("=" * 60)
 
-            # 发送 CREATE_ORDER 请求（现货买入 BTCUSDT）
+            # 发送 CREATE_ORDER 请求（期货买入 BTCUSDT）
             # 协议要求:
             # - requestId: WS请求追踪ID（UUID格式）
             # - newClientOrderId: 订单标识ID（必填，UUID格式），用于关联订单与推送
@@ -65,18 +65,20 @@ async def main():
                 "requestId": request_id,
                 "timestamp": int(time.time() * 1000),
                 "data": {
-                    "symbol": "BINANCE:BTCUSDT",  # 现货格式: EXCHANGE:SYMBOL
+                    "symbol": "BINANCE:BTCUSDT.PERP",  # 期货格式: EXCHANGE:SYMBOL.PERP
                     "side": "BUY",
                     "type": "MARKET",
                     "quantity": 0.002,  # 约 100 USDT
-                    "newClientOrderId": new_client_order_id  # 必填字段
-                }
+                    "newClientOrderId": new_client_order_id,  # 必填字段
+                },
             }
 
             logger.info(f"📝 requestId: {request_id}")
             logger.info(f"📝 newClientOrderId: {new_client_order_id}")
 
-            logger.info(f"📤 发送订单请求: {json.dumps(order_request, ensure_ascii=False)}")
+            logger.info(
+                f"📤 发送订单请求: {json.dumps(order_request, ensure_ascii=False)}"
+            )
             await ws.send(json.dumps(order_request))
 
             # 第一阶段: 等待 ACK 确认
@@ -96,7 +98,9 @@ async def main():
                 return
 
             if ack_data.get("requestId") != request_id:
-                logger.error(f"❌ ACK requestId 不匹配: 期望 {request_id}, 实际 {ack_data.get('requestId')}")
+                logger.error(
+                    f"❌ ACK requestId 不匹配: 期望 {request_id}, 实际 {ack_data.get('requestId')}"
+                )
                 return
 
             logger.info("✅ ACK 确认正确")
@@ -120,20 +124,26 @@ async def main():
             logger.info(f"时间戳 (timestamp): {order_data.get('timestamp')}")
             logger.info("-" * 60)
             logger.info("完整数据 (data):")
-            logger.info(json.dumps(order_data.get("data"), ensure_ascii=False, indent=2))
+            logger.info(
+                json.dumps(order_data.get("data"), ensure_ascii=False, indent=2)
+            )
             logger.info("=" * 60)
 
             # 验证响应
             if order_data.get("type") not in ("ORDER_DATA", "ERROR"):
-                logger.error(f"❌ 期望 ORDER_DATA 或 ERROR，实际收到: {order_data.get('type')}")
+                logger.error(
+                    f"❌ 期望 ORDER_DATA 或 ERROR，实际收到: {order_data.get('type')}"
+                )
                 return
 
             if order_data.get("requestId") != request_id:
-                logger.error(f"❌ 响应 requestId 不匹配")
+                logger.error("响应 requestId 不匹配")
                 return
 
             if order_data.get("type") == "ERROR":
-                logger.error(f"❌ 订单创建失败: {order_data.get('data', {}).get('errorMessage')}")
+                logger.error(
+                    f"❌ 订单创建失败: {order_data.get('data', {}).get('errorMessage')}"
+                )
                 return
 
             logger.info("✅ 订单创建成功")
@@ -142,7 +152,9 @@ async def main():
             logger.info(f"📊 订单 taskId: {task_id}")
 
             # 提取币安订单ID，用于后续查询
-            binance_order_id = order_data.get("data", {}).get("result", {}).get("orderId")
+            binance_order_id = (
+                order_data.get("data", {}).get("result", {}).get("orderId")
+            )
             logger.info(f"📊 币安订单ID (orderId): {binance_order_id}")
 
             # ============================================================
@@ -163,20 +175,24 @@ async def main():
                 "requestId": query_request_id,
                 "timestamp": int(time.time() * 1000),
                 "data": {
-                    "symbol": "BINANCE:BTCUSDT",  # 现货格式: EXCHANGE:SYMBOL
-                    "orderId": str(binance_order_id)  # 使用币安生成的订单ID查询
-                }
+                    "symbol": "BINANCE:BTCUSDT.PERP",  # 期货格式: EXCHANGE:SYMBOL.PERP
+                    "orderId": str(binance_order_id),  # 使用币安生成的订单ID查询
+                },
             }
 
             logger.info(f"📝 查询 requestId: {query_request_id}")
-            logger.info(f"📤 发送查询请求: {json.dumps(query_request, ensure_ascii=False)}")
+            logger.info(
+                f"📤 发送查询请求: {json.dumps(query_request, ensure_ascii=False)}"
+            )
             await ws.send(json.dumps(query_request))
 
             # 等待 ACK
             ack_msg = await wait_for_message(ws, timeout=5)
             if ack_msg:
                 ack_data = json.loads(ack_msg)
-                logger.info(f"📥 收到查询 ACK: {json.dumps(ack_data, ensure_ascii=False)}")
+                logger.info(
+                    f"📥 收到查询 ACK: {json.dumps(ack_data, ensure_ascii=False)}"
+                )
 
             # 等待查询响应
             query_msg = await wait_for_message(ws, timeout=30)
@@ -193,18 +209,22 @@ async def main():
                 logger.info(f"时间戳 (timestamp): {query_data.get('timestamp')}")
                 logger.info("-" * 60)
                 logger.info("完整数据 (data):")
-                logger.info(json.dumps(query_data.get("data"), ensure_ascii=False, indent=2))
+                logger.info(
+                    json.dumps(query_data.get("data"), ensure_ascii=False, indent=2)
+                )
                 logger.info("=" * 60)
 
                 if query_data.get("type") == "ORDER_DATA":
                     logger.info("✅ 查询订单成功")
                 else:
-                    logger.error(f"❌ 查询失败: {query_data.get('data', {}).get('errorMessage')}")
+                    logger.error(
+                        f"❌ 查询失败: {query_data.get('data', {}).get('errorMessage')}"
+                    )
             else:
                 logger.error("❌ 未收到查询响应")
 
             # ============================================================
-            #.error("❌ 测试总结
+            # .error("❌ 测试总结
             # ============================================================
             logger.info("=" * 60)
             logger.info("📋 测试总结:")
@@ -216,6 +236,7 @@ async def main():
     except Exception as e:
         logger.error(f"测试失败: {e}")
         import traceback
+
         traceback.print_exc()
 
 

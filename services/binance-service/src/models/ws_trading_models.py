@@ -83,9 +83,7 @@ class WSOrderParams(BaseModel):
     price: Optional[str] = None
     time_in_force: Optional[str] = Field(default=None, alias="timeInForce")
     stop_price: Optional[str] = Field(default=None, alias="stopPrice")
-    new_client_order_id: Optional[str] = Field(
-        default=None, alias="newClientOrderId"
-    )
+    new_client_order_id: Optional[str] = Field(default=None, alias="newClientOrderId")
     quote_order_qty: Optional[str] = Field(default=None, alias="quoteOrderQty")
     # 签名相关参数
     timestamp: int
@@ -213,9 +211,7 @@ class WSCancelOrderParams(BaseModel):
 
     symbol: str
     order_id: Optional[str] = Field(default=None, alias="orderId")
-    orig_client_order_id: Optional[str] = Field(
-        default=None, alias="origClientOrderId"
-    )
+    orig_client_order_id: Optional[str] = Field(default=None, alias="origClientOrderId")
     timestamp: int
     api_key: str = Field(..., alias="apiKey")
     signature: str
@@ -239,9 +235,7 @@ class WSQueryOrderParams(BaseModel):
 
     symbol: str
     order_id: Optional[str] = Field(default=None, alias="orderId")
-    orig_client_order_id: Optional[str] = Field(
-        default=None, alias="origClientOrderId"
-    )
+    orig_client_order_id: Optional[str] = Field(default=None, alias="origClientOrderId")
     timestamp: int
     api_key: str = Field(..., alias="apiKey")
     signature: str

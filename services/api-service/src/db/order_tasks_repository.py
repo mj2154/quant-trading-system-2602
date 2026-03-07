@@ -21,8 +21,9 @@ order_tasks 表字段（与 tasks 表一致，增加 request_id 顶层字段）�
 
 import json
 import logging
+from typing import Any
+
 import asyncpg
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ class OrderTasksRepository:
         )
         return task_id
 
-    async def get_order_task(self, task_id: int) -> Optional[dict[str, Any]]:
+    async def get_order_task(self, task_id: int) -> dict[str, Any] | None:
         """根据ID获取订单任务
 
         Args:
@@ -135,7 +136,7 @@ class OrderTasksRepository:
             result = await conn.execute(query, result, status, task_id)
         return result != "UPDATE 0"
 
-    async def get_order_task_result(self, task_id: int) -> Optional[dict[str, Any]]:
+    async def get_order_task_result(self, task_id: int) -> dict[str, Any] | None:
         """获取订单任务结果
 
         Args:
@@ -184,7 +185,12 @@ class OrderTasksRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query)
 
-        stats: dict[str, int] = {"pending": 0, "processing": 0, "completed": 0, "failed": 0}
+        stats: dict[str, int] = {
+            "pending": 0,
+            "processing": 0,
+            "completed": 0,
+            "failed": 0,
+        }
         for row in rows:
             stats[row["status"]] = row["count"]
         return stats
@@ -193,7 +199,7 @@ class OrderTasksRepository:
         self,
         request_id: str,
         task_type: str | None = None,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """根据 request_id 查询订单任务
 
         直接使用 request_id 顶层字段查询（可建索引，效率高）。

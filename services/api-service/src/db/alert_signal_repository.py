@@ -2,7 +2,6 @@
 
 import json
 import logging
-from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -366,9 +365,7 @@ class AlertSignalRepository:
             Total number of alert signals.
         """
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(
-                "SELECT COUNT(*) FROM alert_configs"
-            )
+            return await conn.fetchval("SELECT COUNT(*) FROM alert_configs")
 
     async def enable(self, alert_id: str) -> bool:
         """Enable an alert signal.

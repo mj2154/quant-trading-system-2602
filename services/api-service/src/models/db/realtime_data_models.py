@@ -8,8 +8,7 @@
 版本: v2.0.0
 """
 
-from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class SubscriptionKey(BaseModel):
@@ -51,7 +50,9 @@ class SubscriptionKey(BaseModel):
         )
 
     @classmethod
-    def create_key(cls, symbol: str, subscription_type: str, params: dict | None = None) -> str:
+    def create_key(
+        cls, symbol: str, subscription_type: str, params: dict | None = None
+    ) -> str:
         """
         创建订阅键
 
@@ -84,7 +85,7 @@ class SubscriptionKey(BaseModel):
         return key_obj.to_key()
 
     @classmethod
-    def from_key(cls, key: str) -> "SubscriptionKey":
+    def from_key(cls, key: str) -> SubscriptionKey:
         """从字符串键创建实例"""
         if "@" not in key:
             raise ValueError(f"无效的订阅键格式: {key}")
@@ -173,9 +174,7 @@ class SubscriptionChange(BaseModel):
     timestamp: float  # 变更时间
 
     def __str__(self) -> str:
-        return (
-            f"SubscriptionChange({self.exchange}, +{len(self.subscribe)}, -{len(self.unsubscribe)})"
-        )
+        return f"SubscriptionChange({self.exchange}, +{len(self.subscribe)}, -{len(self.unsubscribe)})"
 
 
 class SubscriptionStats(BaseModel):
@@ -275,6 +274,10 @@ class BatchSubscriptionResult(BaseModel):
     failed: list[dict] | None = None  # 失败的订阅
 
     def __str__(self) -> str:
-        total_success = sum(len(subs) for subs in self.successful_subscriptions.values())
+        total_success = sum(
+            len(subs) for subs in self.successful_subscriptions.values()
+        )
         total_failed = len(self.failed) if self.failed else 0
-        return f"BatchSubscriptionResult(success={total_success}, failed={total_failed})"
+        return (
+            f"BatchSubscriptionResult(success={total_success}, failed={total_failed})"
+        )

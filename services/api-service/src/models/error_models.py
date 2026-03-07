@@ -7,7 +7,6 @@
 版本: v3.0.0
 """
 
-
 from pydantic import BaseModel, Field
 
 
@@ -254,9 +253,15 @@ class ErrorMessage:
 
 
 BINANCE_ERROR_CODES: dict[int, dict[str, str]] = {
-    -2015: {"message": "API认证失败或权限不足", "description": "API密钥无效、IP被限制或权限不足"},
+    -2015: {
+        "message": "API认证失败或权限不足",
+        "description": "API密钥无效、IP被限制或权限不足",
+    },
     -2014: {"message": "API密钥不存在", "description": "提供的API密钥在系统中不存在"},
-    -1021: {"message": "时间戳超出有效窗口", "description": "请求时间戳超出recvWindow限制"},
+    -1021: {
+        "message": "时间戳超出有效窗口",
+        "description": "请求时间戳超出recvWindow限制",
+    },
     -1003: {"message": "请求频率过高", "description": "超出API速率限制"},
     -1013: {"message": "无效的资产代码", "description": "提供的资产代码无效"},
     -1022: {"message": "签名无效", "description": "请求签名验证失败"},
@@ -328,4 +333,6 @@ def create_binance_error(
     }
 
     error_class = error_classes.get(code, BinanceAPIError)
-    return error_class(code=code, msg=msg, http_status=http_status, retry_after=retry_after)
+    return error_class(
+        code=code, msg=msg, http_status=http_status, retry_after=retry_after
+    )

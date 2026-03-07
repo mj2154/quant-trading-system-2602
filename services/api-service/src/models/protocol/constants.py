@@ -19,12 +19,14 @@ WS_USER_DATA_PATH = "/ws/user"
 # ==================== 心跳配置 ====================
 
 PING_INTERVAL = 20  # 心跳间隔（秒）
-PING_TIMEOUT = 60   # 心跳超时（秒）
+PING_TIMEOUT = 60  # 心跳超时（秒）
 
 # ==================== 消息动作类型 ====================
 
+
 class WSAction:
     """WebSocket消息动作类型"""
+
     GET = "get"
     SUBSCRIBE = "subscribe"
     UNSUBSCRIBE = "unsubscribe"
@@ -35,8 +37,10 @@ class WSAction:
 
 # ==================== 消息数据类型 ====================
 
+
 class WSMessageType:
     """WebSocket消息数据类型"""
+
     CONFIG = "config"
     SEARCH_SYMBOLS = "search_symbols"
     RESOLVE_SYMBOL = "resolve_symbol"
@@ -51,8 +55,10 @@ class WSMessageType:
 
 # ==================== 订阅类型 ====================
 
+
 class SubscriptionType:
     """数据订阅类型"""
+
     KLINE = "kline"
     TICKER = "ticker"
     MARK_PRICE = "mark_price"
@@ -91,8 +97,10 @@ INTERVAL_TO_RESOLUTION = {v: k for k, v in RESOLUTION_TO_INTERVAL.items()}
 
 # ==================== 产品类型 ====================
 
+
 class ProductType:
     """产品类型"""
+
     SPOT = "spot"
     FUTURES = "futures"
     COIN_FUTURES = "coin_futures"
@@ -100,8 +108,10 @@ class ProductType:
 
 # ==================== 错误代码 ====================
 
+
 class WSErrorCode:
     """WebSocket错误代码"""
+
     UNKNOWN = "unknown"
     INVALID_REQUEST = "invalid_request"
     AUTH_REQUIRED = "auth_required"

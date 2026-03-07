@@ -64,7 +64,9 @@ class TasksRepository:
             """
             payload_json = json.dumps(payload)
             async with self._pool.acquire() as conn:
-                task_id = await conn.fetchval(query, task_type, request_id, payload_json)
+                task_id = await conn.fetchval(
+                    query, task_type, request_id, payload_json
+                )
         else:
             query = """
                 INSERT INTO tasks (type, payload)
@@ -323,20 +325,24 @@ class TasksRepository:
         """
 
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(query, symbol, interval, from_timestamp, to_timestamp)
+            rows = await conn.fetch(
+                query, symbol, interval, from_timestamp, to_timestamp
+            )
 
         klines = []
         for row in rows:
-            klines.append({
-                "time": int(row["open_time"].timestamp() * 1000),
-                "open": float(row["open_price"]),
-                "high": float(row["high_price"]),
-                "low": float(row["low_price"]),
-                "close": float(row["close_price"]),
-                "volume": float(row["volume"]),
-                "symbol": symbol,
-                "interval": interval,  # 统一使用 interval
-            })
+            klines.append(
+                {
+                    "time": int(row["open_time"].timestamp() * 1000),
+                    "open": float(row["open_price"]),
+                    "high": float(row["high_price"]),
+                    "low": float(row["low_price"]),
+                    "close": float(row["close_price"]),
+                    "volume": float(row["volume"]),
+                    "symbol": symbol,
+                    "interval": interval,  # 统一使用 interval
+                }
+            )
 
         return klines
 
@@ -364,6 +370,8 @@ class TasksRepository:
             return {
                 "data": data,
                 "update_time": row["update_time"],
-                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                "updated_at": (
+                    row["updated_at"].isoformat() if row["updated_at"] else None
+                ),
             }
         return None

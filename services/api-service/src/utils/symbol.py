@@ -14,8 +14,6 @@ Examples:
 """
 
 from dataclasses import dataclass
-from typing import Optional
-
 
 # Known contract types
 CONTRACT_TYPE_PERPETUAL = "PERP"
@@ -35,9 +33,10 @@ class SemanticSymbol:
         contract_type: Contract type suffix (e.g., "PERP", "20260327") or None for spot
         original: Original semantic symbol string
     """
+
     exchange: str
     raw_symbol: str
-    contract_type: Optional[str]
+    contract_type: str | None
     original: str
 
     @property
@@ -136,7 +135,7 @@ def to_binance_api_symbol(symbol: str) -> str:
 def build_semantic_symbol(
     exchange: str,
     raw_symbol: str,
-    contract_type: Optional[str] = None,
+    contract_type: str | None = None,
 ) -> str:
     """Build a semantic symbol from components.
 

@@ -12,22 +12,22 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from .db.alert_signal_repository import AlertSignalRepository
+from .db.database import close_pool, get_pool, init_pool
+from .db.order_tasks_repository import OrderTasksRepository
+from .db.strategy_metadata_repository import StrategyMetadataRepository
+from .db.strategy_signals_repository import StrategySignalsRepository
+from .db.tasks_repository import TasksRepository
 from .gateway import (
     ClientManager,
-    TaskRouter,
     DataProcessor,
     SubscriptionManager,
+    TaskRouter,
 )
-from .db.database import init_pool, close_pool, get_pool
-from .db.tasks_repository import TasksRepository
-from .db.order_tasks_repository import OrderTasksRepository
-from .db.strategy_signals_repository import StrategySignalsRepository
-from .db.strategy_metadata_repository import StrategyMetadataRepository
-from .db.alert_signal_repository import AlertSignalRepository
-from .models.db.task_models import UnifiedTaskPayload, TaskType
+from .models.db.task_models import TaskType, UnifiedTaskPayload
 
 # 配置日志
 logging.basicConfig(
@@ -64,9 +64,15 @@ async def _create_initial_tasks(tasks_repo: TasksRepository) -> None:
 
         task_id = await tasks_repo.create_task(
             task_type=TaskType.SYSTEM_FETCH_EXCHANGE_INFO,
-            payload={"action": task.action, "resource": task.resource, "params": task.params},
+            payload={
+                "action": task.action,
+                "resource": task.resource,
+                "params": task.params,
+            },
         )
-        logger.info(f"初始任务已创建: {TaskType.SYSTEM_FETCH_EXCHANGE_INFO}, task_id={task_id}")
+        logger.info(
+            f"初始任务已创建: {TaskType.SYSTEM_FETCH_EXCHANGE_INFO}, task_id={task_id}"
+        )
 
     except Exception as e:
         logger.error(f"创建初始任务失败: {e}", exc_info=True)
@@ -112,6 +118,7 @@ async def lifespan(app: FastAPI):
 
     # 2. 初始化交易所信息仓储
     from .db.exchange_info_repository import ExchangeInfoRepository
+
     _exchange_repo = ExchangeInfoRepository(pool)
     logger.info("ExchangeInfoRepository initialized")
 

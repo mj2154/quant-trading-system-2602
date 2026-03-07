@@ -1,5 +1,7 @@
 """Strategy metadata repository for querying strategies from database."""
+
 from typing import Any
+
 from asyncpg import Pool
 
 

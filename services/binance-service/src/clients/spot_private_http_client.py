@@ -12,11 +12,6 @@ from urllib.parse import urlencode
 
 from .base_http_client import BinanceHTTPClient
 from models.spot_account import SpotAccountInfo
-from models.trading_order import (
-    OrderSide,
-    OrderType,
-    TimeInForce,
-)
 from utils.ed25519_signer import Ed25519Signer
 from utils.rsa_signer import RSASigner
 

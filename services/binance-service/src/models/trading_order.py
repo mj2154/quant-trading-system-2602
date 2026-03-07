@@ -16,13 +16,14 @@
 from enum import Enum
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from .base import CamelCaseModel, SnakeCaseModel
+from .base import SnakeCaseModel
 
 
 class OrderType(str, Enum):
     """订单类型"""
+
     LIMIT = "LIMIT"
     MARKET = "MARKET"
     STOP_LOSS = "STOP_LOSS"
@@ -35,12 +36,14 @@ class OrderType(str, Enum):
 
 class OrderSide(str, Enum):
     """订单方向"""
+
     BUY = "BUY"
     SELL = "SELL"
 
 
 class PositionSide(str, Enum):
     """持仓方向（对冲模式）"""
+
     LONG = "LONG"
     SHORT = "SHORT"
     BOTH = "BOTH"
@@ -48,6 +51,7 @@ class PositionSide(str, Enum):
 
 class TimeInForce(str, Enum):
     """时间策略"""
+
     GTC = "GTC"  # Good Till Cancel - 成交为止
     IOC = "IOC"  # Immediate or Cancel - 立即成交，否则取消
     FOK = "FOK"  # Fill or Kill - 全部成交，否则取消
@@ -55,13 +59,15 @@ class TimeInForce(str, Enum):
 
 class OrderResponseType(str, Enum):
     """订单响应类型"""
-    ACK = "ACK"    # 仅返回确认信息
+
+    ACK = "ACK"  # 仅返回确认信息
     RESULT = "RESULT"  # 返回执行结果
     FULL = "FULL"  # 返回完整信息
 
 
 class OrderStatus(str, Enum):
     """订单状态"""
+
     NEW = "NEW"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
@@ -74,6 +80,7 @@ class OrderStatus(str, Enum):
 # =============================================================================
 # 现货订单请求模型 (WebSocket API)
 # =============================================================================
+
 
 class SpotWsOrderRequest(SnakeCaseModel):
     """现货 WebSocket 订单请求参数
@@ -92,48 +99,82 @@ class SpotWsOrderRequest(SnakeCaseModel):
     symbol: str = Field(..., description="交易对，如 BTCUSDT")
     side: str = Field(..., description="订单方向 BUY/SELL")
     type: str = Field(..., description="订单类型 LIMIT/MARKET/STOP_LOSS etc.")
-    new_client_order_id: str = Field(..., alias="newClientOrderId", description="客户端订单ID（必填，用于关联请求和响应）")
+    new_client_order_id: str = Field(
+        ...,
+        alias="newClientOrderId",
+        description="客户端订单ID（必填，用于关联请求和响应）",
+    )
 
     # quantity 或 quoteOrderQty 至少填写一个
     quantity: Optional[float] = Field(None, description="订单数量")
-    quote_order_qty: Optional[float] = Field(None, alias="quoteOrderQty", description="报价数量（市价买单时指定支付金额）")
+    quote_order_qty: Optional[float] = Field(
+        None, alias="quoteOrderQty", description="报价数量（市价买单时指定支付金额）"
+    )
 
     # ========== 可选字段 ==========
 
     # 价格相关（限价单必需）
     price: Optional[float] = Field(None, description="限价价格")
-    time_in_force: Optional[str] = Field(None, alias="timeInForce", description="时间策略 GTC/IOC/FOK")
+    time_in_force: Optional[str] = Field(
+        None, alias="timeInForce", description="时间策略 GTC/IOC/FOK"
+    )
 
     # 策略参数
     strategy_id: Optional[int] = Field(None, alias="strategyId", description="策略ID")
-    strategy_type: Optional[int] = Field(None, alias="strategyType", description="策略类型（值不能小于1000000）")
+    strategy_type: Optional[int] = Field(
+        None, alias="strategyType", description="策略类型（值不能小于1000000）"
+    )
 
     # 止损/止盈
     stop_price: Optional[float] = Field(None, alias="stopPrice", description="止损价格")
-    trailing_delta: Optional[int] = Field(None, alias="trailingDelta", description="追踪止损delta")
+    trailing_delta: Optional[int] = Field(
+        None, alias="trailingDelta", description="追踪止损delta"
+    )
 
     # 冰山订单参数
-    iceberg_qty: Optional[float] = Field(None, alias="icebergQty", description="冰山订单数量")
-    limit_iceberg_qty: Optional[float] = Field(None, alias="limitIcebergQty", description="冰山订单的限价部分数量")
-    stop_iceberg_qty: Optional[float] = Field(None, alias="stopIcebergQty", description="止损单的冰山数量")
+    iceberg_qty: Optional[float] = Field(
+        None, alias="icebergQty", description="冰山订单数量"
+    )
+    limit_iceberg_qty: Optional[float] = Field(
+        None, alias="limitIcebergQty", description="冰山订单的限价部分数量"
+    )
+    stop_iceberg_qty: Optional[float] = Field(
+        None, alias="stopIcebergQty", description="止损单的冰山数量"
+    )
 
     # 策略参数 - 限价单和止损单
-    limit_strategy_id: Optional[int] = Field(None, alias="limitStrategyId", description="限价单的策略ID")
-    stop_strategy_id: Optional[int] = Field(None, alias="stopStrategyId", description="止损单的策略ID")
+    limit_strategy_id: Optional[int] = Field(
+        None, alias="limitStrategyId", description="限价单的策略ID"
+    )
+    stop_strategy_id: Optional[int] = Field(
+        None, alias="stopStrategyId", description="止损单的策略ID"
+    )
 
     # 止损限价单时间策略
-    stop_limit_time_in_force: Optional[str] = Field(None, alias="stopLimitTimeInForce", description="止损限价单时间策略 GTC/IOC/FOK")
+    stop_limit_time_in_force: Optional[str] = Field(
+        None, alias="stopLimitTimeInForce", description="止损限价单时间策略 GTC/IOC/FOK"
+    )
 
     # 响应格式
-    new_order_resp_type: Optional[str] = Field("FULL", alias="newOrderRespType", description="响应格式 ACK/RESULT/FULL")
+    new_order_resp_type: Optional[str] = Field(
+        "FULL", alias="newOrderRespType", description="响应格式 ACK/RESULT/FULL"
+    )
 
     # 自成交防止
-    self_trade_prevention_mode: Optional[str] = Field(None, alias="selfTradePreventionMode", description="自成交防止模式")
+    self_trade_prevention_mode: Optional[str] = Field(
+        None, alias="selfTradePreventionMode", description="自成交防止模式"
+    )
 
     # Pegged订单参数
-    peg_price_type: Optional[str] = Field(None, alias="pegPriceType", description="价格peg类型 PRIMARY_PEG/MARKET_PEG")
-    peg_offset_value: Optional[int] = Field(None, alias="pegOffsetValue", description="peg偏移值")
-    peg_offset_type: Optional[int] = Field(None, alias="pegOffsetType", description="peg偏移类型")
+    peg_price_type: Optional[str] = Field(
+        None, alias="pegPriceType", description="价格peg类型 PRIMARY_PEG/MARKET_PEG"
+    )
+    peg_offset_value: Optional[int] = Field(
+        None, alias="pegOffsetValue", description="peg偏移值"
+    )
+    peg_offset_type: Optional[int] = Field(
+        None, alias="pegOffsetType", description="peg偏移类型"
+    )
 
     def to_binance_params(self) -> dict:
         """转换为发送给币安的参数字典（驼峰命名）"""
@@ -143,6 +184,7 @@ class SpotWsOrderRequest(SnakeCaseModel):
 # =============================================================================
 # 期货订单请求模型 (WebSocket API)
 # =============================================================================
+
 
 class FuturesWsOrderRequest(SnakeCaseModel):
     """期货 WebSocket 订单请求参数
@@ -165,7 +207,11 @@ class FuturesWsOrderRequest(SnakeCaseModel):
     symbol: str = Field(..., description="交易对，如 BTCUSDT")
     side: str = Field(..., description="订单方向 BUY/SELL")
     type: str = Field(..., description="订单类型 LIMIT/MARKET/STOP_LOSS etc.")
-    new_client_order_id: str = Field(..., alias="newClientOrderId", description="客户端订单ID（必填，用于关联请求和响应）")
+    new_client_order_id: str = Field(
+        ...,
+        alias="newClientOrderId",
+        description="客户端订单ID（必填，用于关联请求和响应）",
+    )
 
     # quantity 或 closePosition 至少填写一个
     quantity: Optional[float] = Field(None, description="订单数量")
@@ -174,10 +220,14 @@ class FuturesWsOrderRequest(SnakeCaseModel):
 
     # 价格相关
     price: Optional[float] = Field(None, description="限价价格")
-    time_in_force: Optional[str] = Field(None, alias="timeInForce", description="时间策略 GTC/IOC/FOK")
+    time_in_force: Optional[str] = Field(
+        None, alias="timeInForce", description="时间策略 GTC/IOC/FOK"
+    )
 
     # 持仓方向（对冲模式）- 期货特有
-    position_side: Optional[str] = Field(None, alias="positionSide", description="持仓方向 LONG/SHORT/BOTH")
+    position_side: Optional[str] = Field(
+        None, alias="positionSide", description="持仓方向 LONG/SHORT/BOTH"
+    )
 
     # 止损/止盈 - 期货特有
     stop_price: Optional[float] = Field(None, alias="stopPrice", description="止损价格")
@@ -185,18 +235,36 @@ class FuturesWsOrderRequest(SnakeCaseModel):
     close_position: bool = Field(False, alias="closePosition", description="是否全平仓")
 
     # 追踪止损 - 期货特有
-    activation_price: Optional[float] = Field(None, alias="activationPrice", description="触发价格（追踪止损）")
-    callback_rate: Optional[float] = Field(None, alias="callbackRate", description="回调比例（0.1-10）")
+    activation_price: Optional[float] = Field(
+        None, alias="activationPrice", description="触发价格（追踪止损）"
+    )
+    callback_rate: Optional[float] = Field(
+        None, alias="callbackRate", description="回调比例（0.1-10）"
+    )
 
     # 响应格式
-    new_order_resp_type: Optional[str] = Field("ACK", alias="newOrderRespType", description="响应格式 ACK/RESULT/FULL")
+    new_order_resp_type: Optional[str] = Field(
+        "ACK", alias="newOrderRespType", description="响应格式 ACK/RESULT/FULL"
+    )
 
     # 期货特有参数
-    working_type: Optional[str] = Field("CONTRACT_PRICE", alias="workingType", description="触发价格类型 MARK_PRICE/CONTRACT_PRICE")
-    price_protect: bool = Field(False, alias="priceProtect", description="是否开启价格保护")
-    price_match: Optional[str] = Field(None, alias="priceMatch", description="价格匹配模式 OPPONENT/QUEUE等")
-    self_trade_prevention_mode: Optional[str] = Field(None, alias="selfTradePreventionMode", description="自成交防止模式")
-    good_till_date: Optional[int] = Field(None, alias="goodTillDate", description="GTD订单过期时间")
+    working_type: Optional[str] = Field(
+        "CONTRACT_PRICE",
+        alias="workingType",
+        description="触发价格类型 MARK_PRICE/CONTRACT_PRICE",
+    )
+    price_protect: bool = Field(
+        False, alias="priceProtect", description="是否开启价格保护"
+    )
+    price_match: Optional[str] = Field(
+        None, alias="priceMatch", description="价格匹配模式 OPPONENT/QUEUE等"
+    )
+    self_trade_prevention_mode: Optional[str] = Field(
+        None, alias="selfTradePreventionMode", description="自成交防止模式"
+    )
+    good_till_date: Optional[int] = Field(
+        None, alias="goodTillDate", description="GTD订单过期时间"
+    )
 
     def to_binance_params(self) -> dict:
         """转换为发送给币安的参数字典（驼峰命名）"""
@@ -206,8 +274,6 @@ class FuturesWsOrderRequest(SnakeCaseModel):
 # =============================================================================
 # 查询/取消订单请求模型 (WebSocket API - 通用)
 # =============================================================================
-
-from pydantic import model_validator
 
 
 class WsQueryOrderRequest(SnakeCaseModel):
@@ -222,7 +288,9 @@ class WsQueryOrderRequest(SnakeCaseModel):
 
     # orderId 或 origClientOrderId 至少填写一个
     order_id: Optional[int] = Field(None, alias="orderId", description="订单ID")
-    orig_client_order_id: Optional[str] = Field(None, alias="origClientOrderId", description="客户端订单ID")
+    orig_client_order_id: Optional[str] = Field(
+        None, alias="origClientOrderId", description="客户端订单ID"
+    )
 
     @model_validator(mode="after")
     def validate_required_fields(self) -> "WsQueryOrderRequest":
@@ -248,13 +316,21 @@ class WsCancelOrderRequest(SnakeCaseModel):
 
     # orderId 或 origClientOrderId 至少填写一个
     order_id: Optional[int] = Field(None, alias="orderId", description="订单ID")
-    orig_client_order_id: Optional[str] = Field(None, alias="origClientOrderId", description="客户端订单ID")
+    orig_client_order_id: Optional[str] = Field(
+        None, alias="origClientOrderId", description="客户端订单ID"
+    )
 
     # ========== 可选字段 ==========
-    new_client_order_id: Optional[str] = Field(None, alias="newClientOrderId", description="用于唯一标识此次取消操作")
+    new_client_order_id: Optional[str] = Field(
+        None, alias="newClientOrderId", description="用于唯一标识此次取消操作"
+    )
 
     # 现货特有
-    cancel_restrictions: Optional[str] = Field(None, alias="cancelRestrictions", description="取消限制条件 ONLY_NEW/ONLY_PARTIALLY_FILLED")
+    cancel_restrictions: Optional[str] = Field(
+        None,
+        alias="cancelRestrictions",
+        description="取消限制条件 ONLY_NEW/ONLY_PARTIALLY_FILLED",
+    )
 
     @model_validator(mode="after")
     def validate_required_fields(self) -> "WsCancelOrderRequest":
@@ -271,6 +347,7 @@ class WsCancelOrderRequest(SnakeCaseModel):
 # =============================================================================
 # 响应模型 (WebSocket API)
 # =============================================================================
+
 
 class SpotWsOrderResponse(SnakeCaseModel):
     """现货 WebSocket 订单响应
@@ -311,7 +388,9 @@ class SpotWsOrderResponse(SnakeCaseModel):
     working_time: Optional[int] = Field(None, alias="workingTime")
 
     # 自成交防止
-    self_trade_prevention_mode: Optional[str] = Field(None, alias="selfTradePreventionMode")
+    self_trade_prevention_mode: Optional[str] = Field(
+        None, alias="selfTradePreventionMode"
+    )
 
     # 成交明细（仅FULL响应包含）
     fills: Optional[list[dict]] = None
@@ -375,7 +454,9 @@ class FuturesWsOrderResponse(SnakeCaseModel):
     working_type: str = Field("CONTRACT_PRICE", alias="workingType")
     price_protect: bool = Field(False, alias="priceProtect")
     price_match: Optional[str] = Field(None, alias="priceMatch")
-    self_trade_prevention_mode: Optional[str] = Field(None, alias="selfTradePreventionMode")
+    self_trade_prevention_mode: Optional[str] = Field(
+        None, alias="selfTradePreventionMode"
+    )
     good_till_date: Optional[int] = Field(None, alias="goodTillDate")
 
     # 时间戳
@@ -427,7 +508,9 @@ class WsCancelOrderResponse(SnakeCaseModel):
     # 条件字段
     stop_price: Optional[str] = Field(None, alias="stopPrice")
     iceberg_qty: Optional[str] = Field(None, alias="icebergQty")
-    self_trade_prevention_mode: Optional[str] = Field(None, alias="selfTradePreventionMode")
+    self_trade_prevention_mode: Optional[str] = Field(
+        None, alias="selfTradePreventionMode"
+    )
     strategy_id: Optional[int] = Field(None, alias="strategyId")
     strategy_type: Optional[int] = Field(None, alias="strategyType")
 

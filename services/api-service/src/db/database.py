@@ -6,15 +6,14 @@
 
 import asyncio
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 import asyncpg
 
 # 从环境变量读取配置
 DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://dbuser:pass@timescale-db:5432/trading_db"
+    "DATABASE_URL", "postgresql://dbuser:pass@timescale-db:5432/trading_db"
 )
 
 # 连接池
@@ -50,7 +49,7 @@ async def get_pool() -> asyncpg.Pool:
 
 
 @asynccontextmanager
-async def get_connection() -> AsyncGenerator[asyncpg.Connection, None]:
+async def get_connection() -> AsyncGenerator[asyncpg.Connection]:
     """获取数据库连接
 
     使用示例:

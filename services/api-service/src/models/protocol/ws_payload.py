@@ -8,14 +8,16 @@ WebSocket数据载荷模型
 """
 
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 # 使用本地基类进行命名转换
 from ..base import CamelCaseModel
 
 # 从 trading 模块导入数据模型
-from ..trading.quote_models import QuotesValue, QuotesData
-
+from ..trading.kline_models import KlineBars
+from ..trading.quote_models import QuotesData
+from ..trading.symbol_models import SymbolInfo
 
 # ==================== 数据载荷模型 ====================
 
@@ -132,6 +134,7 @@ class ErrorData(CamelCaseModel):
 
     内部使用snake_case，序列化输出camelCase。
     """
+
     error_code: str
     error_message: str
 
@@ -143,6 +146,7 @@ class TaskResultData(CamelCaseModel):
     遵循API设计文档v2.1规范：type字段在data内部。
     内部使用snake_case，序列化输出camelCase。
     """
+
     type: str = ""
     result: dict[str, Any] = Field(default_factory=dict)
 
@@ -153,6 +157,7 @@ class SubscriptionInfo(CamelCaseModel):
     注意：使用 interval 而非 resolution，以与数据库字段和API设计保持一致。
     内部使用snake_case，序列化输出camelCase。
     """
+
     subscription_key: str
     data_type: str
     exchange: str
@@ -164,11 +169,6 @@ class SubscriptionInfo(CamelCaseModel):
     message_count: int = 0
     last_message_at: int | None = None
 
-
-# ==================== 导入需要的类型 ====================
-
-from ..trading.kline_models import KlineBars
-from ..trading.symbol_models import SymbolInfo
 
 # ==================== 向后兼容性别名 ====================
 

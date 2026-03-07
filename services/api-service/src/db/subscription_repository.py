@@ -7,8 +7,6 @@
 """
 
 import asyncpg
-from datetime import datetime
-from typing import Optional
 
 
 class SubscriptionRepository:
@@ -24,7 +22,7 @@ class SubscriptionRepository:
         exchange: str,
         symbol: str,
         data_type: str,
-        interval: Optional[str] = None,  # 统一使用 interval
+        interval: str | None = None,  # 统一使用 interval
     ) -> int:
         """添加订阅"""
         query = """

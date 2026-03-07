@@ -10,7 +10,7 @@ API文档: https://binance-docs.github.io/apidocs/spot/cn/#user-data-stream
 import asyncio
 import json
 import logging
-from typing import Callable, Awaitable, Optional
+from typing import Any, Callable, Awaitable, Optional
 
 import httpx
 
@@ -62,7 +62,7 @@ class SpotUserStreamClient:
         self._proxy_url = proxy_url
 
         self._listen_key: Optional[str] = None
-        self._ws_connection: Optional[any] = None
+        self._ws_connection: Optional[Any] = None
         self._running = False
         self._receive_task: Optional[asyncio.Task] = None
         self._renew_task: Optional[asyncio.Task] = None

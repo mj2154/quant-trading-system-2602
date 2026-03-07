@@ -24,7 +24,6 @@
 
 import asyncio
 import logging
-from typing import Optional
 
 import asyncpg
 
@@ -96,7 +95,9 @@ class SubscriptionManager:
                 self._subscriptions[key] = set()
             self._subscriptions[key].add(client_id)
 
-            logger.debug(f"[订阅] 添加: key={key}, client={client_id}, total_clients={len(self._subscriptions[key])}")
+            logger.debug(
+                f"[订阅] 添加: key={key}, client={client_id}, total_clients={len(self._subscriptions[key])}"
+            )
             logger.debug(f"[订阅] 当前所有订阅键: {list(self._subscriptions.keys())}")
 
             # 2. 信号订阅只存在于内存中，不存入数据库
@@ -113,7 +114,9 @@ class SubscriptionManager:
 
             # 从订阅键解析数据类型
             data_type = self._parse_data_type_from_key(key)
-            result = await self._repository.add_subscription(key, data_type, self.SUBSCRIBER_ID)
+            result = await self._repository.add_subscription(
+                key, data_type, self.SUBSCRIBER_ID
+            )
             logger.debug(f"[订阅] 数据库操作结果: key={key}, result={result}")
             return result
 
@@ -190,7 +193,9 @@ class SubscriptionManager:
                     if sub_key in self._db_keys:
                         self._db_keys.discard(sub_key)
                         deleted_keys.append(sub_key)
-                        await self._repository.remove_subscription(sub_key, self.SUBSCRIBER_ID)
+                        await self._repository.remove_subscription(
+                            sub_key, self.SUBSCRIBER_ID
+                        )
 
         return deleted_keys
 
@@ -278,7 +283,9 @@ class SubscriptionManager:
     async def _publish_clean_notification(self) -> None:
         """发送清空订阅通知"""
         async with self._pool.acquire() as conn:
-            await conn.execute('NOTIFY "subscription_clean", \'{"action": "clean_all"}\'')
+            await conn.execute(
+                'NOTIFY "subscription_clean", \'{"action": "clean_all"}\''
+            )
 
     # ========== 辅助方法 ==========
 

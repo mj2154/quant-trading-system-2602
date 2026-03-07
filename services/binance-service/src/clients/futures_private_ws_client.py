@@ -6,16 +6,17 @@
 
 WebSocket端点：wss://testnet.binancefuture.com/ws-fapi/v1 (仅Testnet)
 
-关键特性：
-1. 连接后使用session.logon进行Ed25519认证
+关键特性（设计文档 8.10.10）：
+1. 请求级签名认证 - 每个请求都带 apiKey + timestamp + signature
 2. 签名payload按键名字母顺序排序（与REST API不同）
 3. 请求/响应通过ID关联
+4. 重连逻辑与公共WS客户端一致（无需重新认证）
 """
 
 import asyncio
+import json
 import logging
 import time
-import uuid
 from typing import Any, Awaitable, Callable, Optional
 
 from websockets.asyncio.client import connect
@@ -32,11 +33,12 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
 
     支持Ed25519签名认证的期货私有WebSocket API。
 
-    特点：
-    - 使用session.logon进行连接认证
+    特点（设计文档 8.10.10 请求级签名）：
+    - 每个请求都带 apiKey + timestamp + signature（无需session.logon认证）
     - 签名payload按字母顺序排序
     - 支持order.place、order.cancel、order.status请求
     - 使用回调模式处理响应
+    - 重连逻辑与公共WS客户端一致
 
     Args:
         api_key: 币安API Key
@@ -83,21 +85,12 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
         self._signer = Ed25519Signer(private_key_pem)
         self._timeout = timeout
 
-        # 认证状态
-        self._authenticated = False
-
         # 响应回调 - 回调模式核心（用于异步处理订单响应）
         self._response_callback: Optional[Callable[[str, dict], Awaitable[None]]] = None
 
-        # 认证回调 - 用于内部处理认证响应
-        self._auth_callback: Optional[Callable[[dict], Awaitable[None]]] = None
-
-    @property
-    def is_authenticated(self) -> bool:
-        """检查是否已认证"""
-        return self._authenticated
-
-    def set_response_callback(self, callback: Callable[[str, dict], Awaitable[None]]) -> None:
+    def set_response_callback(
+        self, callback: Callable[[str, dict], Awaitable[None]]
+    ) -> None:
         """设置响应回调
 
         Args:
@@ -109,14 +102,13 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
     async def send_request(self, method: str, params: dict, request_id: str) -> None:
         """发送请求（不等待响应，通过回调处理响应）
 
+        设计文档 8.10.10：每个请求都带签名认证，无需连接级认证
+
         Args:
             method: WebSocket API方法名
-            params: 请求参数
+            params: 请求参数（已包含签名）
             request_id: 请求ID，用于关联响应
         """
-        if not self._authenticated:
-            raise RuntimeError("WebSocket not authenticated")
-
         request = {
             "id": request_id,
             "method": method,
@@ -127,7 +119,10 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
         logger.debug(f"[{self.CLIENT_ID}] 请求已发送: method={method}, id={request_id}")
 
     async def connect(self) -> None:
-        """建立WebSocket连接并认证"""
+        """建立WebSocket连接
+
+        设计文档 8.10.10：无需连接级认证，每个请求都带签名
+        """
         if self._state.connected:
             return
 
@@ -145,9 +140,6 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
             # 启动接收循环
             self._receive_task = asyncio.create_task(self._receive_loop())
 
-            # 执行认证
-            await self._authenticate()
-
         except Exception as e:
             logger.error(f"[{self.CLIENT_ID}] 连接失败: {e}")
             self._state.connected = False
@@ -156,126 +148,6 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
             if self._reconnect_task and not self._reconnect_task.done():
                 self._reconnect_task.cancel()
             self._reconnect_task = asyncio.create_task(self._schedule_reconnect())
-
-    async def _authenticate(self) -> None:
-        """执行session.logon认证（使用回调模式）"""
-        timestamp = int(time.time() * 1000)
-
-        # 创建认证请求
-        request = self._create_auth_request(timestamp)
-
-        # 创建回调来处理认证响应
-        auth_completed = asyncio.Event()
-
-        async def auth_response_handler(response: dict) -> None:
-            """处理认证响应"""
-            try:
-                ws_response = self._parse_response(response)
-                if ws_response.status == 200:
-                    self._authenticated = True
-                    logger.info(f"[{self.CLIENT_ID}] 认证成功")
-                else:
-                    logger.error(f"[{self.CLIENT_ID}] 认证失败: {ws_response.error}")
-                    await self._force_disconnect()
-            except Exception as e:
-                logger.error(f"[{self.CLIENT_ID}] 认证响应处理失败: {e}")
-                await self._force_disconnect()
-            finally:
-                auth_completed.set()
-
-        # 设置认证回调
-        self._auth_callback = auth_response_handler
-
-        try:
-            # 发送认证请求
-            await self._send(request)
-            logger.info(f"[{self.CLIENT_ID}] 认证请求已发送")
-            # 调试日志：显示请求内容（隐藏签名）
-            import json
-            debug_request = {**request}
-            if "params" in debug_request:
-                debug_request["params"] = {**debug_request["params"]}
-                debug_request["params"]["signature"] = debug_request["params"].get("signature", "")[:20] + "..."
-            logger.info(f"[{self.CLIENT_ID}] 认证请求内容: {json.dumps(debug_request)}")
-
-            # 等待认证完成
-            try:
-                await asyncio.wait_for(auth_completed.wait(), timeout=self._timeout)
-            except asyncio.TimeoutError:
-                logger.error(f"[{self.CLIENT_ID}] 认证超时")
-                await self._force_disconnect()
-
-        except Exception as e:
-            logger.error(f"[{self.CLIENT_ID}] 认证失败: {e}")
-            self._auth_callback = None
-            await self._force_disconnect()
-
-    async def _force_disconnect(self) -> None:
-        """强制断开连接（保持_running状态，让基类自动重连）
-
-        认证失败时调用此方法断开连接，但保持运行状态。
-        关闭WebSocket后，基类的接收循环会检测到连接关闭并触发自动重连。
-        """
-        logger.info(f"[{self.CLIENT_ID}] 强制断开连接，准备重连...")
-        self._authenticated = False
-        self._state.connected = False
-
-        # 取消接收任务，防止它继续运行
-        if self._receive_task and not self._receive_task.done():
-            self._receive_task.cancel()
-            try:
-                await self._receive_task
-            except asyncio.CancelledError:
-                pass
-            self._receive_task = None
-
-        if self._websocket:
-            try:
-                await self._websocket.close()
-            except Exception as e:
-                logger.warning(f"[{self.CLIENT_ID}] 关闭连接时出错: {e}")
-            self._websocket = None
-
-    def _create_auth_request(self, timestamp: int) -> dict[str, Any]:
-        """创建认证请求
-
-        Args:
-            timestamp: 毫秒时间戳
-
-        Returns:
-            认证请求JSON
-        """
-        # 创建签名payload（按字母顺序排序）
-        payload = self._create_auth_payload(timestamp)
-
-        # 生成签名
-        signature = self._signer.sign(payload)
-
-        return {
-            "id": str(uuid.uuid4()),
-            "method": "session.logon",
-            "params": {
-                "apiKey": self.api_key,
-                "signature": signature,
-                "timestamp": timestamp,
-            },
-        }
-
-    def _create_auth_payload(self, timestamp: int) -> str:
-        """创建认证签名的payload
-
-        WebSocket认证payload格式：apiKey=xxx&timestamp=xxx（按键名字母顺序）
-
-        Args:
-            timestamp: 毫秒时间戳
-
-        Returns:
-            签名的payload字符串
-        """
-        # 按字母顺序排序（必须包含apiKey和timestamp）
-        params = {"apiKey": self.api_key, "timestamp": str(timestamp)}
-        # 键字母顺序排序后拼接
-        return "&".join(f"{k}={v}" for k, v in sorted(params.items()))
 
     def _create_ws_payload(self, params: dict) -> str:
         """创建WebSocket签名的payload
@@ -309,6 +181,8 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
     ) -> dict[str, Any]:
         """构建订单参数
 
+        设计文档 8.10.10：每个请求都带签名认证
+
         Args:
             symbol: 交易对
             side: 订单方向（BUY/SELL）
@@ -323,7 +197,7 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
             recv_window: 接收窗口
 
         Returns:
-            订单参数字典
+            订单参数字典（包含apiKey和signature）
         """
         timestamp = int(time.time() * 1000)
 
@@ -356,8 +230,12 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
         if recv_window is not None:
             params["recvWindow"] = recv_window
 
-        # 注意：期货使用session.logon认证后，订单请求不需要再签名
-        # 与现货不同，期货WS API认证后不需要signature参数
+        # 设计文档 8.10.10：每个请求都带签名认证（apiKey + signature）
+        params["apiKey"] = self.api_key
+
+        # 生成签名（payload按键名字母顺序排序）
+        payload = self._create_ws_payload(params)
+        params["signature"] = self._signer.sign(payload)
 
         return params
 
@@ -370,6 +248,8 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
     ) -> dict[str, Any]:
         """构建撤单参数
 
+        设计文档 8.10.10：每个请求都带签名认证
+
         Args:
             symbol: 交易对
             order_id: 订单ID
@@ -377,7 +257,7 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
             recv_window: 接收窗口
 
         Returns:
-            撤单参数字典
+            撤单参数字典（包含apiKey和signature）
         """
         timestamp = int(time.time() * 1000)
 
@@ -395,7 +275,10 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
         if recv_window is not None:
             params["recvWindow"] = recv_window
 
-        # 生成签名
+        # 设计文档 8.10.10：每个请求都带签名认证（apiKey + signature）
+        params["apiKey"] = self.api_key
+
+        # 生成签名（payload按键名字母顺序排序）
         payload = self._create_ws_payload(params)
         params["signature"] = self._signer.sign(payload)
 
@@ -410,6 +293,8 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
     ) -> dict[str, Any]:
         """构建查询订单参数
 
+        设计文档 8.10.10：每个请求都带签名认证
+
         Args:
             symbol: 交易对
             order_id: 订单ID
@@ -417,7 +302,7 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
             recv_window: 接收窗口
 
         Returns:
-            查询订单参数字典
+            查询订单参数字典（包含apiKey和signature）
         """
         timestamp = int(time.time() * 1000)
 
@@ -435,7 +320,12 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
         if recv_window is not None:
             params["recvWindow"] = recv_window
 
-        # 注意：期货使用session.logon认证后，查询订单不需要再签名
+        # 设计文档 8.10.10：每个请求都带签名认证（apiKey + signature）
+        params["apiKey"] = self.api_key
+
+        # 生成签名（payload按键名字母顺序排序）
+        payload = self._create_ws_payload(params)
+        params["signature"] = self._signer.sign(payload)
 
         return params
 
@@ -453,28 +343,21 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
     async def _handle_message(self, message: dict) -> None:
         """处理接收到的消息
 
+        设计文档 8.10.10：无需连接级认证，直接处理响应
+
         Args:
             message: 消息数据
         """
-        import json
         logger.info(f"[{self.CLIENT_ID}] 收到消息: {json.dumps(message)[:500]}")
 
         # 识别响应消息（包含id和result/status）
         if "id" in message and ("result" in message or "status" in message):
             request_id = str(message["id"])
 
-            # 优先使用认证回调处理认证响应
-            if self._auth_callback:
-                auth_callback = self._auth_callback
-                self._auth_callback = None  # 清除认证回调
-                await auth_callback(message)
-                logger.debug(f"[{self.CLIENT_ID}] 认证响应已处理: id={request_id}")
-            # 使用回调模式处理响应
-            elif self._response_callback:
+            # 使用回调模式处理响应（设计文档 8.10.10：每个请求都带签名，无需认证回调）
+            if self._response_callback:
                 await self._response_callback(request_id, message)
-                logger.debug(
-                    f"[{self.CLIENT_ID}] 响应已通过回调处理: id={request_id}"
-                )
+                logger.debug(f"[{self.CLIENT_ID}] 响应已通过回调处理: id={request_id}")
             else:
                 logger.debug(f"[{self.CLIENT_ID}] 收到未知请求的响应: id={request_id}")
             return
@@ -485,7 +368,7 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
     async def _reconnect(self) -> None:
         """断线重连
 
-        覆盖基类方法，重连后需要重新认证。
+        设计文档 8.10.10：重连逻辑与公共WS客户端一致，无需重新认证
         """
         if not self._running:
             return
@@ -496,7 +379,6 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
         old_websocket = self._websocket
         self._websocket = None
         self._state.connected = False
-        self._authenticated = False
 
         if old_websocket:
             try:
@@ -515,13 +397,15 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
             self._reconnect_task = asyncio.create_task(self._schedule_reconnect())
 
     async def _try_reconnect(self) -> bool:
-        """尝试重连，返回是否成功"""
+        """尝试重连，返回是否成功
+
+        设计文档 8.10.10：重连逻辑与公共WS客户端一致，无需重新认证
+        """
         try:
             # 关闭旧连接
             old_websocket = self._websocket
             self._websocket = None
             self._state.connected = False
-            self._authenticated = False
 
             if old_websocket:
                 try:
@@ -538,8 +422,7 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
             self._state.connected = True
             logger.info(f"[{self.CLIENT_ID}] 已重新连接")
 
-            # 重新认证
-            await self._authenticate()
+            # 设计文档 8.10.10：无需重新认证，每个请求都带签名
 
             if self._reconnect_callback:
                 await self._reconnect_callback()
@@ -552,5 +435,3 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
             logger.error(f"[{self.CLIENT_ID}] 重连失败: {e}")
             self._state.connected = False
             return False
-
-

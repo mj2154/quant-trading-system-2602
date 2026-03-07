@@ -8,23 +8,21 @@ WebSocket消息协议模型
 版本: v2.0.0
 """
 
-from typing import Any, Optional
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import Field
 
 # 使用本地基类进行命名转换
 from ..base import CamelCaseModel, SnakeCaseModel
 
 # 从 trading 模块导入数据模型
-from ..trading.kline_models import KlineBar, KlineBars
-from ..trading.symbol_models import SymbolInfo
-
 
 # ==================== 协议常量 ====================
 
 PROTOCOL_VERSION = "2.0"
 WS_PATH = "/ws/market"
 PING_INTERVAL = 20  # 秒
-PING_TIMEOUT = 60   # 秒
+PING_TIMEOUT = 60  # 秒
 
 
 # ==================== 通用消息模型 ====================
@@ -45,7 +43,7 @@ class WebSocketMessage(SnakeCaseModel):
     type: str  # 消息类型：GET_KLINES, SUBSCRIBE, UNSUBSCRIBE 等
     request_id: str
     timestamp: int  # 时间戳（毫秒）
-    data: Optional[dict[str, Any]] = None  # 消息数据
+    data: dict[str, Any] | None = None  # 消息数据
 
     def __str__(self) -> str:
         return f"WebSocketMessage(type={self.type}, request_id={self.request_id})"
@@ -71,15 +69,17 @@ class MessageRequest(WebSocketMessage):
 
 class ConfigRequest(SnakeCaseModel):
     """配置请求"""
+
     type: str = "config"
 
 
 class SearchSymbolsRequest(SnakeCaseModel):
     """搜索交易对请求"""
+
     type: str = "search_symbols"
-    query: Optional[str] = None
-    exchange: Optional[str] = None
-    type_filter: Optional[str] = None
+    query: str | None = None
+    exchange: str | None = None
+    type_filter: str | None = None
     limit: int = 50
     offset: int = 0
 
@@ -89,6 +89,7 @@ class SearchSymbolsRequest(SnakeCaseModel):
 
 class ResolveSymbolRequest(SnakeCaseModel):
     """解析交易对请求"""
+
     type: str = "resolve_symbol"
     symbol: str
 
@@ -102,6 +103,7 @@ class KlinesRequest(SnakeCaseModel):
     注意：使用 interval 而非 resolution，以与数据库字段和内部逻辑保持一致。
     前端传入的 resolution 会在订阅转换器中自动转换为 interval。
     """
+
     type: str = "klines"
     symbol: str
     interval: str  # 统一使用 interval，与数据库字段和内部逻辑一致
@@ -114,11 +116,13 @@ class KlinesRequest(SnakeCaseModel):
 
 class ServerTimeRequest(SnakeCaseModel):
     """服务器时间请求"""
+
     type: str = "server_time"
 
 
 class QuotesRequest(SnakeCaseModel):
     """报价数据请求"""
+
     type: str = "quotes"
     symbols: list[str]
 
@@ -147,7 +151,7 @@ class UnsubscribeRequest(SnakeCaseModel):
     精确取消或全部取消。
     """
 
-    subscriptions: Optional[list[str]] = None
+    subscriptions: list[str] | None = None
     all: bool = False
 
     def __str__(self) -> str:
@@ -162,12 +166,14 @@ class SubscriptionsRequest(SnakeCaseModel):
 
     遵循API设计文档v2.1规范：type 改为 subscriptions
     """
+
     type: str = "subscriptions"
-    client_id: Optional[str] = None
+    client_id: str | None = None
 
 
 class MetricsRequest(SnakeCaseModel):
     """指标查询请求"""
+
     type: str = "metrics"
 
 
@@ -186,7 +192,7 @@ class MessageResponseBase(CamelCaseModel):
     protocol_version: str = PROTOCOL_VERSION
     type: str  # 消息类型：ACK, SUCCESS, ERROR, UPDATE 等
     request_id: str
-    task_id: Optional[int] = None
+    task_id: int | None = None
     timestamp: int
     data: dict[str, Any]
 

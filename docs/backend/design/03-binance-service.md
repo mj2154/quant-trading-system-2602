@@ -1964,6 +1964,102 @@ async def test_market_buy():
     print(f"成交数量: {result.get('executedQty')}")
 ```
 
+### 8.10.10 私有WebSocket客户端认证设计
+
+#### 8.10.10.1 设计背景
+
+在生产环境中，网络代理（如Clash）可能不稳定，导致基于连接级认证的WebSocket客户端出现问题：
+
+- **连接中断**：网络波动导致WebSocket连接断开
+- **认证超时**：代理服务器响应延迟导致`session.logon`认证超时
+- **状态不一致**：长连接认证状态与服务器不同步
+
+因此，设计改为**每个请求都带签名**的认证方式，避免依赖连接级认证状态。
+
+#### 8.10.10.2 认证方式对比
+
+| 认证方式 | 连接级认证 | 请求级认证（当前设计） |
+|---------|-----------|---------------------|
+| 实现方式 | 先执行`session.logon`，后续请求无需签名 | 每个请求都携带`apiKey`+`signature` |
+| 优点 | 认证一次即可 | 无需维护连接认证状态 |
+| 缺点 | 依赖长连接稳定性 | 每个请求稍大 |
+| 适用场景 | 网络稳定环境 | 网络不稳定环境 |
+
+#### 8.10.10.3 币安官方文档参考
+
+根据币安官方WebSocket API文档，每个请求都可以独立携带认证信息：
+
+**文档原文**：
+> "you can always specify the apiKey and signature explicitly for individual requests, **overriding the authenticated API key**"
+
+这意味着：
+- 不需要先执行`session.logon`认证
+- 每个请求都携带`apiKey`、`timestamp`、`signature`参数
+- 签名payload按键名字母顺序排序
+
+#### 8.10.10.4 实现方案
+
+**期货WebSocket订单请求格式**：
+```json
+{
+    "id": "uuid",
+    "method": "order.place",
+    "params": {
+        "apiKey": "Vm...",
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "type": "MARKET",
+        "quantity": "0.001",
+        "timestamp": 1772915446000,
+        "signature": "Base64编码的Ed25519签名"
+    }
+}
+```
+
+**现货WebSocket订单请求格式**：
+```json
+{
+    "id": "uuid",
+    "method": "order.place",
+    "params": {
+        "apiKey": "Vm...",
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "type": "MARKET",
+        "quantity": "0.001",
+        "timestamp": 1772915446000,
+        "signature": "Base64编码的Ed25519签名"
+    }
+}
+```
+
+**签名Payload格式**（按键名字母顺序）：
+```
+apiKey=xxx&quantity=0.001&side=BUY&symbol=BTCUSDT&timestamp=1772915446000&type=MARKET
+```
+
+#### 8.10.10.5 客户端组件
+
+| 组件 | 说明 |
+|------|------|
+| `BinanceFuturesPrivateWSClient` | 期货私有WebSocket客户端（请求级签名） |
+| `BinanceSpotPrivateWSClient` | 现货私有WebSocket客户端（请求级签名） |
+
+**关键特性**：
+- 每个请求都生成新的`timestamp`和`signature`
+- 不依赖`session.logon`连接认证
+- 认证失败不影响连接状态，可直接重试
+
+#### 8.10.10.6 重连策略
+
+由于采用请求级签名，重连逻辑简化：
+
+1. 检测到连接断开
+2. 重新建立WebSocket连接
+3. 直接发送请求（每次请求都带签名，无需重新认证）
+
+无需处理`session.logon`认证超时问题。
+
 ## 相关文档
 
 - [QUANT_TRADING_SYSTEM_ARCHITECTURE.md](./QUANT_TRADING_SYSTEM_ARCHITECTURE.md) - 完整实施文档
@@ -1973,5 +2069,5 @@ async def test_market_buy():
 
 ---
 
-**版本**：v2.3
-**更新**：2026-03-02 - 添加交易功能设计（8.10节）
+**版本**：v2.4
+**更新**：2026-03-08 - 私有WebSocket改为请求级签名认证（8.10.10节），解决网络不稳定导致的认证问题

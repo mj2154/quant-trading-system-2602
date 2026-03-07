@@ -7,23 +7,22 @@ WebSocket 处理器
 import asyncio
 import json
 import logging
-from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .client_manager import ClientManager
-from .task_router import TaskRouter
 from .protocol import (
-    parse_message,
-    format_success_response,
     format_error_response,
-    PROTOCOL_VERSION,
+    parse_message,
 )
+from .task_router import TaskRouter
 
 logger = logging.getLogger(__name__)
 
 
-async def _safe_send(client_manager: ClientManager, client_id: str, message: dict) -> bool:
+async def _safe_send(
+    client_manager: ClientManager, client_id: str, message: dict
+) -> bool:
     """安全发送消息，捕获连接断开等异常
 
     Returns:
@@ -71,7 +70,7 @@ async def ws_market(
     # 注册客户端
     client_id = await client_manager.connect(websocket)
     # 记录客户端连接的 WebSocket 路径（用于调试消息路由问题）
-    client_path = getattr(websocket, 'url', None)
+    client_path = getattr(websocket, "url", None)
     logger.info(f"Client connected: {client_id}, path: {client_path}")
 
     try:
@@ -101,7 +100,9 @@ async def ws_market(
             msg_type = message.get("type", "UNKNOWN")
 
             # 记录接收到的请求（用于调试消息路由问题）
-            logger.info(f"← [WS] client_id={client_id}, requestId={request_id}, type={msg_type}")
+            logger.info(
+                f"← [WS] client_id={client_id}, requestId={request_id}, type={msg_type}"
+            )
 
             # 路由任务
             try:
@@ -111,7 +112,7 @@ async def ws_market(
                 )
                 # _handle_get 返回 None 时表示消息已由 handler 内部发送（如实时订阅确认）
                 if response is None:
-                    logger.debug(f"Response is None, message already sent by handler")
+                    logger.debug("Response is None, message already sent by handler")
                 else:
                     # 设置 requestId 用于三阶段模式关联
                     if request_id:

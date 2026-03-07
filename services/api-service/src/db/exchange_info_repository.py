@@ -4,8 +4,9 @@
 查询 exchange_info 表中的交易对信息。
 """
 
+from typing import Any
+
 import asyncpg
-from typing import List, Dict, Any, Optional
 
 
 class ExchangeInfoRepository:
@@ -46,7 +47,7 @@ class ExchangeInfoRepository:
         symbol: str,
         exchange: str = "BINANCE",
         market_type: str = "SPOT",
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """精确解析单个交易对
 
         Args:
@@ -100,8 +101,8 @@ class ExchangeInfoRepository:
                 full_symbol = f"{exchange}:{row['symbol']}"
                 return {
                     "symbol": full_symbol,
-                    "ticker": row['symbol'],
-                    "name": row['symbol'],
+                    "ticker": row["symbol"],
+                    "name": row["symbol"],
                     "description": f"{row['base_asset']}/{row['quote_asset']}",
                     "exchange": exchange,
                     "listed_exchange": exchange,
@@ -114,7 +115,7 @@ class ExchangeInfoRepository:
                     "has_daily": True,
                     "has_weekly_and_monthly": True,
                     "volume_precision": 2,
-                    "currency_code": row['quote_asset'],
+                    "currency_code": row["quote_asset"],
                 }
         except Exception:
             return None
@@ -125,7 +126,7 @@ class ExchangeInfoRepository:
         exchange: str = "BINANCE",
         market_type: str = "SPOT",
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """搜索交易对
 
         Args:
@@ -174,17 +175,19 @@ class ExchangeInfoRepository:
             results = []
             for row in rows:
                 # 永续期货添加 .PERP 后缀
-                symbol_suffix = ".PERP" if row['market_type'] == "FUTURES" else ""
+                symbol_suffix = ".PERP" if row["market_type"] == "FUTURES" else ""
                 ticker = f"{row['symbol']}{symbol_suffix}"
                 full_symbol = f"BINANCE:{ticker}"
-                results.append({
-                    "symbol": full_symbol,
-                    "full_name": full_symbol,  # TradingView格式: EXCHANGE:SYMBOL
-                    "description": f"{row['base_asset']}/{row['quote_asset']}",
-                    "exchange": "BINANCE",
-                    "ticker": ticker,
-                    "type": "crypto",
-                })
+                results.append(
+                    {
+                        "symbol": full_symbol,
+                        "full_name": full_symbol,  # TradingView格式: EXCHANGE:SYMBOL
+                        "description": f"{row['base_asset']}/{row['quote_asset']}",
+                        "exchange": "BINANCE",
+                        "ticker": ticker,
+                        "type": "crypto",
+                    }
+                )
 
             return results
 

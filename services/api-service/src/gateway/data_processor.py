@@ -45,6 +45,7 @@ def _map_task_type_to_response_type(task_type: str) -> str:
     """映射任务类型为前端响应类型"""
     return _TASK_TYPE_TO_RESPONSE_TYPE.get(task_type, task_type)
 
+
 # 任务事件频道列表
 TASK_CHANNELS = [
     "task_completed",
@@ -126,9 +127,7 @@ class DataProcessor:
 
         # 订阅任务事件频道
         for channel in TASK_CHANNELS:
-            await self._connection.add_listener(
-                channel, self._on_task_notification
-            )
+            await self._connection.add_listener(channel, self._on_task_notification)
             logger.info(f"Subscribed to task channel: {channel}")
 
         # 订阅订单任务事件频道
@@ -140,16 +139,12 @@ class DataProcessor:
 
         # 订阅实时数据事件频道
         for channel in REALTIME_CHANNELS:
-            await self._connection.add_listener(
-                channel, self._on_realtime_notification
-            )
+            await self._connection.add_listener(channel, self._on_realtime_notification)
             logger.info(f"Subscribed to realtime channel: {channel}")
 
         # 订阅业务事件频道
         for channel in BUSINESS_CHANNELS:
-            await self._connection.add_listener(
-                channel, self._on_notification
-            )
+            await self._connection.add_listener(channel, self._on_notification)
             logger.info(f"Subscribed to business channel: {channel}")
 
         # 启动监听任务
@@ -240,10 +235,13 @@ class DataProcessor:
 
             # 广播给订阅的客户端
             # 注意：signal_new 和 alert_config 事件使用下面的专用广播逻辑
-            if channel not in ("signal_new", "alert_config.new", "alert_config.update", "alert_config.delete"):
-                await self._client_manager.broadcast(
-                    subscription_key, message
-                )
+            if channel not in (
+                "signal_new",
+                "alert_config.new",
+                "alert_config.update",
+                "alert_config.delete",
+            ):
+                await self._client_manager.broadcast(subscription_key, message)
 
             # 也尝试通配符匹配
             symbol = event_data.get("symbol", "")
@@ -256,7 +254,12 @@ class DataProcessor:
                 )
 
             # 对于信号和配置事件，广播到通用的策略频道
-            if channel in ("signal_new", "config.new", "config.update", "config.delete"):
+            if channel in (
+                "signal_new",
+                "config.new",
+                "config.update",
+                "config.delete",
+            ):
                 await self._client_manager.broadcast(
                     "strategy:all",
                     message,
@@ -276,7 +279,9 @@ class DataProcessor:
                         message,
                     )
                 else:
-                    logger.warning("[Broadcast] signal_new has no alert_id, skipping broadcast")
+                    logger.warning(
+                        "[Broadcast] signal_new has no alert_id, skipping broadcast"
+                    )
 
             # 注意：alert_config 事件（alert_config.new/update/delete）不再广播到 SIGNAL: 频道
             # 前端通过订阅 SIGNAL:{alert_id} 来接收真正的信号 (signal_new)
@@ -371,16 +376,24 @@ class DataProcessor:
             # 根据任务类型处理
             if task_type == "get_klines":
                 # get_klines 的 result 为空，需查询 klines_history 表
-                await self._handle_klines_result(client_id, task_id, payload_data, request_id)
+                await self._handle_klines_result(
+                    client_id, task_id, payload_data, request_id
+                )
             elif task_type in ("get_futures_account", "get_spot_account"):
                 # 账户信息任务：result 为空，需查询 account_info 表
-                await self._handle_account_info_result(client_id, task_id, task_type, payload_data, request_id)
+                await self._handle_account_info_result(
+                    client_id, task_id, task_type, payload_data, request_id
+                )
             elif status == "failed":
                 # 任务失败处理
-                await self._handle_task_error(client_id, task_type, data, payload_data, request_id)
+                await self._handle_task_error(
+                    client_id, task_type, data, payload_data, request_id
+                )
             else:
                 # 其他任务成功处理（result 已包含在通知中）
-                await self._handle_task_success(client_id, task_id, task_type, payload_data, result, request_id)
+                await self._handle_task_success(
+                    client_id, task_id, task_type, payload_data, result, request_id
+                )
 
         except json.JSONDecodeError as e:
             logger.error(f"解析任务通知载荷失败: {e}, payload={payload}")
@@ -388,7 +401,11 @@ class DataProcessor:
             logger.exception(f"处理任务通知失败: {e}")
 
     async def _handle_klines_result(
-        self, client_id: str, task_id: int, payload: dict[str, Any], request_id: str | None = None
+        self,
+        client_id: str,
+        task_id: int,
+        payload: dict[str, Any],
+        request_id: str | None = None,
     ) -> None:
         """处理 get_klines 任务结果
 
@@ -465,8 +482,7 @@ class DataProcessor:
             )
 
             success = await self._client_manager.send(
-                client_id,
-                response.model_dump(by_alias=True)
+                client_id, response.model_dump(by_alias=True)
             )
             if success:
                 logger.info(
@@ -478,12 +494,15 @@ class DataProcessor:
 
         except Exception as e:
             logger.exception(f"处理 klines 结果失败: {e}")
-            await self._send_error_to_client(
-                client_id, "PROCESSING_ERROR", str(e)
-            )
+            await self._send_error_to_client(client_id, "PROCESSING_ERROR", str(e))
 
     async def _handle_account_info_result(
-        self, client_id: str, task_id: int, task_type: str, payload: dict[str, Any], request_id: str | None = None
+        self,
+        client_id: str,
+        task_id: int,
+        task_type: str,
+        payload: dict[str, Any],
+        request_id: str | None = None,
     ) -> None:
         """处理账户信息任务结果
 
@@ -515,13 +534,16 @@ class DataProcessor:
             if not account_info:
                 logger.error(f"账户信息不存在: account_type={account_type}")
                 await self._send_error_to_client(
-                    client_id, "ACCOUNT_INFO_NOT_FOUND", f"Account info not found: {account_type}"
+                    client_id,
+                    "ACCOUNT_INFO_NOT_FOUND",
+                    f"Account info not found: {account_type}",
                 )
                 return
 
             # 构建响应 - 使用 content 字段符合文档规范
             task_data = {
-                "type": task_type.replace("get_", "") + "s",  # get_futures_account -> futures_account
+                "type": task_type.replace("get_", "")
+                + "s",  # get_futures_account -> futures_account
                 "content": account_info.get("data"),
                 "update_time": account_info.get("update_time"),
             }
@@ -548,12 +570,16 @@ class DataProcessor:
 
         except Exception as e:
             logger.exception(f"处理账户信息结果失败: {e}")
-            await self._send_error_to_client(
-                client_id, "PROCESSING_ERROR", str(e)
-            )
+            await self._send_error_to_client(client_id, "PROCESSING_ERROR", str(e))
 
     async def _handle_task_success(
-        self, client_id: str, task_id: int, task_type: str, payload: dict[str, Any], result: dict[str, Any], request_id: str | None = None
+        self,
+        client_id: str,
+        task_id: int,
+        task_type: str,
+        payload: dict[str, Any],
+        result: dict[str, Any],
+        request_id: str | None = None,
     ) -> None:
         """处理任务成功结果
 
@@ -595,7 +621,9 @@ class DataProcessor:
                 data=task_data,
             )
 
-            success = await self._client_manager.send(client_id, response.model_dump(by_alias=True))
+            success = await self._client_manager.send(
+                client_id, response.model_dump(by_alias=True)
+            )
             if success:
                 logger.info(
                     f"已推送任务结果给客户端 {client_id}: "
@@ -604,9 +632,7 @@ class DataProcessor:
 
         except Exception as e:
             logger.exception(f"推送任务结果失败: {e}")
-            await self._send_error_to_client(
-                client_id, "RESULT_ERROR", str(e)
-            )
+            await self._send_error_to_client(client_id, "RESULT_ERROR", str(e))
 
     async def _on_order_task_notification(
         self,
@@ -696,7 +722,11 @@ class DataProcessor:
                 ).model_dump(by_alias=True)
             else:
                 # 订单失败
-                error_message = result.get("error", "Unknown error") if isinstance(result, dict) else str(result)
+                error_message = (
+                    result.get("error", "Unknown error")
+                    if isinstance(result, dict)
+                    else str(result)
+                )
                 message = MessageError(
                     type="ERROR",
                     request_id=request_id,
@@ -710,7 +740,9 @@ class DataProcessor:
 
             # 发送给特定客户端（通过 task_id 找到的客户端）
             await self._client_manager.send(client_id, message)
-            logger.info(f"已推送订单任务通知: task_id={task_id}, request_id={request_id}, status={status}")
+            logger.info(
+                f"已推送订单任务通知: task_id={task_id}, request_id={request_id}, status={status}"
+            )
 
         except json.JSONDecodeError as e:
             logger.error(f"解析订单任务通知载荷失败: {e}, payload={payload}")
@@ -718,7 +750,12 @@ class DataProcessor:
             logger.exception(f"处理订单任务通知失败: {e}")
 
     async def _handle_task_error(
-        self, client_id: str, task_type: str, data: dict[str, Any], payload: dict[str, Any], request_id: str | None = None
+        self,
+        client_id: str,
+        task_type: str,
+        data: dict[str, Any],
+        payload: dict[str, Any],
+        request_id: str | None = None,
     ) -> None:
         """处理任务错误结果
 
@@ -733,7 +770,11 @@ class DataProcessor:
         # request_id 从方法参数获取（通知顶层）
 
         result = data.get("result")
-        error_message = result if isinstance(result, str) else result.get("error", "Unknown error") if result else "Unknown error"
+        error_message = (
+            result
+            if isinstance(result, str)
+            else result.get("error", "Unknown error") if result else "Unknown error"
+        )
 
         # 严格遵循07-websocket-protocol.md规范：使用模型确保符合协议
         message = MessageError(
@@ -817,6 +858,7 @@ class DataProcessor:
             # 因为 convert_quotes 使用的是币安原始数据中的 symbol（缺少 .PERP 后缀）
             if data_type == "QUOTES" and subscription_key and "n" in tv_content:
                 from ..converters.subscription import SubscriptionKeyParser
+
                 parsed = SubscriptionKeyParser.parse(subscription_key)
                 if parsed and parsed.symbol:
                     tv_content["n"] = f"BINANCE:{parsed.symbol}"
@@ -833,7 +875,13 @@ class DataProcessor:
             ).model_dump(by_alias=True)
 
             # 调试：获取订阅的客户端
-            clients: list[str] = self._client_manager._subscription_manager.get_subscribed_clients(subscription_key) if self._client_manager._subscription_manager else []
+            clients: list[str] = (
+                self._client_manager._subscription_manager.get_subscribed_clients(
+                    subscription_key
+                )
+                if self._client_manager._subscription_manager
+                else []
+            )
             logger.debug(f"[DEBUG] 订阅 {subscription_key} 的客户端: {clients}")
 
             # 广播给订阅的客户端
@@ -860,9 +908,7 @@ class DataProcessor:
                 logger.error(f"Listen loop error: {e}")
                 await asyncio.sleep(5)  # 错误后等待重试
 
-    def _get_subscription_key(
-        self, event_type: str, event_data: dict[str, Any]
-    ) -> str:
+    def _get_subscription_key(self, event_type: str, event_data: dict[str, Any]) -> str:
         """生成订阅键
 
         Args:
@@ -918,7 +964,11 @@ class DataProcessor:
                 result[key] = self._convert_uuids_to_str(value)
             elif isinstance(value, list):
                 result[key] = [
-                    self._convert_uuids_to_str(item) if isinstance(item, dict) else str(item) if isinstance(item, UUID) else item
+                    (
+                        self._convert_uuids_to_str(item)
+                        if isinstance(item, dict)
+                        else str(item) if isinstance(item, UUID) else item
+                    )
                     for item in value
                 ]
             else:
@@ -928,5 +978,5 @@ class DataProcessor:
     def _timestamp_ms(self) -> int:
         """获取当前时间戳（毫秒）"""
         import time
-        return int(time.time() * 1000)
 
+        return int(time.time() * 1000)

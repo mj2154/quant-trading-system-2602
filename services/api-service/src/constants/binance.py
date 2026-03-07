@@ -5,7 +5,6 @@
 """
 
 
-
 class BinanceBaseURL:
     """币安API基础URL"""
 

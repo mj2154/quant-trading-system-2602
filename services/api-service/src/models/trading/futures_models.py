@@ -18,7 +18,9 @@ class MarkPriceData(BaseModel):
     用于风险管理和平仓价格计算。
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore", use_enum_values=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True, extra="ignore", use_enum_values=True
+    )
 
     symbol: str
     mark_price: float
@@ -33,7 +35,9 @@ class FundingRateData(BaseModel):
     用于表示期货资金费率信息，包括当前费率和结算时间。
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore", use_enum_values=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True, extra="ignore", use_enum_values=True
+    )
 
     symbol: str
     funding_rate: float
@@ -46,7 +50,9 @@ class OpenInterestData(BaseModel):
     用于表示期货持仓量信息，包括总持仓量和持仓量价值。
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore", use_enum_values=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True, extra="ignore", use_enum_values=True
+    )
 
     symbol: str
     open_interest: float
@@ -60,7 +66,9 @@ class FuturesSymbolInfo(BaseModel):
     用于交易对查询和风险控制。
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore", use_enum_values=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True, extra="ignore", use_enum_values=True
+    )
 
     # 基础信息
     exchange: str = "BINANCE"

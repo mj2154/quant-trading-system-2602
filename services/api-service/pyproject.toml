@@ -38,7 +38,7 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "W"]
-ignore = ["E501"]
+ignore = ["E501", "F403"]
 
 [tool.cov]
 report = ["text", "json", "html"]

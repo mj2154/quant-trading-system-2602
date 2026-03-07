@@ -9,9 +9,10 @@
 - TRUNCATE realtime_data → pg_notify('subscription_clean')
 """
 
-import asyncpg
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
+
+import asyncpg
 
 
 class RealtimeDataRepository:
@@ -54,7 +55,9 @@ class RealtimeDataRepository:
         """
         try:
             async with self._pool.acquire() as conn:
-                result = await conn.fetchval(query, subscription_key, data_type, subscriber)
+                result = await conn.fetchval(
+                    query, subscription_key, data_type, subscriber
+                )
             return result  # True = INSERT (新行), False = UPDATE (已存在)
         except asyncpg.UniqueViolationError:
             return False  # 已存在
@@ -147,7 +150,7 @@ class RealtimeDataRepository:
             """)
             return len(rows)
 
-    async def get_all_subscriptions(self) -> List[Dict[str, Any]]:
+    async def get_all_subscriptions(self) -> list[dict[str, Any]]:
         """获取所有订阅
 
         Returns:
@@ -165,7 +168,7 @@ class RealtimeDataRepository:
     async def get_subscription(
         self,
         subscription_key: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """获取指定订阅键的数据
 
         Args:
@@ -188,8 +191,8 @@ class RealtimeDataRepository:
     async def update_data(
         self,
         subscription_key: str,
-        data: Dict[str, Any],
-        event_time: Optional[datetime] = None,
+        data: dict[str, Any],
+        event_time: datetime | None = None,
     ) -> bool:
         """更新实时数据
 
@@ -239,7 +242,7 @@ class RealtimeDataRepository:
     async def get_subscriptions_by_type(
         self,
         data_type: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """根据数据类型获取订阅
 
         Args:

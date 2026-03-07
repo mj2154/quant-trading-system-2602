@@ -17,7 +17,7 @@
 
 import logging
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -27,14 +27,14 @@ from ..base import SnakeCaseModel
 logger = logging.getLogger(__name__)
 
 
-class OrderSide(str, Enum):
+class OrderSide(StrEnum):
     """订单方向"""
 
     BUY = "BUY"
     SELL = "SELL"
 
 
-class OrderType(str, Enum):
+class OrderType(StrEnum):
     """订单类型
 
     与币安 API 保持一致：LIMIT, MARKET, STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET
@@ -49,7 +49,7 @@ class OrderType(str, Enum):
     TRAILING_STOP_MARKET = "TRAILING_STOP_MARKET"
 
 
-class OrderTimeInForce(str, Enum):
+class OrderTimeInForce(StrEnum):
     """订单有效时间
 
     GTC - Good Till Cancel (成交为止)
@@ -62,7 +62,7 @@ class OrderTimeInForce(str, Enum):
     FOK = "FOK"
 
 
-class MarketType(str, Enum):
+class MarketType(StrEnum):
     """市场类型"""
 
     SPOT = "SPOT"
@@ -106,13 +106,17 @@ class CreateOrderRequest(SnakeCaseModel):
     good_till_date: int | None = Field(None, description="GTD订单取消时间")
 
     # 现货可选字段
-    quote_order_qty: float | None = Field(None, description="报价数量（市价买单时指定支付金额）")
+    quote_order_qty: float | None = Field(
+        None, description="报价数量（市价买单时指定支付金额）"
+    )
     iceberg_qty: float | None = Field(None, description="冰山订单数量")
     self_trade_prevention_mode: str | None = Field(None, description="自成交防止模式")
-    new_order_resp_type: str | None = Field("FULL", description="响应格式：ACK, RESULT, FULL")
+    new_order_resp_type: str | None = Field(
+        "FULL", description="响应格式：ACK, RESULT, FULL"
+    )
 
     @model_validator(mode="after")
-    def validate_order(self) -> "CreateOrderRequest":
+    def validate_order(self) -> CreateOrderRequest:
         """验证订单必填字段"""
 
         # 限价单必须有价格
@@ -150,7 +154,7 @@ class GetOrderRequest(SnakeCaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_required_fields(self) -> "GetOrderRequest":
+    def validate_required_fields(self) -> GetOrderRequest:
         """验证必填字段"""
         if not self.order_id and not self.orig_client_order_id:
             raise ValueError("Either orderId or origClientOrderId is required")
@@ -206,7 +210,7 @@ class CancelOrderRequest(SnakeCaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_required_fields(self) -> "CancelOrderRequest":
+    def validate_required_fields(self) -> CancelOrderRequest:
         """验证必填字段"""
         if not self.order_id and not self.orig_client_order_id:
             raise ValueError("Either orderId or origClientOrderId is required")
@@ -259,9 +263,12 @@ class OrderListData(BaseModel):
     count: int = Field(0, description="订单数量")
 
     @classmethod
-    def from_list(cls, orders_data: list[dict[str, Any]]) -> "OrderListData":
+    def from_list(cls, orders_data: list[dict[str, Any]]) -> OrderListData:
         """从字典列表创建订单列表"""
-        orders = [OrderData(**order) if isinstance(order, dict) else order for order in orders_data]
+        orders = [
+            OrderData(**order) if isinstance(order, dict) else order
+            for order in orders_data
+        ]
         return cls(orders=orders, count=len(orders))
 
 
@@ -281,6 +288,7 @@ class OrderUpdateData(OrderData):
 
 
 # 便捷验证函数
+
 
 def validate_create_order_payload(data: dict[str, Any]) -> CreateOrderRequest:
     """验证并转换创建订单请求数据

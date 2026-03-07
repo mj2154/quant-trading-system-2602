@@ -22,7 +22,9 @@ class WSRequest(SnakeCaseModel):
     protocol_version: str = "2.0"
     action: Literal["get", "subscribe", "unsubscribe"]
     request_id: str
-    timestamp: int = Field(default_factory=lambda: int(__import__("time").time() * 1000))
+    timestamp: int = Field(
+        default_factory=lambda: int(__import__("time").time() * 1000)
+    )
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -37,7 +39,9 @@ class WSResponse(CamelCaseModel):
     action: Literal["success", "error"]
     request_id: str | None = None
     task_id: int | None = None  # 异步任务 ID（用于三阶段模式）
-    timestamp: int = Field(default_factory=lambda: int(__import__("time").time() * 1000))
+    timestamp: int = Field(
+        default_factory=lambda: int(__import__("time").time() * 1000)
+    )
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -49,7 +53,9 @@ class WSUpdate(CamelCaseModel):
 
     protocol_version: str = "2.0"
     action: Literal["update"] = "update"
-    timestamp: int = Field(default_factory=lambda: int(__import__("time").time() * 1000))
+    timestamp: int = Field(
+        default_factory=lambda: int(__import__("time").time() * 1000)
+    )
     data: dict[str, Any]
 
 
@@ -91,5 +97,7 @@ class MessageAck(CamelCaseModel):
     protocol_version: str = "2.0"
     type: Literal["ACK"] = "ACK"  # 严格遵循协议：type="ACK"
     request_id: str | None = None
-    timestamp: int = Field(default_factory=lambda: int(__import__("time").time() * 1000))
+    timestamp: int = Field(
+        default_factory=lambda: int(__import__("time").time() * 1000)
+    )
     data: AckData = Field(default_factory=AckData)  # 空对象

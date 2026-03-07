@@ -11,7 +11,6 @@
 版本: v1.0.0
 """
 
-from .subscription import StreamParser
 from .binance_converter import (
     convert_binance_to_tv,
     convert_kline,
@@ -19,6 +18,7 @@ from .binance_converter import (
     convert_trade,
     to_float,
 )
+from .subscription import StreamParser
 
 __all__ = [
     "StreamParser",

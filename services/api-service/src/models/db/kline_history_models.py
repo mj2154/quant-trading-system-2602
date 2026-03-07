@@ -10,7 +10,8 @@ K线历史数据模型
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Literal
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -33,7 +34,7 @@ class KlineData(BaseModel):
     symbol: str = Field(
         ...,
         description="语义化交易对符号，格式: EXCHANGE:SYMBOL[.CONTRACT_TYPE]，"
-                    "例如: BINANCE:BTCUSDT (现货), BINANCE:BTCUSDT.PERP (永续合约)"
+        "例如: BINANCE:BTCUSDT (现货), BINANCE:BTCUSDT.PERP (永续合约)",
     )
     interval: str = Field(..., description="K线间隔，如1m, 5m, 1h, 1d")
 
@@ -45,7 +46,9 @@ class KlineData(BaseModel):
 
     # 成交量信息
     volume: Decimal = Field(..., ge=0, description="成交量（基础资产），必须大于等于0")
-    quote_volume: Decimal = Field(..., ge=0, description="成交额（报价资产），必须大于等于0")
+    quote_volume: Decimal = Field(
+        ..., ge=0, description="成交额（报价资产），必须大于等于0"
+    )
 
     # 交易统计
     number_of_trades: int = Field(..., ge=0, description="交易笔数，必须大于等于0")
@@ -59,14 +62,16 @@ class KlineData(BaseModel):
     )
 
     # WebSocket特有字段
-    first_trade_id: Optional[int] = Field(None, ge=0, description="第一笔交易ID")
-    last_trade_id: Optional[int] = Field(None, ge=0, description="最后一笔交易ID")
-    is_closed: Optional[bool] = Field(None, description="K线是否已结束")
+    first_trade_id: int | None = Field(None, ge=0, description="第一笔交易ID")
+    last_trade_id: int | None = Field(None, ge=0, description="最后一笔交易ID")
+    is_closed: bool | None = Field(None, description="K线是否已结束")
 
     # 事件时间（WebSocket）
-    event_time: Optional[datetime] = Field(None, description="事件发生时间")
+    event_time: datetime | None = Field(None, description="事件发生时间")
 
-    @field_validator("open_price", "high_price", "low_price", "close_price", mode="before")
+    @field_validator(
+        "open_price", "high_price", "low_price", "close_price", mode="before"
+    )
     @classmethod
     def validate_price(cls, v):
         """验证并转换价格为Decimal类型"""
@@ -74,7 +79,13 @@ class KlineData(BaseModel):
             return Decimal(str(v))
         return v
 
-    @field_validator("volume", "quote_volume", "taker_buy_base_volume", "taker_buy_quote_volume", mode="before")
+    @field_validator(
+        "volume",
+        "quote_volume",
+        "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+        mode="before",
+    )
     @classmethod
     def validate_volume(cls, v):
         """验证并转换量为Decimal类型"""
@@ -94,7 +105,7 @@ class KlineData(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_ohlc_consistency(self) -> "KlineData":
+    def validate_ohlc_consistency(self) -> KlineData:
         """验证OHLC价格的一致性"""
         # 最高价必须大于等于开盘价、收盘价、最低价
         if self.high_price < self.open_price:
@@ -127,7 +138,7 @@ class KlineData(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_time_consistency(self) -> "KlineData":
+    def validate_time_consistency(self) -> KlineData:
         """验证时间字段的一致性"""
         if self.open_time > self.close_time:
             raise ValueError(
@@ -152,8 +163,7 @@ class KlineCreate(BaseModel):
     """
 
     symbol: str = Field(
-        ...,
-        description="语义化交易对符号，格式: EXCHANGE:SYMBOL[.CONTRACT_TYPE]"
+        ..., description="语义化交易对符号，格式: EXCHANGE:SYMBOL[.CONTRACT_TYPE]"
     )
     interval: str = Field(..., description="K线间隔")
 
@@ -178,18 +188,26 @@ class KlineCreate(BaseModel):
     )
 
     # 可选字段
-    first_trade_id: Optional[int] = Field(None, ge=0, description="第一笔交易ID")
-    last_trade_id: Optional[int] = Field(None, ge=0, description="最后一笔交易ID")
+    first_trade_id: int | None = Field(None, ge=0, description="第一笔交易ID")
+    last_trade_id: int | None = Field(None, ge=0, description="最后一笔交易ID")
     is_closed: bool = Field(default=False, description="K线是否已结束")
 
-    @field_validator("open_price", "high_price", "low_price", "close_price", mode="before")
+    @field_validator(
+        "open_price", "high_price", "low_price", "close_price", mode="before"
+    )
     @classmethod
     def validate_price(cls, v):
         if isinstance(v, str) or isinstance(v, (int, float)):
             return Decimal(str(v))
         return v
 
-    @field_validator("volume", "quote_volume", "taker_buy_base_volume", "taker_buy_quote_volume", mode="before")
+    @field_validator(
+        "volume",
+        "quote_volume",
+        "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+        mode="before",
+    )
     @classmethod
     def validate_volume(cls, v):
         if isinstance(v, str) or isinstance(v, (int, float)):
@@ -197,7 +215,7 @@ class KlineCreate(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_ohlc_consistency(self) -> "KlineCreate":
+    def validate_ohlc_consistency(self) -> KlineCreate:
         """验证OHLC价格的一致性"""
         if self.high_price < self.open_price:
             raise ValueError(
@@ -226,7 +244,7 @@ class KlineCreate(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_time_consistency(self) -> "KlineCreate":
+    def validate_time_consistency(self) -> KlineCreate:
         """验证时间字段的一致性"""
         if self.open_time > self.close_time:
             raise ValueError(
@@ -293,7 +311,9 @@ class KlineResponse(BaseModel):
             return int(v.timestamp() * 1000)
         return v
 
-    @field_validator("open_price", "high_price", "low_price", "close_price", mode="before")
+    @field_validator(
+        "open_price", "high_price", "low_price", "close_price", mode="before"
+    )
     @classmethod
     def validate_price(cls, v):
         """验证并转换价格为字符串"""
@@ -301,7 +321,13 @@ class KlineResponse(BaseModel):
             return str(v)
         return str(v)
 
-    @field_validator("volume", "quote_volume", "taker_buy_base_volume", "taker_buy_quote_volume", mode="before")
+    @field_validator(
+        "volume",
+        "quote_volume",
+        "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+        mode="before",
+    )
     @classmethod
     def validate_volume(cls, v):
         """验证并转换量为字符串"""
@@ -316,7 +342,7 @@ class KlineResponse(BaseModel):
         return int(v)
 
     @classmethod
-    def from_kline_data(cls, kline: KlineData) -> "KlineResponse":
+    def from_kline_data(cls, kline: KlineData) -> KlineResponse:
         """
         从KlineData模型转换为响应格式
 
@@ -397,8 +423,7 @@ class KlineWebSocket(BaseModel):
     event_type: Literal["kline"] = Field("kline", description="事件类型")
     event_time: datetime = Field(..., description="事件时间")
     symbol: str = Field(
-        ...,
-        description="语义化交易对符号，格式: EXCHANGE:SYMBOL[.CONTRACT_TYPE]"
+        ..., description="语义化交易对符号，格式: EXCHANGE:SYMBOL[.CONTRACT_TYPE]"
     )
 
     kline: KlineData = Field(..., description="K线数据")
@@ -510,8 +535,8 @@ class KLineHistoryQuery(BaseModel):
 
     symbol: str = Field(..., description="交易对符号")
     interval: str = Field(..., description="K线间隔")
-    start_time: Optional[int] = Field(None, description="开始时间戳（毫秒）")
-    end_time: Optional[int] = Field(None, description="结束时间戳（毫秒）")
+    start_time: int | None = Field(None, description="开始时间戳（毫秒）")
+    end_time: int | None = Field(None, description="结束时间戳（毫秒）")
     limit: int = Field(default=1000, description="返回数量限制", ge=1, le=5000)
 
 
@@ -523,5 +548,5 @@ class KLineHistoryResponse(BaseModel):
     interval: str = Field(..., description="K线间隔")
     bars: list[KlineData] = Field(..., description="K线数据列表")
     count: int = Field(..., description="返回数量")
-    start_time: Optional[int] = Field(None, description="实际开始时间")
-    end_time: Optional[int] = Field(None, description="实际结束时间")
+    start_time: int | None = Field(None, description="实际开始时间")
+    end_time: int | None = Field(None, description="实际结束时间")

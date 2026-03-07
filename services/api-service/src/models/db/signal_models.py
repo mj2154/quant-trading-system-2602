@@ -8,7 +8,6 @@ API 服务只负责告警配置管理，信号由 signal-service 处理。
 版本: v3.0.0
 """
 
-import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -39,7 +38,9 @@ class StrategyMetadataResponse(CamelCaseModel):
     type: str = Field(..., description="策略类型（类名）")
     name: str = Field(..., description="策略显示名称")
     description: str = Field(..., description="策略描述")
-    params: list[StrategyParam] = Field(default_factory=list, description="策略参数列表")
+    params: list[StrategyParam] = Field(
+        default_factory=list, description="策略参数列表"
+    )
     created_at: datetime | None = Field(None, description="创建时间")
     updated_at: datetime | None = Field(None, description="更新时间")
 
@@ -47,7 +48,9 @@ class StrategyMetadataResponse(CamelCaseModel):
 class StrategyMetadataListResponse(CamelCaseModel):
     """策略元数据列表响应模型 - 序列化时自动转为 camelCase"""
 
-    strategies: list[StrategyMetadataResponse] = Field(..., description="策略元数据列表")
+    strategies: list[StrategyMetadataResponse] = Field(
+        ..., description="策略元数据列表"
+    )
 
 
 class SignalRecordResponse(CamelCaseModel):
@@ -64,7 +67,9 @@ class SignalRecordResponse(CamelCaseModel):
     symbol: str = Field(..., description="交易对")
     interval: str = Field(..., description="K线周期")
     trigger_type: str | None = Field(None, description="触发类型")
-    signal_value: bool | None = Field(None, description="信号值: true=做多, false=做空, null=无信号")
+    signal_value: bool | None = Field(
+        None, description="信号值: true=做多, false=做空, null=无信号"
+    )
     signal_reason: str | None = Field(None, description="信号原因")
     computed_at: datetime = Field(..., description="信号计算时间")
     source_subscription_key: str | None = Field(None, description="触发该信号的订阅键")

@@ -12,6 +12,7 @@
 
 from datetime import datetime
 from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -21,13 +22,9 @@ class AccountInfoCreate(BaseModel):
     对应数据库 account_info 表的 id, account_type, data 字段。
     """
 
-    account_type: str = Field(
-        ...,
-        description="账户类型: SPOT(现货), FUTURES(期货)"
-    )
+    account_type: str = Field(..., description="账户类型: SPOT(现货), FUTURES(期货)")
     data: dict[str, Any] = Field(
-        default_factory=dict,
-        description="账户原始数据（JSON格式存储）"
+        default_factory=dict, description="账户原始数据（JSON格式存储）"
     )
 
 
@@ -94,7 +91,9 @@ class FuturesAccountInfo(BaseModel):
     total_position_value: float = Field(default=0.0, description="持仓市值")
     total_unrealized_pnl: float = Field(default=0.0, description="未实现盈亏")
     margin_balance: float = Field(default=0.0, description="保证金余额")
-    positions: list[dict[str, Any]] = Field(default_factory=list, description="持仓列表")
+    positions: list[dict[str, Any]] = Field(
+        default_factory=list, description="持仓列表"
+    )
 
     def __str__(self) -> str:
         return f"FuturesAccountInfo(balance={self.total_balance}, pnl={self.total_unrealized_pnl})"
@@ -122,7 +121,9 @@ class PositionInfo(BaseModel):
     """持仓信息模型"""
 
     symbol: str = Field(..., description="交易对")
-    position_side: str = Field(default="BOTH", description="持仓方向: LONG, SHORT, BOTH")
+    position_side: str = Field(
+        default="BOTH", description="持仓方向: LONG, SHORT, BOTH"
+    )
     position_amount: float = Field(default=0.0, description="持仓数量")
     entry_price: float = Field(default=0.0, description="开仓价格")
     mark_price: float = Field(default=0.0, description="标记价格")

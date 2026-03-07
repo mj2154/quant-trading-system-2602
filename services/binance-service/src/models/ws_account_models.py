@@ -121,9 +121,15 @@ class FuturesAccountInfoV2WS(BaseModel):
     total_wallet_balance: str = Field(default="0", alias="totalWalletBalance")
     total_unrealized_profit: str = Field(default="0", alias="totalUnrealizedProfit")
     total_margin_balance: str = Field(default="0", alias="totalMarginBalance")
-    total_position_initial_margin: str = Field(default="0", alias="totalPositionInitialMargin")
-    total_open_order_initial_margin: str = Field(default="0", alias="totalOpenOrderInitialMargin")
-    total_cross_wallet_balance: str = Field(default="0", alias="totalCrossWalletBalance")
+    total_position_initial_margin: str = Field(
+        default="0", alias="totalPositionInitialMargin"
+    )
+    total_open_order_initial_margin: str = Field(
+        default="0", alias="totalOpenOrderInitialMargin"
+    )
+    total_cross_wallet_balance: str = Field(
+        default="0", alias="totalCrossWalletBalance"
+    )
     total_cross_un_pnl: str = Field(default="0", alias="totalCrossUnPnl")
     available_balance: str = Field(default="0", alias="availableBalance")
     max_withdraw_amount: str = Field(default="0", alias="maxWithdrawAmount")

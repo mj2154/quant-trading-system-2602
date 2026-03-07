@@ -13,15 +13,15 @@
 import time
 from typing import Any
 
+from ..models.protocol.constants import PROTOCOL_VERSION
 from ..models.protocol.ws_message import (
-    MessageSuccess,
+    KlinesRequest,
     MessageError,
     MessageRequest,
-    KlinesRequest,
+    MessageSuccess,
     SubscribeRequest,
     UnsubscribeRequest,
 )
-from ..models.protocol.constants import PROTOCOL_VERSION
 
 
 def parse_message(raw: dict[str, Any]) -> dict[str, Any]:
@@ -53,13 +53,15 @@ def parse_message(raw: dict[str, Any]) -> dict[str, Any]:
 
     # 使用 Pydantic 模型验证完整消息结构
     try:
-        validated = MessageRequest.model_validate({
-            "protocolVersion": version or PROTOCOL_VERSION,
-            "type": msg_type,
-            "requestId": raw.get("requestId", ""),
-            "timestamp": timestamp,
-            "data": raw.get("data", {}),
-        })
+        validated = MessageRequest.model_validate(
+            {
+                "protocolVersion": version or PROTOCOL_VERSION,
+                "type": msg_type,
+                "requestId": raw.get("requestId", ""),
+                "timestamp": timestamp,
+                "data": raw.get("data", {}),
+            }
+        )
         return validated.model_dump(by_alias=True)
     except Exception as e:
         raise ValueError(f"Invalid message format: {e}")

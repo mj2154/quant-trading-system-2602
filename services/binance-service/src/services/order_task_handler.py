@@ -20,10 +20,6 @@ from pydantic import ValidationError
 from models.trading_order import (
     SpotWsOrderRequest,
     FuturesWsOrderRequest,
-    SpotWsOrderResponse,
-    FuturesWsOrderResponse,
-    WsQueryOrderRequest,
-    WsCancelOrderRequest,
 )
 
 if TYPE_CHECKING:
@@ -120,7 +116,7 @@ class OrderTaskHandler:
         # 检查是否有 BINANCE: 前缀
         if symbol.upper().startswith("BINANCE:"):
             # 去掉前缀
-            clean_symbol = symbol[len("BINANCE:"):]
+            clean_symbol = symbol[len("BINANCE:") :]
 
             # 检查是否为期货（.PERP 后缀）
             if clean_symbol.upper().endswith(".PERP"):
@@ -249,7 +245,9 @@ class OrderTaskHandler:
                     )
 
                     # 发送请求（不等待响应，通过回调处理）
-                    await self._futures_ws_client.send_request("order.place", binance_params, request_id)
+                    await self._futures_ws_client.send_request(
+                        "order.place", binance_params, request_id
+                    )
                     logger.info(f"订单创建请求已发送: requestId={request_id}")
                     # 注意：任务状态将在回调中更新
                     return
@@ -263,7 +261,7 @@ class OrderTaskHandler:
                 await self._repo.fail(task_id, "期货客户端未初始化")
                 return
 
-            result = await client.create_order(
+            await client.create_order(
                 symbol=symbol,
                 side=side,
                 order_type=order_type,
@@ -296,7 +294,9 @@ class OrderTaskHandler:
                 )
 
                 # 发送请求（不等待响应，通过回调处理）
-                await self._spot_ws_client.send_request("order.place", binance_params, request_id)
+                await self._spot_ws_client.send_request(
+                    "order.place", binance_params, request_id
+                )
                 logger.info(f"订单创建请求已发送(现货): requestId={request_id}")
                 # 注意：任务状态将在回调中更新
                 return
@@ -323,7 +323,9 @@ class OrderTaskHandler:
             await self._repo.fail(task_id, "Missing required field: symbol")
             return
         if not params.get("orderId") and not params.get("clientOrderId"):
-            await self._repo.fail(task_id, "Missing required field: orderId or clientOrderId")
+            await self._repo.fail(
+                task_id, "Missing required field: orderId or clientOrderId"
+            )
             return
 
         # 解析语义化symbol，根据前缀自动判断市场类型
@@ -333,7 +335,9 @@ class OrderTaskHandler:
         order_id = params.get("orderId")
         client_order_id = params.get("origClientOrderId") or params.get("clientOrderId")
 
-        logger.info(f"取消订单: {symbol} orderId={order_id} clientOrderId={client_order_id} market={market_type}")
+        logger.info(
+            f"取消订单: {symbol} orderId={order_id} clientOrderId={client_order_id} market={market_type}"
+        )
 
         # 使用requestId关联请求和响应（从任务记录的顶层request_id字段获取）
         # 设计文档要求: request_id 从 payload 提升到顶层字段
@@ -350,7 +354,9 @@ class OrderTaskHandler:
                         order_id=str(order_id) if order_id else None,
                         orig_client_order_id=client_order_id,
                     )
-                    await self._futures_ws_client.send_request("order.cancel", cancel_params, request_id)
+                    await self._futures_ws_client.send_request(
+                        "order.cancel", cancel_params, request_id
+                    )
                     logger.info(f"取消订单请求已发送: requestId={request_id}")
                     return
                 except Exception as e:
@@ -376,7 +382,9 @@ class OrderTaskHandler:
                         order_id=str(order_id) if order_id else None,
                         orig_client_order_id=client_order_id,
                     )
-                    await self._spot_ws_client.send_request("order.cancel", cancel_params, request_id)
+                    await self._spot_ws_client.send_request(
+                        "order.cancel", cancel_params, request_id
+                    )
                     logger.info(f"取消订单请求已发送: requestId={request_id}")
                     return
                 except Exception as e:
@@ -412,7 +420,9 @@ class OrderTaskHandler:
             await self._repo.fail(task_id, "Missing required field: symbol")
             return
         if not params.get("orderId") and not params.get("clientOrderId"):
-            await self._repo.fail(task_id, "Missing required field: orderId or clientOrderId")
+            await self._repo.fail(
+                task_id, "Missing required field: orderId or clientOrderId"
+            )
             return
 
         # 解析语义化symbol，根据前缀自动判断市场类型
@@ -422,7 +432,9 @@ class OrderTaskHandler:
         order_id = params.get("orderId")
         client_order_id = params.get("origClientOrderId") or params.get("clientOrderId")
 
-        logger.info(f"查询订单: {symbol} orderId={order_id} clientOrderId={client_order_id} market={market_type}")
+        logger.info(
+            f"查询订单: {symbol} orderId={order_id} clientOrderId={client_order_id} market={market_type}"
+        )
 
         # 使用requestId关联请求和响应（从任务记录的顶层request_id字段获取）
         # 设计文档要求: request_id 从 payload 提升到顶层字段
@@ -439,7 +451,9 @@ class OrderTaskHandler:
                         order_id=str(order_id) if order_id else None,
                         orig_client_order_id=client_order_id,
                     )
-                    await self._futures_ws_client.send_request("order.status", query_params, request_id)
+                    await self._futures_ws_client.send_request(
+                        "order.status", query_params, request_id
+                    )
                     logger.info(f"查询订单请求已发送: requestId={request_id}")
                     return
                 except Exception as e:
@@ -465,7 +479,9 @@ class OrderTaskHandler:
                         order_id=str(order_id) if order_id else None,
                         orig_client_order_id=client_order_id,
                     )
-                    await self._spot_ws_client.send_request("order.status", query_params, request_id)
+                    await self._spot_ws_client.send_request(
+                        "order.status", query_params, request_id
+                    )
                     logger.info(f"查询订单请求已发送: requestId={request_id}")
                     return
                 except Exception as e:
@@ -510,10 +526,16 @@ class OrderTaskHandler:
         if status == 200:
             result = response.get("result", {})
             await self._repo.complete(task_id, result)
-            logger.info(f"[期货回调] 任务完成: taskId={task_id}, orderId={result.get('orderId')}")
+            logger.info(
+                f"[期货回调] 任务完成: taskId={task_id}, orderId={result.get('orderId')}"
+            )
         else:
             error = response.get("error", {})
-            error_msg = error.get("msg", "Unknown error") if isinstance(error, dict) else str(error)
+            error_msg = (
+                error.get("msg", "Unknown error")
+                if isinstance(error, dict)
+                else str(error)
+            )
             await self._repo.fail(task_id, error_msg)
             logger.error(f"[期货回调] 任务失败: taskId={task_id}, error={error_msg}")
 
@@ -539,9 +561,15 @@ class OrderTaskHandler:
         if status == 200:
             result = response.get("result", {})
             await self._repo.complete(task_id, result)
-            logger.info(f"[现货回调] 任务完成: taskId={task_id}, orderId={result.get('orderId')}")
+            logger.info(
+                f"[现货回调] 任务完成: taskId={task_id}, orderId={result.get('orderId')}"
+            )
         else:
             error = response.get("error", {})
-            error_msg = error.get("msg", "Unknown error") if isinstance(error, dict) else str(error)
+            error_msg = (
+                error.get("msg", "Unknown error")
+                if isinstance(error, dict)
+                else str(error)
+            )
             await self._repo.fail(task_id, error_msg)
             logger.error(f"[现货回调] 任务失败: taskId={task_id}, error={error_msg}")

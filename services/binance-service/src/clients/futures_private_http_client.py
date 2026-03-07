@@ -12,13 +12,6 @@ from urllib.parse import urlencode
 
 from .base_http_client import BinanceHTTPClient
 from models.futures_account import FuturesAccountInfo
-from models.trading_order import (
-    OrderSide,
-    OrderType,
-    OrderResponseType,
-    PositionSide,
-    TimeInForce,
-)
 from utils.ed25519_signer import Ed25519Signer
 from utils.rsa_signer import RSASigner
 

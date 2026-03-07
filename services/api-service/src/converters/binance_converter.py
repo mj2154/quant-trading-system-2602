@@ -142,7 +142,7 @@ def convert_quotes(data: dict) -> dict:
             "volume": volume,
             "high": high_price,
             "low": low_price,
-        }
+        },
     }
 
 

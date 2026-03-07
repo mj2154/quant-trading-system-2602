@@ -8,13 +8,13 @@
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     """任务状态枚举"""
 
     PENDING = "pending"
@@ -23,7 +23,7 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
-class TaskType(str, Enum):
+class TaskType(StrEnum):
     """任务类型枚举"""
 
     # TradingView 数据任务
@@ -94,8 +94,12 @@ class UnifiedTaskPayload(BaseModel):
         UnifiedTaskPayload(action='tv.subscribe_kline', resource='BINANCE:BTCUSDT', params={})
     """
 
-    action: str = Field(..., description="任务动作，如 tv.subscribe_kline, system.fetch_exchange_info")
-    resource: str = Field(default="", description="资源标识，如 BINANCE:BTCUSDT@KLINE_1")
+    action: str = Field(
+        ..., description="任务动作，如 tv.subscribe_kline, system.fetch_exchange_info"
+    )
+    resource: str = Field(
+        default="", description="资源标识，如 BINANCE:BTCUSDT@KLINE_1"
+    )
     params: dict[str, Any] = Field(default_factory=dict, description="额外参数字典")
 
     @property
@@ -121,8 +125,8 @@ class TaskCreate(BaseModel):
                 "payload": {
                     "action": "tv.subscribe_kline",
                     "resource": "BINANCE:BTCUSDT@KLINE_1m",
-                    "params": {}
-                }
+                    "params": {},
+                },
             }
         }
     )

@@ -28,6 +28,10 @@ from ..db.order_tasks_repository import OrderTasksRepository
 from ..db.strategy_metadata_repository import StrategyMetadataRepository
 from ..db.strategy_signals_repository import StrategySignalsRepository
 from ..db.tasks_repository import TasksRepository
+from ..models.db.signal_models import (
+    StrategyMetadataListResponse,
+    StrategyMetadataResponse,
+)
 from ..models.protocol.constants import PROTOCOL_VERSION
 from ..models.protocol.ws_message import MessageError, MessageSuccess
 from ..models.trading.kline_models import KlineBar, KlineBars
@@ -35,11 +39,7 @@ from ..models.trading.order_models import (
     CancelOrderRequest,
     CreateOrderRequest,
     GetOrderRequest,
-    validate_create_order_payload,
-    validate_get_order_payload,
-    validate_cancel_order_payload,
 )
-from ..models.db.signal_models import StrategyMetadataListResponse, StrategyMetadataResponse
 from ..protocol.messages import MessageAck
 from ..utils.symbol import parse_semantic_symbol
 from .alert_handler import AlertHandler
@@ -91,7 +91,9 @@ class TaskRouter:
         """
         self._tasks_repo = tasks_repo
 
-    def set_order_tasks_repository(self, order_tasks_repo: OrderTasksRepository) -> None:
+    def set_order_tasks_repository(
+        self, order_tasks_repo: OrderTasksRepository
+    ) -> None:
         """设置订单任务仓储实例
 
         Args:
@@ -100,7 +102,9 @@ class TaskRouter:
         self._order_tasks_repo = order_tasks_repo
         logger.info("OrderTasksRepository set in TaskRouter")
 
-    def set_exchange_info_repository(self, exchange_repo: ExchangeInfoRepository) -> None:
+    def set_exchange_info_repository(
+        self, exchange_repo: ExchangeInfoRepository
+    ) -> None:
         """设置交易所信息仓储实例
 
         Args:
@@ -211,7 +215,9 @@ class TaskRouter:
         data = request.get("data", {})
         request_id = request.get("requestId") or request.get("request_id")
 
-        logger.info(f"handle: msg_type={msg_type}, request_id={request_id}, request={request}")
+        logger.info(
+            f"handle: msg_type={msg_type}, request_id={request_id}, request={request}"
+        )
 
         # ========== 需要三阶段模式的请求类型 ==========
         # 严格遵循07-websocket-protocol.md：所有请求都先返回 ACK，确认后再处理
@@ -502,7 +508,14 @@ class TaskRouter:
                 ],
                 "currency_codes": ["USDT", "BTC", "ETH", "BNB", "BUSD"],
                 "supported_resolutions": [
-                    "1", "5", "15", "60", "240", "1D", "1W", "1M"
+                    "1",
+                    "5",
+                    "15",
+                    "60",
+                    "240",
+                    "1D",
+                    "1W",
+                    "1M",
                 ],
                 "intraday_multipliers": ["1", "5", "15", "60", "240"],
             },
@@ -521,6 +534,7 @@ class TaskRouter:
         if self._tasks_repo:
             # 异步调用需要处理
             import asyncio
+
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
@@ -919,9 +933,7 @@ class TaskRouter:
         if all_subs:
             # 取消所有订阅
             deleted_keys = await self._subscription_manager.unsubscribe_all(client_id)
-            logger.info(
-                f"客户端 {client_id} 取消全部 {len(deleted_keys)} 个订阅"
-            )
+            logger.info(f"客户端 {client_id} 取消全部 {len(deleted_keys)} 个订阅")
             return self._response(
                 msg_type="SUBSCRIPTION_DATA",  # 遵循07-websocket-protocol.md规范
                 request_id=request_id,
@@ -1096,7 +1108,11 @@ class TaskRouter:
 
         try:
             # 构建查询参数，统一通过 order.query 任务让 binance-service 调用币安 API
-            query_request_id = request_id or (f"query_{orig_client_order_id}" if orig_client_order_id else f"query_{order_id}")
+            query_request_id = request_id or (
+                f"query_{orig_client_order_id}"
+                if orig_client_order_id
+                else f"query_{order_id}"
+            )
             query_payload: dict[str, Any] = {"symbol": symbol}
 
             # orderId 和 origClientOrderId 都传给币安 API（API 会自动识别）
@@ -1111,7 +1127,9 @@ class TaskRouter:
                 payload=query_payload,
             )
 
-            logger.info(f"Created order query task: id={task_id}, symbol={symbol}, orderId={order_id}, origClientOrderId={orig_client_order_id}")
+            logger.info(
+                f"Created order query task: id={task_id}, symbol={symbol}, orderId={order_id}, origClientOrderId={orig_client_order_id}"
+            )
 
             # 注册任务与客户端的映射（用于订单完成后推送结果）
             self._client_manager.register_task(task_id, client_id)
@@ -1166,15 +1184,17 @@ class TaskRouter:
 
             orders = []
             for task in tasks:
-                orders.append({
-                    "taskId": task.get("id"),
-                    "type": task.get("type"),
-                    "status": task.get("status"),
-                    "payload": task.get("payload"),
-                    "result": task.get("result"),
-                    "createdAt": task.get("created_at"),
-                    "updatedAt": task.get("updated_at"),
-                })
+                orders.append(
+                    {
+                        "taskId": task.get("id"),
+                        "type": task.get("type"),
+                        "status": task.get("status"),
+                        "payload": task.get("payload"),
+                        "result": task.get("result"),
+                        "createdAt": task.get("created_at"),
+                        "updatedAt": task.get("updated_at"),
+                    }
+                )
 
             return self._response(
                 msg_type="ORDER_LIST_DATA",
@@ -1234,7 +1254,6 @@ class TaskRouter:
 
         # 使用 orig_client_order_id 作为取消依据
         orig_client_order_id = validated_cancel.orig_client_order_id
-        order_id = validated_cancel.order_id
 
         try:
             # 创建取消订单任务（requestId 存为顶层字段，不是 payload）
@@ -1244,7 +1263,9 @@ class TaskRouter:
                 payload=validated_cancel.model_dump(),  # payload 不含 requestId
             )
 
-            logger.info(f"Created cancel order task: id={task_id}, origClientOrderId={orig_client_order_id}")
+            logger.info(
+                f"Created cancel order task: id={task_id}, origClientOrderId={orig_client_order_id}"
+            )
 
             return self._response(
                 msg_type="ORDER_DATA",
@@ -1294,15 +1315,17 @@ class TaskRouter:
 
             orders = []
             for task in tasks:
-                orders.append({
-                    "taskId": task.get("id"),
-                    "type": task.get("type"),
-                    "status": task.get("status"),
-                    "payload": task.get("payload"),
-                    "result": task.get("result"),
-                    "createdAt": task.get("created_at"),
-                    "updatedAt": task.get("updated_at"),
-                })
+                orders.append(
+                    {
+                        "taskId": task.get("id"),
+                        "type": task.get("type"),
+                        "status": task.get("status"),
+                        "payload": task.get("payload"),
+                        "result": task.get("result"),
+                        "createdAt": task.get("created_at"),
+                        "updatedAt": task.get("updated_at"),
+                    }
+                )
 
             return self._response(
                 msg_type="ORDER_LIST_DATA",
@@ -1449,6 +1472,7 @@ class TaskRouter:
     def _timestamp_ms(self) -> int:
         """获取当前时间戳（毫秒）"""
         import time
+
         return int(time.time() * 1000)
 
     def _align_to_kline_open_time(self, timestamp_ms: int, interval: str) -> int:
@@ -1540,9 +1564,7 @@ class TaskRouter:
                 strategies.append(strategy_resp.model_dump())
 
             # 构建响应
-            response = StrategyMetadataListResponse(
-                strategies=strategies
-            )
+            response = StrategyMetadataListResponse(strategies=strategies)
 
             return self._response(
                 msg_type="STRATEGY_METADATA_DATA",

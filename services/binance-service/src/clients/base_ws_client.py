@@ -13,7 +13,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Callable, Awaitable, Optional
+from typing import Any, Callable, Awaitable, Optional
 
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
@@ -93,7 +93,7 @@ class BaseWSClient:
 
         logger.info(f"[{self.CLIENT_ID}] 正在连接...")
         try:
-            connect_kwargs: dict[str, str] = {}
+            connect_kwargs: dict[str, Any] = {}
             if self._proxy_url:
                 connect_kwargs["proxy"] = self._proxy_url
 
@@ -102,7 +102,8 @@ class BaseWSClient:
             # 再次检查运行状态（防止在连接过程中被断开）
             if not self._running:
                 logger.info(f"[{self.CLIENT_ID}] 连接完成但已停止，关闭连接")
-                await self._websocket.close()
+                if self._websocket:
+                    await self._websocket.close()
                 self._websocket = None
                 return
 
@@ -282,7 +283,7 @@ class BaseWSClient:
                     logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
 
             # 创建新连接
-            connect_kwargs = {}
+            connect_kwargs: dict[str, Any] = {}
             if self._proxy_url:
                 connect_kwargs["proxy"] = self._proxy_url
 

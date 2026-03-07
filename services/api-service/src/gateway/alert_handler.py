@@ -25,7 +25,7 @@ from ..models.db.alert_config_models import (
     AlertSignalUpdate,
 )
 from ..models.db.signal_models import SignalListResponse, SignalRecordResponse
-from .protocol import format_success_response, format_error_response
+from .protocol import format_error_response, format_success_response
 
 logger = logging.getLogger(__name__)
 
@@ -398,7 +398,11 @@ class AlertHandler:
                 is_enabled = is_enabled.lower() in ("true", "1", "yes")
 
             # Enable/disable alert signal (pass string, not UUID, since DB field is VARCHAR)
-            success = await self._alert_repo.enable(alert_id) if is_enabled else await self._alert_repo.disable(alert_id)
+            success = (
+                await self._alert_repo.enable(alert_id)
+                if is_enabled
+                else await self._alert_repo.disable(alert_id)
+            )
 
             if not success:
                 return format_error_response(
@@ -507,7 +511,7 @@ class AlertHandler:
                 items.append(signal_record.model_dump())
 
             # 构建响应模型
-            response = SignalListResponse(
+            SignalListResponse(
                 items=items,  # items 已是 camelCase 格式
                 total=total,
                 page=page,
