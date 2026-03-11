@@ -131,7 +131,7 @@ describe('WebSocket Trading Order E2E', () => {
     }
   });
 
-  test.describe('Connection', () => {
+  describe('Connection', () => {
     test('should connect to trading WebSocket endpoint', () => {
       expect(ws.readyState).toBe(WebSocket.OPEN);
     });
@@ -145,12 +145,12 @@ describe('WebSocket Trading Order E2E', () => {
     });
   });
 
-  test.describe('CREATE_ORDER', () => {
+  describe('CREATE_ORDER', () => {
     test('should create a LIMIT order successfully', async () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: testOrders.validLimitOrder
       };
@@ -178,7 +178,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: testOrders.validMarketOrder
       };
@@ -203,7 +203,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -228,7 +228,7 @@ describe('WebSocket Trading Order E2E', () => {
     });
   });
 
-  test.describe('GET_ORDER', () => {
+  describe('GET_ORDER', () => {
     let createdOrderId: number;
 
     test.beforeAll(async () => {
@@ -236,7 +236,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: testOrders.validLimitOrder
       };
@@ -249,7 +249,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'GET_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -276,7 +276,7 @@ describe('WebSocket Trading Order E2E', () => {
       const createRequest = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           ...testOrders.validLimitOrder,
@@ -290,7 +290,7 @@ describe('WebSocket Trading Order E2E', () => {
       const queryRequest = {
         protocolVersion: '2.0',
         type: 'GET_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -307,12 +307,12 @@ describe('WebSocket Trading Order E2E', () => {
     });
   });
 
-  test.describe('LIST_ORDERS', () => {
+  describe('LIST_ORDERS', () => {
     test('should list orders for a symbol', async () => {
       const request = {
         protocolVersion: '2.0',
         type: 'LIST_ORDERS',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -337,7 +337,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'LIST_ORDERS',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -355,12 +355,12 @@ describe('WebSocket Trading Order E2E', () => {
     });
   });
 
-  test.describe('GET_OPEN_ORDERS', () => {
+  describe('GET_OPEN_ORDERS', () => {
     test('should get open orders', async () => {
       const request = {
         protocolVersion: '2.0',
         type: 'GET_OPEN_ORDERS',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -384,7 +384,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'GET_OPEN_ORDERS',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           marketType: 'FUTURES'
@@ -398,13 +398,13 @@ describe('WebSocket Trading Order E2E', () => {
     });
   });
 
-  test.describe('CANCEL_ORDER', () => {
+  describe('CANCEL_ORDER', () => {
     test('should cancel an order by orderId', async () => {
       // First create an order
       const createRequest = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: testOrders.validLimitOrder
       };
@@ -416,7 +416,7 @@ describe('WebSocket Trading Order E2E', () => {
       const cancelRequest = {
         protocolVersion: '2.0',
         type: 'CANCEL_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -444,7 +444,7 @@ describe('WebSocket Trading Order E2E', () => {
       const createRequest = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           ...testOrders.validLimitOrder,
@@ -458,7 +458,7 @@ describe('WebSocket Trading Order E2E', () => {
       const cancelRequest = {
         protocolVersion: '2.0',
         type: 'CANCEL_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -475,12 +475,12 @@ describe('WebSocket Trading Order E2E', () => {
     });
   });
 
-  test.describe('Error Handling', () => {
+  describe('Error Handling', () => {
     test('should handle missing required fields', async () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           // Missing required fields: symbol, side, type, quantity
@@ -498,7 +498,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'CREATE_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',
@@ -519,7 +519,7 @@ describe('WebSocket Trading Order E2E', () => {
       const request = {
         protocolVersion: '2.0',
         type: 'GET_ORDER',
-        requestId: generateRequestId()`,
+        requestId: generateRequestId(),
         timestamp: Date.now(),
         data: {
           symbol: 'BTCUSDT',

@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
-import { NGrid, NGridItem } from 'naive-ui'
-import OrderForm from '../components/trading/OrderForm.vue'
-import OrderList from '../components/trading/OrderList.vue'
-import OrderDetail from '../components/trading/OrderDetail.vue'
+import { NGrid, NGridItem, NCard, NTabs, NTabPane } from 'naive-ui'
 import { useTradingStore } from '../stores/trading-store'
+import SpotOrderForm from '../components/trading/SpotOrderForm.vue'
 
 // Development mode flag
 const isDev = import.meta.env.DEV
@@ -86,6 +84,15 @@ onUnmounted(() => {
     ws = null
   }
 })
+
+// Order event handlers
+function handleOrderSuccess(order: unknown) {
+  log('log', 'Order created successfully:', order)
+}
+
+function handleOrderError(error: string) {
+  log('error', 'Order error:', error)
+}
 </script>
 
 <template>
@@ -95,28 +102,40 @@ onUnmounted(() => {
       <p class="dashboard-subtitle">实时订单管理与交易执行</p>
     </div>
 
-    <NGrid :cols="24" :x-gap="20" :y-gap="20" responsive="screen" item-responsive>
-      <!-- Order Form -->
-      <NGridItem :span="24" :md="{ span: 10 }" :lg="{ span: 8 }">
-        <div class="card-wrapper">
-          <OrderForm />
-        </div>
-      </NGridItem>
+    <!-- 交易面板标签页 -->
+    <NTabs type="line" animated>
+      <NTabPane name="spot" tab="现货交易">
+        <div class="trading-content">
+          <NGrid :cols="24" :x-gap="20" :y-gap="20" responsive="screen" item-responsive>
+            <!-- 订单表单 -->
+            <NGridItem :span="24" :md="8">
+              <SpotOrderForm @order-success="handleOrderSuccess" @order-error="handleOrderError" />
+            </NGridItem>
 
-      <!-- Order List -->
-      <NGridItem :span="24" :md="{ span: 14 }" :lg="{ span: 16 }">
-        <div class="card-wrapper">
-          <OrderList />
+            <!-- 订单列表 -->
+            <NGridItem :span="24" :md="16">
+              <NCard title="当前挂单" class="orders-card">
+                <div class="orders-list">
+                  <p class="placeholder-text">连接WebSocket后自动显示当前挂单</p>
+                </div>
+              </NCard>
+            </NGridItem>
+          </NGrid>
         </div>
-      </NGridItem>
-    </NGrid>
+      </NTabPane>
 
-    <!-- Order Detail Modal -->
-    <OrderDetail
-      v-if="tradingStore.currentOrder"
-      :order="tradingStore.currentOrder"
-      @close="tradingStore.setCurrentOrder(null)"
-    />
+      <NTabPane name="futures" tab="合约交易">
+        <div class="trading-content">
+          <NGrid :cols="24" :x-gap="20" :y-gap="20" responsive="screen" item-responsive>
+            <NGridItem :span="24">
+              <NCard title="合约交易" class="placeholder-card">
+                <p class="placeholder-text">合约交易功能开发中...</p>
+              </NCard>
+            </NGridItem>
+          </NGrid>
+        </div>
+      </NTabPane>
+    </NTabs>
   </div>
 </template>
 
@@ -153,25 +172,48 @@ onUnmounted(() => {
   font-weight: 300;
 }
 
-/* Card Wrapper */
-.card-wrapper {
+/* Placeholder Card */
+.placeholder-card {
   background: rgba(30, 41, 59, 0.6);
   border-radius: 16px;
   border: 1px solid rgba(245, 158, 11, 0.15);
   backdrop-filter: blur(10px);
-  box-shadow:
-    0 4px 6px -1px rgba(0, 0, 0, 0.3),
-    0 2px 4px -1px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  transition: all 0.3s ease;
+  padding: 48px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
-.card-wrapper:hover {
-  border-color: rgba(245, 158, 11, 0.3);
-  box-shadow:
-    0 8px 25px -5px rgba(0, 0, 0, 0.4),
-    0 4px 10px -5px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+.placeholder-text {
+  color: #94A3B8;
+  font-size: 14px;
+  margin-top: 16px;
+}
+
+.placeholder-text code {
+  background: rgba(245, 158, 11, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #F59E0B;
+}
+
+/* Trading Content */
+.trading-content {
+  padding-top: 20px;
+}
+
+/* Orders Card */
+.orders-card {
+  background: rgba(30, 41, 59, 0.6);
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.15);
+}
+
+.orders-list {
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Responsive adjustments */
@@ -182,10 +224,6 @@ onUnmounted(() => {
 
   .dashboard-title {
     font-size: 22px;
-  }
-
-  .card-wrapper {
-    border-radius: 12px;
   }
 }
 

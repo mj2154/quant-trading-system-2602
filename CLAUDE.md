@@ -20,6 +20,16 @@
 cd docker && docker-compose up -d
 ```
 
+### 前端调试
+```bash
+# 进入前端目录并启动开发服务器
+cd frontend/trading-panel && pnpm dev
+```
+
+访问地址: http://localhost:5173
+
+进入其他页面: 点击首页的 **加号(+)** 按钮可进入交易页面等不同功能页面。
+
 ### 运行微服务
 - API服务: `cd services/api-service && uv run python src/main.py`
 - 币安服务: `cd services/binance-service && uv run python main.py`
