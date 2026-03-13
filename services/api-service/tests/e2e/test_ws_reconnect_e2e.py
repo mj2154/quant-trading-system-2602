@@ -2,7 +2,7 @@
 端到端测试：模拟前端WebSocket连接，观察快速订阅/取消订阅是否会触发连接断开
 
 测试流程：
-1. 通过WebSocket连接到后端 (ws://localhost:8000/ws/market)
+1. 通过WebSocket连接到后端 (ws://localhost:8000/ws)
 2. 发送订阅消息（使用v2.0格式）
 3. 发送取消订阅消息
 4. 观察连接是否断开
@@ -31,7 +31,7 @@ async def test_rapid_subscribe_unsubscribe():
     4. 订阅 ['BINANCE:ETHUSDT@TICKER']
     5. 检查连接是否断开
     """
-    uri = "ws://localhost:8000/ws/market"
+    uri = "ws://localhost:8000/ws"
 
     try:
         logger.info("=" * 80)
@@ -160,7 +160,7 @@ async def test_multiple_pair_switches():
     """
     测试多次切换交易对
     """
-    uri = "ws://localhost:8000/ws/market"
+    uri = "ws://localhost:8000/ws"
 
     try:
         logger.info("\n" + "=" * 80)

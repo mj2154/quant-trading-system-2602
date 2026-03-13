@@ -39,7 +39,7 @@ function formatIntervalForDisplay(interval: string): string {
 
 // 处理告警触发 - 全局版本（处理声音和弹窗）
 function handleGlobalAlert(signal: SignalRecord) {
-  const signalType = signal.signal_value === true ? '建仓' : signal.signal_value === false ? '清仓' : '观望'
+  const signalType = signal.signalValue === true ? '建仓' : signal.signalValue === false ? '清仓' : '观望'
 
   // 播放声音
   if (alertSettings.value.soundEnabled) {
@@ -49,7 +49,7 @@ function handleGlobalAlert(signal: SignalRecord) {
   // 弹窗通知 - 左下角，不自动消失，最多10个（由 NNotificationProvider 控制）
   if (alertSettings.value.popupEnabled) {
     notification.info({
-      title: `交易信号 - ${signal.strategy_name}`,
+      title: `交易信号 - ${signal.strategyName}`,
       content: `${formatSymbolForDisplay(signal.symbol)} ${formatIntervalForDisplay(signal.interval)} ${signalType}`,
       duration: 0, // 不自动消失
     })

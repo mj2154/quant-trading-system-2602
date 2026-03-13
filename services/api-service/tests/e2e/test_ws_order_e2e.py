@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # WebSocket 端点
-WS_URL = "ws://localhost:8000/ws/trading"
+WS_URL = "ws://localhost:8000/ws"
 
 
 async def wait_for_message(ws, timeout=10):

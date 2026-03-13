@@ -33,15 +33,15 @@
         v-for="alert in store.alerts"
         :key="alert.id"
         class="alert-card"
-        :class="{ disabled: !alert.is_enabled }"
+        :class="{ disabled: !alert.isEnabled }"
         hoverable
         @click="handleSelect(alert)"
       >
         <template #header>
           <div class="card-header">
             <span class="alert-name">{{ alert.name }}</span>
-            <n-tag :type="alert.is_enabled ? 'success' : 'default'" size="small">
-              {{ alert.is_enabled ? '启用' : '禁用' }}
+            <n-tag :type="alert.isEnabled ? 'success' : 'default'" size="small">
+              {{ alert.isEnabled ? '启用' : '禁用' }}
             </n-tag>
           </div>
         </template>
@@ -57,11 +57,11 @@
           <!-- 第二行：触发 + 策略 -->
           <div class="info-row">
             <span class="label">触发</span>
-            <span class="value trigger">{{ formatTriggerType(alert.trigger_type) }}</span>
+            <span class="value trigger">{{ formatTriggerType(alert.triggerType) }}</span>
           </div>
           <div class="info-row">
             <span class="label">策略</span>
-            <span class="value strategy">{{ formatStrategyType(alert.strategy_type) }}</span>
+            <span class="value strategy">{{ formatStrategyType(alert.strategyType) }}</span>
           </div>
 
           <!-- MACD参数 -->
@@ -95,10 +95,10 @@
           <div class="card-actions">
             <n-button
               size="small"
-              :type="alert.is_enabled ? 'warning' : 'success'"
+              :type="alert.isEnabled ? 'warning' : 'success'"
               @click.stop="handleToggle(alert)"
             >
-              {{ alert.is_enabled ? '禁用' : '启用' }}
+              {{ alert.isEnabled ? '禁用' : '启用' }}
             </n-button>
             <n-button size="small" @click.stop="handleEdit(alert)">编辑</n-button>
             <n-button size="small" type="error" @click.stop="handleDelete(alert)">删除</n-button>
@@ -237,7 +237,7 @@ async function handleRefresh() {
 async function handleToggle(alert: AlertConfig) {
   const success = await store.toggleAlert(alert.id)
   if (success) {
-    message.success(alert.is_enabled ? '已禁用' : '已启用')
+    message.success(alert.isEnabled ? '已禁用' : '已启用')
   } else {
     message.error('操作失败')
   }

@@ -15,7 +15,7 @@ import type {
   AccountOverview,
   PositionItem,
   BalanceItem,
-} from '../types/account-types'
+} from '../types/api'
 
 // WebSocket URL - 使用环境变量或默认配置
 const WS_BASE_URL = import.meta.env?.VITE_WS_URL || 'ws://127.0.0.1:8000'
@@ -237,7 +237,7 @@ export const useAccountStore = defineStore('account', () => {
     wsConnecting.value = true
 
     try {
-      ws.value = new WebSocket(`${WS_BASE_URL}/ws/market`)
+      ws.value = new WebSocket(`${WS_BASE_URL}/ws`)
 
       ws.value.onopen = () => {
         wsConnected.value = true

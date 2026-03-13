@@ -668,7 +668,7 @@ function connectWebSocket(isManualReconnect = false) {
 
     return new Promise((resolve, reject) => {
         // 直接连接到后端 WebSocket 服务（绕过 Vite 代理问题）
-        const wsUrl = 'ws://127.0.0.1:8000/ws/market';
+        const wsUrl = 'ws://127.0.0.1:8000/ws';
         ws = new WebSocket(wsUrl);
 
         const timeout = setTimeout(() => {
@@ -998,12 +998,13 @@ export default {
 
         // 使用WebSocket GET请求获取K线数据
         // interval 与数据库字段和后端API保持一致（设计文档 v2.1 规范）
+        // 使用 camelCase 格式 (fromTime, toTime)，后端使用 SnakeCaseModel 自动转换
         sendWSRequest({
             type: "klines",
             symbol: symbol,
             interval: resolution,  // 使用 interval 而非 resolution
-            from_time: from_ts,
-            to_time: to_ts
+            fromTime: from_ts,
+            toTime: to_ts
         }, (response) => {
             // v2.0 协议: 使用 type === 'KLINES_DATA'
             if (response.type === 'KLINES_DATA') {

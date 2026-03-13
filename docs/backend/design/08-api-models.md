@@ -425,7 +425,7 @@ models/
 | 常量名称 | 用途 | 值 |
 |---------|------|-----|
 | `PROTOCOL_VERSION` | 协议版本 | `"2.0"` |
-| `WS_PATH` | WebSocket 路径 | `"/ws/market"` |
+| `WS_PATH` | WebSocket 路径 | `"/ws"` |
 | `WS_USER_DATA_PATH` | 用户数据路径 | `"/ws/user"` |
 | `PING_INTERVAL` | 心跳间隔 | `20` 秒 |
 | `PING_TIMEOUT` | 心跳超时 | `60` 秒 |

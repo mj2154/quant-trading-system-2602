@@ -13,7 +13,7 @@ PROTOCOL_VERSION = "2.0"
 
 # ==================== WebSocket路径 ====================
 
-WS_PATH = "/ws/market"
+WS_PATH = "/ws"
 WS_USER_DATA_PATH = "/ws/user"
 
 # ==================== 心跳配置 ====================

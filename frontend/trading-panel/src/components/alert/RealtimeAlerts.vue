@@ -5,31 +5,31 @@
       <TransitionGroup name="signal">
         <div
           v-for="signal in store.realtimeAlertSignals"
-          :key="signal.alert_id"
+          :key="signal.alertId"
           class="signal-item"
           role="listitem"
-          :aria-label="`${signal.strategy_name} - ${signal.signal_value === true ? '建仓信号' : signal.signal_value === false ? '清仓信号' : '观望'}`"
+          :aria-label="`${signal.strategyName} - ${signal.signalValue === true ? '建仓信号' : signal.signalValue === false ? '清仓信号' : '观望'}`"
           :class="{
-            'signal-long': signal.signal_value === true,
-            'signal-short': signal.signal_value === false,
-            'signal-none': signal.signal_value === null,
+            'signal-long': signal.signalValue === true,
+            'signal-short': signal.signalValue === false,
+            'signal-none': signal.signalValue === null,
           }"
         >
           <!-- 发光指示条 -->
           <div class="glow-bar" :class="{
-            'glow-long': signal.signal_value === true,
-            'glow-short': signal.signal_value === false,
+            'glow-long': signal.signalValue === true,
+            'glow-short': signal.signalValue === false,
           }"></div>
 
           <div class="signal-icon">
             <div class="icon-wrapper" :class="{
-              'icon-long': signal.signal_value === true,
-              'icon-short': signal.signal_value === false,
+              'icon-long': signal.signalValue === true,
+              'icon-short': signal.signalValue === false,
             }">
-              <n-icon v-if="signal.signal_value === true" size="16">
+              <n-icon v-if="signal.signalValue === true" size="16">
                 <ArrowUpIcon />
               </n-icon>
-              <n-icon v-else-if="signal.signal_value === false" size="16">
+              <n-icon v-else-if="signal.signalValue === false" size="16">
                 <ArrowDownIcon />
               </n-icon>
               <n-icon v-else size="16">
@@ -40,24 +40,24 @@
 
           <div class="signal-content">
             <div class="signal-header">
-              <span class="strategy-name">{{ signal.strategy_name }}</span>
+              <span class="strategy-name">{{ signal.strategyName }}</span>
               <span class="signal-type" :class="{
-                'type-long': signal.signal_value === true,
-                'type-short': signal.signal_value === false,
+                'type-long': signal.signalValue === true,
+                'type-short': signal.signalValue === false,
               }">
-                {{ signal.signal_value === true ? '建仓' : signal.signal_value === false ? '清仓' : '观望' }}
+                {{ signal.signalValue === true ? '建仓' : signal.signalValue === false ? '清仓' : '观望' }}
               </span>
             </div>
             <div class="signal-info">
               <span class="symbol-badge">{{ formatSymbol(signal.symbol) }}</span>
               <span class="interval-badge">{{ formatInterval(signal.interval) }}</span>
             </div>
-            <div v-if="signal.signal_reason" class="signal-reason">
-              {{ truncateText(signal.signal_reason, 50) }}
+            <div v-if="signal.signalReason" class="signal-reason">
+              {{ truncateText(signal.signalReason, 50) }}
             </div>
             <div class="signal-time">
               <span class="time-icon">◷</span>
-              {{ formatTime(signal.computed_at) }}
+              {{ formatTime(signal.computedAt) }}
             </div>
           </div>
         </div>

@@ -168,8 +168,8 @@ export const useAlertStore = defineStore('alert', () => {
   const alertSignalQueryParams = ref<SignalRecordQueryParams>({
     page: 1,
     pageSize: 20,
-    order_by: 'computed_at',
-    order_dir: 'desc',
+    orderBy: 'computedAt',
+    orderDir: 'desc',
   })
 
   // WebSocket 连接
@@ -756,10 +756,10 @@ export const useAlertStore = defineStore('alert', () => {
         symbol: qp.symbol,
         strategyType: qp.strategyType,
         interval: qp.interval,
-        from_time: qp.from_time,
-        to_time: qp.to_time,
-        order_by: qp.order_by,
-        order_dir: qp.order_dir,
+        fromTime: qp.fromTime,
+        toTime: qp.toTime,
+        orderBy: qp.orderBy,
+        orderDir: qp.orderDir,
       })
 
       const data = await sendWSRequest<AlertSignalListResponse>(message)
@@ -789,8 +789,8 @@ export const useAlertStore = defineStore('alert', () => {
     alertSignalQueryParams.value = {
       page: 1,
       pageSize: 20,
-      order_by: 'computed_at',
-      order_dir: 'desc',
+      orderBy: 'computedAt',
+      orderDir: 'desc',
     }
   }
 
@@ -811,7 +811,7 @@ export const useAlertStore = defineStore('alert', () => {
     wsConnecting.value = true
 
     try {
-      ws.value = new WebSocket(`${WS_BASE_URL}/ws/market`)
+      ws.value = new WebSocket(`${WS_BASE_URL}/ws`)
 
       ws.value.onopen = () => {
         const isReconnect = wsConnected.value === false && ws.value !== null
@@ -958,23 +958,23 @@ export const useAlertStore = defineStore('alert', () => {
 
   /**
    * 转换后端信号数据到前端格式
-   * 后端字段: strategyType -> 前端字段: strategy_name
+   * 后端使用 CamelCaseModel 序列化，响应使用 camelCase
    */
   function transformBackendSignalToFrontend(content: Record<string, unknown>): SignalRecord {
     return {
       id: (content.id as number) || 0,
-      alert_id: (content.alert_id as string) || '',
-      config_id: (content.config_id as string) || null,
-      // strategyType -> strategy_name
-      strategy_name: (content.strategyType as string) || (content.strategy_name as string) || 'unknown',
+      alertId: (content.alertId as string) || '',
+      configId: (content.configId as string) || null,
+      // 后端返回 strategyType，前端使用 strategyName
+      strategyName: (content.strategyType as string) || (content.strategyName as string) || 'unknown',
       symbol: (content.symbol as string) || '',
       interval: (content.interval as string) || '',
       triggerType: (content.triggerType as string) || null,
-      // signal_value 可能是 boolean 或字符串 't'/'f'
-      signal_value: content.signal_value === 't' ? true : content.signal_value === 'f' ? false : content.signal_value as boolean | null,
-      signal_reason: (content.signal_reason as string) || null,
-      computed_at: (content.computed_at as string) || new Date().toISOString(),
-      source_subscription_key: (content.source_subscription_key as string) || null,
+      // signalValue 可能是 boolean 或字符串 't'/'f'
+      signalValue: content.signalValue === 't' ? true : content.signalValue === 'f' ? false : content.signalValue as boolean | null,
+      signalReason: (content.signalReason as string) || null,
+      computedAt: (content.computedAt as string) || new Date().toISOString(),
+      sourceSubscriptionKey: (content.sourceSubscriptionKey as string) || null,
       metadata: (content.metadata as Record<string, unknown>) || {},
     }
   }
@@ -1010,16 +1010,16 @@ export const useAlertStore = defineStore('alert', () => {
   function triggerTestSignal() {
     const testSignal: SignalRecord = {
       id: Date.now(),
-      alert_id: 'test-alert',
-      config_id: null,
-      strategy_name: '测试策略',
+      alertId: 'test-alert',
+      configId: null,
+      strategyName: '测试策略',
       symbol: 'BTCUSDT',
       interval: '60',
       triggerType: 'price_above',
-      signal_value: true,
-      signal_reason: '测试触发',
-      computed_at: new Date().toISOString(),
-      source_subscription_key: null,
+      signalValue: true,
+      signalReason: '测试触发',
+      computedAt: new Date().toISOString(),
+      sourceSubscriptionKey: null,
       metadata: {},
     }
     addRealtimeAlertSignal(testSignal)

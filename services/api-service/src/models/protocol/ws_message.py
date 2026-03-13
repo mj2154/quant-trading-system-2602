@@ -20,7 +20,7 @@ from ..base import CamelCaseModel, SnakeCaseModel
 # ==================== 协议常量 ====================
 
 PROTOCOL_VERSION = "2.0"
-WS_PATH = "/ws/market"
+WS_PATH = "/ws"
 PING_INTERVAL = 20  # 秒
 PING_TIMEOUT = 60  # 秒
 

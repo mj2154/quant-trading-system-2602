@@ -33,7 +33,12 @@ from ..models.db.signal_models import (
     StrategyMetadataResponse,
 )
 from ..models.protocol.constants import PROTOCOL_VERSION
-from ..models.protocol.ws_message import MessageError, MessageSuccess
+from ..models.protocol.ws_message import (
+    KlinesRequest,
+    MessageError,
+    MessageSuccess,
+    QuotesRequest,
+)
 from ..models.trading.kline_models import KlineBar, KlineBars
 from ..models.trading.order_models import (
     CancelOrderRequest,
@@ -278,7 +283,16 @@ class TaskRouter:
 
         # 报价数据 - 异步任务
         elif msg_type == "GET_QUOTES":
-            symbols = data.get("symbols", [])
+            # 使用 SnakeCaseModel 验证请求，自动将 camelCase 转换为 snake_case
+            try:
+                validated = QuotesRequest.model_validate(data)
+                symbols = validated.symbols
+            except Exception as e:
+                return self._error_response(
+                    error_code="INVALID_PARAMETERS",
+                    error_message=f"Missing symbols parameter: {str(e)}",
+                )
+
             if not symbols:
                 return self._error_response(
                     error_code="INVALID_PARAMETERS",
@@ -562,6 +576,8 @@ class TaskRouter:
 
         协议要求：无论缓存是否命中，都必须先返回 ACK 确认。
 
+        使用 KlinesRequest 模型验证数据，自动将 camelCase 转换为 snake_case。
+
         Args:
             client_id: 客户端 ID
             data: 请求数据
@@ -570,17 +586,19 @@ class TaskRouter:
         Returns:
             None（响应已由内部发送）
         """
-        symbol = data.get("symbol")
-        interval = data.get("interval")
-        from_time = data.get("from_time")
-        to_time = data.get("to_time")
-
-        if not all([symbol, interval, from_time, to_time]):
+        # 使用 SnakeCaseModel 验证请求，自动将 camelCase 转换为 snake_case
+        try:
+            validated = KlinesRequest.model_validate(data)
+            symbol = validated.symbol
+            interval = validated.interval
+            from_time = validated.from_time
+            to_time = validated.to_time
+        except Exception as e:
             # 参数错误，也需要先发送 ACK 再发送错误
             await self._client_manager.send(client_id, self._create_ack(request_id))
             error_resp = self._error_response(
                 error_code="INVALID_PARAMETERS",
-                error_message="Missing required parameters",
+                error_message=f"Missing required parameters: {str(e)}",
             )
             await self._client_manager.send(client_id, error_resp)
             return None

@@ -177,7 +177,7 @@ python tests/e2e/test_futures_ws_simple.py
 
 1. **服务器要求**
    - 确保后端服务已启动：`docker-compose up`
-   - 默认连接：`ws://localhost:8000/ws/market`
+   - 默认连接：`ws://localhost:8000/ws`
 
 2. **测试环境**
    - 简化版测试不验证错误处理

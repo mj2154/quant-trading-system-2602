@@ -10,7 +10,8 @@ import {
   NIcon,
   NSpin,
 } from 'naive-ui'
-import { useSpotOrder, type SpotOrderType, type SpotTimeInForce } from '../../composables/useSpotOrder'
+import { useSpotOrder } from '../../composables/useSpotOrder'
+import type { SpotOrderType, OrderTimeInForce } from '../../types/api'
 import { useAccountStore } from '../../stores/account-store'
 
 // Types
@@ -45,7 +46,7 @@ function connectAndFetchQuote(targetSymbol: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = import.meta.env.VITE_WS_HOST || 'localhost:8000'
-    const url = `${wsProtocol}//${host}/ws/market`
+    const url = `${wsProtocol}//${host}/ws`
 
     try {
       ws = new WebSocket(url)
@@ -134,7 +135,7 @@ const buyPrice = ref<number | undefined>(undefined)
 const buyQuantity = ref<number | undefined>(undefined)
 const buyInputAmount = ref<number | undefined>(undefined)
 const buyStopPrice = ref<number | undefined>(undefined)
-const buyTimeInForce = ref<SpotTimeInForce>('GTC')
+const buyTimeInForce = ref<OrderTimeInForce>('GTC')
 const buyPercentage = ref(0)
 
 // Sell side state
@@ -142,7 +143,7 @@ const sellPrice = ref<number | undefined>(undefined)
 const sellQuantity = ref<number | undefined>(undefined)
 const sellInputAmount = ref<number | undefined>(undefined)
 const sellStopPrice = ref<number | undefined>(undefined)
-const sellTimeInForce = ref<SpotTimeInForce>('GTC')
+const sellTimeInForce = ref<OrderTimeInForce>('GTC')
 const sellPercentage = ref(0)
 
 // ====== Computed ======

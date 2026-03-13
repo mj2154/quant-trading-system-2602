@@ -3,7 +3,7 @@ API 网关服务主入口
 
 轻量级 API 网关，支持:
 - HTTP REST: /, /health (服务状态查询)
-- WebSocket: /ws/market (客户端数据交互)
+- WebSocket: /ws (统一客户端数据交互)
 - 订阅管理: subscription_manager (realtime_data表机制)
 - 任务管理: tasks表机制
 """
@@ -269,11 +269,15 @@ async def health() -> JSONResponse:
 # ========== WebSocket 端点 ==========
 
 
-@app.websocket("/ws/market")
-async def ws_market(websocket: WebSocket) -> None:
-    """WebSocket 端点 /ws/market
+@app.websocket("/ws")
+async def ws(websocket: WebSocket) -> None:
+    """WebSocket 端点 /ws
 
-    客户端数据交互的主通道。
+    统一的 WebSocket 端点，处理所有功能：
+    - 市场数据（K线、报价、订阅）
+    - 交易操作（订单创建、查询、取消）
+
+    通过消息类型区分不同功能。
 
     Args:
         websocket: FastAPI WebSocket 连接
@@ -311,49 +315,6 @@ async def ws_market(websocket: WebSocket) -> None:
             await websocket.close(code=1011)
         except Exception:
             pass  # 连接已关闭，静默忽略
-
-
-@app.websocket("/ws/trading")
-async def ws_trading(websocket: WebSocket) -> None:
-    """WebSocket 端点 /ws/trading
-
-    交易操作专用通道，处理订单创建、查询、取消等操作。
-
-    Args:
-        websocket: FastAPI WebSocket 连接
-    """
-    if _client_manager is None or _task_router is None:
-        await websocket.close(code=1011)
-        return
-
-    # 获取客户端 IP
-    client_host = (
-        websocket.headers.get("X-Forwarded-For", "")
-        or websocket.headers.get("X-Real-IP", "")
-        or "unknown"
-    )
-    logger.info(f"Trading WebSocket connection from {client_host}")
-
-    try:
-        # 使用 gateway 模块处理连接（复用 ws_market 逻辑）
-        from .gateway import ws_market as handle_ws
-
-        await handle_ws(
-            websocket=websocket,
-            client_manager=_client_manager,
-            task_router=_task_router,
-        )
-    except WebSocketDisconnect:
-        logger.info(f"Trading WebSocket disconnected from {client_host}")
-    except RuntimeError as e:
-        # 处理 WebSocket 相关运行时错误
-        logger.debug(f"Trading WebSocket runtime error: {e}")
-    except Exception as e:
-        logger.exception(f"Trading WebSocket error: {e}")
-        try:
-            await websocket.close(code=1011)
-        except Exception:
-            pass
 
 
 # ========== 启动入口 ==========

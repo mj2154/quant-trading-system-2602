@@ -41,7 +41,7 @@ class AlertTestClient:
     - page/page_size for pagination
     """
 
-    def __init__(self, ws_uri: str = "ws://localhost:8000/ws/market"):
+    def __init__(self, ws_uri: str = "ws://localhost:8000/ws"):
         self.ws_uri = ws_uri
         self.websocket: Any | None = None
         self.connected = False

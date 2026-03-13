@@ -35,18 +35,30 @@ class OrderSide(StrEnum):
 
 
 class OrderType(StrEnum):
-    """订单类型
+    """订单类型（通用基础类型）
 
-    与币安 API 保持一致：LIMIT, MARKET, STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET
+    注意：现货和期货使用不同的订单类型命名！
+    - 现货: STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT_LIMIT
+    - 期货: STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET
+    - 通用: LIMIT, MARKET, LIMIT_MAKER, TAKE_PROFIT, TRAILING_STOP_MARKET
     """
 
+    # 通用类型
     LIMIT = "LIMIT"
     MARKET = "MARKET"
+    LIMIT_MAKER = "LIMIT_MAKER"
+    TAKE_PROFIT = "TAKE_PROFIT"
+    TRAILING_STOP_MARKET = "TRAILING_STOP_MARKET"
+
+    # 止损止盈类型（期货专属）
     STOP = "STOP"
     STOP_MARKET = "STOP_MARKET"
-    TAKE_PROFIT = "TAKE_PROFIT"
     TAKE_PROFIT_MARKET = "TAKE_PROFIT_MARKET"
-    TRAILING_STOP_MARKET = "TRAILING_STOP_MARKET"
+
+    # 止损止盈类型（现货专属）
+    STOP_LOSS = "STOP_LOSS"
+    STOP_LOSS_LIMIT = "STOP_LOSS_LIMIT"
+    TAKE_PROFIT_LIMIT = "TAKE_PROFIT_LIMIT"
 
 
 class OrderTimeInForce(StrEnum):
@@ -55,11 +67,19 @@ class OrderTimeInForce(StrEnum):
     GTC - Good Till Cancel (成交为止)
     IOC - Immediate or Cancel (立即成交，否则取消)
     FOK - Fill or Kill (全部成交，否则取消)
+    GTX - Good Till Crossing (Post Only 仅做Maker)
+    GTD - Good Till Date (指定日期前有效)
+    RPI - Retail Price Improvement (仅APP/Web)
+
+    注意：GTX, GTD, RPI 仅期货支持
     """
 
     GTC = "GTC"
     IOC = "IOC"
     FOK = "FOK"
+    GTX = "GTX"  # 期货专属
+    GTD = "GTD"  # 期货专属
+    RPI = "RPI"  # 期货专属
 
 
 class MarketType(StrEnum):

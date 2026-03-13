@@ -4,7 +4,7 @@
  */
 
 import { ref } from 'vue'
-import type { Order, OrderListResponse } from '../types/trading-types'
+import type { Order, OrderListResponse, SpotOrderType, OrderTimeInForce } from '../types/api'
 
 // ID generation functions (must follow UUID v4 hex format - 32 characters)
 function generateRequestId(): string {
@@ -22,7 +22,7 @@ const messageHandlers = new Map<string, (data: unknown) => void>()
 function getWebSocketUrl(): string {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = import.meta.env.VITE_WS_HOST || 'localhost:8000'
-  return `${wsProtocol}//${host}/ws/trading`
+  return `${wsProtocol}//${host}/ws`
 }
 
 function connectWebSocket(): Promise<WebSocket> {
@@ -101,20 +101,7 @@ function sendMessage<T>(type: string, data?: unknown): Promise<T> {
   })
 }
 
-// Order types for spot trading
-export type SpotOrderType =
-  | 'LIMIT'
-  | 'MARKET'
-  | 'STOP_LOSS'
-  | 'STOP_LOSS_LIMIT'
-  | 'TAKE_PROFIT'
-  | 'TAKE_PROFIT_LIMIT'
-  | 'LIMIT_MAKER'
-
-// Time in force
-export type SpotTimeInForce = 'GTC' | 'IOC' | 'FOK'
-
-// Create spot order params
+// Create spot order params (使用统一的 types/api 定义)
 export interface CreateSpotOrderParams {
   symbol: string
   side: 'BUY' | 'SELL'
@@ -123,7 +110,7 @@ export interface CreateSpotOrderParams {
   quoteOrderQty?: number
   price?: number
   stopPrice?: number
-  timeInForce?: SpotTimeInForce
+  timeInForce?: OrderTimeInForce
   icebergQty?: number
   trailingDelta?: number
   strategyId?: number

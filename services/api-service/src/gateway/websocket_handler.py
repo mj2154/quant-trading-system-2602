@@ -1,7 +1,7 @@
 """
 WebSocket 处理器
 
-处理 /ws/market 端点的连接和消息。
+处理 /ws 端点的连接和消息。
 """
 
 import asyncio
@@ -55,7 +55,7 @@ async def ws_market(
     client_manager: ClientManager,
     task_router: TaskRouter,
 ) -> None:
-    """WebSocket 端点 /ws/market
+    """WebSocket 端点 /ws
 
     处理客户端连接、消息收发、订阅管理。
 

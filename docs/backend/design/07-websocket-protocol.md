@@ -172,17 +172,18 @@ class KlineResponse(BaseModel):
 
 ## 🌐 WebSocket 端点
 
-### 主端点：数据通道
+### 统一端点：所有功能
 
-- **路径**: `/ws/market`
-- **开发环境**: `ws://localhost:8000/ws/market`
-- **生产环境**: `wss://your-domain.com/ws/market`
+- **路径**: `/ws`
+- **开发环境**: `ws://localhost:8000/ws`
+- **生产环境**: `wss://your-domain.com/ws`
 - **协议**: WebSocket (RFC 6455)
 - **消息格式**: JSON
+- **说明**: 单一 WebSocket 连接处理所有功能，通过消息类型区分市场数据和交易操作
 
-### 状态监控端点
+### 状态查询
 
-- **路径**: `/ws/market/status`
+- **消息类型**: `STATUS`
 - **用途**: 实时监控 WebSocket 服务状态
 - **推送频率**: 每 5 秒
 
@@ -204,30 +205,40 @@ class KlineResponse(BaseModel):
 }
 ```
 
-### 交易端点
-
-- **路径**: `/ws/trading`
-- **开发环境**: `ws://localhost:8000/ws/trading`
-- **生产环境**: `wss://your-domain.com/ws/trading`
-- **协议**: WebSocket (RFC 6455)
-- **消息格式**: JSON
-- **用途**: 处理订单操作（创建、查询、取消）
-
-**职责分离**：
-| 端点 | 职责 |
-|------|------|
-| `/ws/market` | 市场数据（K线、报价、订阅） |
-| `/ws/trading` | 交易操作（订单创建、查询、取消） |
-
-**交易消息类型**（与 /ws/market 复用同一协议）：
-
-| type | 响应类型 | 说明 |
-|------|---------|------|
-| `CREATE_ORDER` | `ORDER_DATA` | 创建订单 |
-| `GET_ORDER` | `ORDER_DATA` | 查询单个订单 |
-| `LIST_ORDERS` | `ORDER_LIST_DATA` | 查询订单列表 |
-| `CANCEL_ORDER` | `ORDER_DATA` | 撤销订单 |
-| `GET_OPEN_ORDERS` | `ORDER_LIST_DATA` | 查询当前挂单 |
+**消息类型说明**：
+| 消息类型 | 功能 |
+|---------|------|
+| **市场数据** | |
+| `GET_CONFIG` | 获取图表配置 |
+| `GET_SERVER_TIME` | 获取服务器时间 |
+| `GET_METRICS` | 获取服务指标 |
+| `GET_KLINES` | 获取K线数据 |
+| `GET_SEARCH_SYMBOLS` | 搜索交易对 |
+| `GET_RESOLVE_SYMBOL` | 解析交易对 |
+| `GET_QUOTES` | 获取报价 |
+| **订阅管理** | |
+| `SUBSCRIBE` | 订阅数据 |
+| `UNSUBSCRIBE` | 取消订阅 |
+| **账户信息** | |
+| `GET_FUTURES_ACCOUNT` | 获取期货账户信息 |
+| `GET_SPOT_ACCOUNT` | 获取现货账户信息 |
+| **交易操作** | |
+| `CREATE_ORDER` | 创建订单 |
+| `GET_ORDER` | 查询订单 |
+| `LIST_ORDERS` | 查询订单列表 |
+| `CANCEL_ORDER` | 取消订单 |
+| `GET_OPEN_ORDERS` | 查询当前挂单 |
+| **告警配置** | |
+| `CREATE_ALERT_CONFIG` | 创建告警配置 |
+| `LIST_ALERT_CONFIGS` | 列出告警配置 |
+| `UPDATE_ALERT_CONFIG` | 更新告警配置 |
+| `DELETE_ALERT_CONFIG` | 删除告警配置 |
+| `ENABLE_ALERT_CONFIG` | 启用告警配置 |
+| `DISABLE_ALERT_CONFIG` | 禁用告警配置 |
+| **信号与策略** | |
+| `LIST_SIGNALS` | 查询历史信号 |
+| `GET_STRATEGY_METADATA` | 获取策略元数据列表 |
+| `GET_STRATEGY_METADATA_BY_TYPE` | 获取指定策略元数据 |
 
 **数据存储**：
 - 交易请求写入 `order_tasks` 表（而非 `tasks` 表）
@@ -314,25 +325,33 @@ newClientOrderId: 用于在前端和交易所层面追踪订单状态
 
 **必填字段**：`symbol`, `side`, `type`, `quantity`, `newClientOrderId`
 
-#### 5. Order Type 强制参数（期货）
+#### 5. Order Type 强制参数（U本位合约/期货）
+
+> 注意：期货使用不同的订单类型命名，与现货不同！
 
 | Order Type | 强制必填参数 |
 |------------|-------------|
 | `LIMIT` | `quantity`, `price`, `timeInForce` |
 | `MARKET` | `quantity` |
-| `STOP` / `TAKE_PROFIT` | `quantity`, `stopPrice`, `price` |
-| `STOP_MARKET` / `TAKE_PROFIT_MARKET` | `stopPrice` |
+| `STOP` | `quantity`, `stopPrice` |
+| `STOP_MARKET` | `stopPrice` |
+| `TAKE_PROFIT` | `quantity`, `stopPrice` |
+| `TAKE_PROFIT_MARKET` | `stopPrice` |
 | `TRAILING_STOP_MARKET` | `callbackRate` |
 
 #### 6. Order Type 强制参数（现货）
+
+> 注意：现货使用不同的订单类型命名，与期货不同！
 
 | Order Type | 强制必填参数 |
 |------------|-------------|
 | `LIMIT` | `quantity`, `price`, `timeInForce` |
 | `LIMIT_MAKER` | `quantity`, `price` |
 | `MARKET` | `quantity` 或 `quoteOrderQty` |
-| `STOP_LOSS` / `TAKE_PROFIT` | `quantity`, `stopPrice` 或 `trailingDelta` |
-| `STOP_LOSS_LIMIT` / `TAKE_PROFIT_LIMIT` | `quantity`, `price`, `timeInForce`, `stopPrice` 或 `trailingDelta` |
+| `STOP_LOSS` | `quantity`, `stopPrice` 或 `trailingDelta` |
+| `STOP_LOSS_LIMIT` | `quantity`, `price`, `timeInForce`, `stopPrice` 或 `trailingDelta` |
+| `TAKE_PROFIT` | `quantity`, `stopPrice` 或 `trailingDelta` |
+| `TAKE_PROFIT_LIMIT` | `quantity`, `price`, `timeInForce`, `stopPrice` 或 `trailingDelta` |
 
 #### 7. 期货特有参数
 
@@ -489,7 +508,7 @@ T+80s  : 如果前面所有 ping 都超时，连接自动断开
 **建议实现**（JavaScript 示例）：
 ```javascript
 // 大多数浏览器 WebSocket API 会自动处理 ping/pong
-const ws = new WebSocket('wss://your-domain.com/ws/market');
+const ws = new WebSocket('wss://your-domain.com/ws');
 
 ws.onopen = () => {
     console.log('WebSocket connected');
@@ -1010,6 +1029,7 @@ const subscribeRequest = {
 | `UPDATE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置更新结果 |
 | `DELETE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置删除结果 |
 | `ENABLE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置启用结果 |
+| `DISABLE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置禁用结果 |
 | `LIST_SIGNALS` | `SIGNAL_DATA` | 信号数据列表 |
 | `GET_STRATEGY_METADATA` | `STRATEGY_METADATA_DATA` | 策略元数据列表 |
 | `GET_STRATEGY_METADATA_BY_TYPE` | `STRATEGY_METADATA_DATA` | 指定策略元数据 |
@@ -1041,6 +1061,7 @@ const subscribeRequest = {
 | `UPDATE_ALERT_CONFIG` | 更新告警配置 | 修改告警配置 |
 | `DELETE_ALERT_CONFIG` | 删除告警配置 | 移除告警 |
 | `ENABLE_ALERT_CONFIG` | 启用告警配置 | 激活告警 |
+| `DISABLE_ALERT_CONFIG` | 禁用告警配置 | 停用告警 |
 | `LIST_SIGNALS` | 查询历史信号 | 获取信号计算结果 |
 
 **策略元数据类型**（api-service）:
@@ -2307,6 +2328,19 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "protocolVersion": "2.0",
     "type": "ENABLE_ALERT_CONFIG",
     "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678"
+    }
+}
+```
+
+**禁用请求**:
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "DISABLE_ALERT_CONFIG",
+    "requestId": "550e8400e29b41d4a716446655440001",
     "timestamp": 1704067200000,
     "data": {
         "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678"

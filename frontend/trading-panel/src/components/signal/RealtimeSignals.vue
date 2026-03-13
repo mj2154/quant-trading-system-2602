@@ -21,16 +21,16 @@
           :key="signal.id"
           class="signal-item"
           :class="{
-            'signal-long': signal.signal_value === true,
-            'signal-short': signal.signal_value === false,
-            'signal-none': signal.signal_value === null,
+            'signal-long': signal.signalValue === true,
+            'signal-short': signal.signalValue === false,
+            'signal-none': signal.signalValue === null,
           }"
         >
           <div class="signal-icon">
-            <n-icon v-if="signal.signal_value === true" size="18" color="#18a058">
+            <n-icon v-if="signal.signalValue === true" size="18" color="#18a058">
               <ArrowUpIcon />
             </n-icon>
-            <n-icon v-else-if="signal.signal_value === false" size="18" color="#d03050">
+            <n-icon v-else-if="signal.signalValue === false" size="18" color="#d03050">
               <ArrowDownIcon />
             </n-icon>
             <n-icon v-else size="18" color="#909399">
@@ -39,20 +39,20 @@
           </div>
           <div class="signal-content">
             <div class="signal-header">
-              <span class="strategy-name">{{ signal.strategy_name }}</span>
+              <span class="strategy-name">{{ signal.strategyName }}</span>
               <span class="signal-type">
-                {{ signal.signal_value === true ? '做多' : signal.signal_value === false ? '做空' : '无' }}
+                {{ signal.signalValue === true ? '做多' : signal.signalValue === false ? '做空' : '无' }}
               </span>
             </div>
             <div class="signal-info">
               <span class="symbol">{{ signal.symbol }}</span>
               <span class="interval">{{ formatInterval(signal.interval) }}</span>
             </div>
-            <div v-if="signal.signal_reason" class="signal-reason">
-              {{ truncateText(signal.signal_reason, 60) }}
+            <div v-if="signal.signalReason" class="signal-reason">
+              {{ truncateText(signal.signalReason, 60) }}
             </div>
             <div class="signal-time">
-              {{ formatTime(signal.computed_at) }}
+              {{ formatTime(signal.computedAt) }}
             </div>
           </div>
         </div>

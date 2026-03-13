@@ -63,7 +63,7 @@ class timeout_checker:
         return True
 
 
-def create_test_client(base_url: str = "ws://localhost:8000/ws/market") -> dict:
+def create_test_client(base_url: str = "ws://localhost:8000/ws") -> dict:
     """创建测试客户端配置
 
     Args:

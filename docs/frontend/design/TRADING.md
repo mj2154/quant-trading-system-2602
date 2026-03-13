@@ -84,35 +84,44 @@ interface TradingState {
 ### 5.1 基础类型
 
 ```typescript
-// 市场类型
-type MarketType = 'FUTURES' | 'SPOT';
-
 // 订单方向
 type OrderSide = 'BUY' | 'SELL';
 
-// 订单类型
-type OrderType = 'LIMIT' | 'MARKET' | 'STOP' | 'STOP_LOSS' | 'STOP_LOSS_LIMIT' |
-                 'TAKE_PROFIT' | 'TAKE_PROFIT_LIMIT' | 'LIMIT_MAKER';
+// 订单类型（期货）
+type FuturesOrderType = 'LIMIT' | 'MARKET' | 'STOP' | 'STOP_MARKET' |
+                        'TAKE_PROFIT' | 'TAKE_PROFIT_MARKET' | 'TRAILING_STOP_MARKET';
 
-// 持仓方向
+// 订单类型（现货）
+type SpotOrderType = 'LIMIT' | 'MARKET' | 'LIMIT_MAKER' | 'STOP_LOSS' |
+                     'STOP_LOSS_LIMIT' | 'TAKE_PROFIT' | 'TAKE_PROFIT_LIMIT';
+
+// 持仓方向（仅期货）
 type PositionSide = 'BOTH' | 'LONG' | 'SHORT';
 
 // 时间策略
-type TimeInForce = 'GTC' | 'IOC' | 'FOK' | 'GTD';
+type TimeInForce = 'GTC' | 'IOC' | 'FOK';
 
 // 订单状态
 type OrderStatus = 'NEW' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELED' |
                    'PENDING_CANCEL' | 'REJECTED' | 'EXPIRED';
 ```
 
+> **重要变更（v2.0）**：
+> - 移除 `marketType` 字段，通过交易对 symbol 前缀区分市场类型
+>   - 现货：`BINANCE:BTCUSDT`
+>   - 期货：`BINANCE:BTCUSDT.PERP`
+> - `OrderType` 区分期货和现货，期货不支持 `STOP_LOSS` 等类型
+
 ### 5.2 请求类型
 
 ```typescript
 interface CreateOrderParams {
-  marketType: MarketType;
+  // 注意：通过 symbol 前缀区分市场类型
+  // 现货：BINANCE:BTCUSDT
+  // 期货：BINANCE:BTCUSDT.PERP
   symbol: string;
   side: OrderSide;
-  orderType: OrderType;
+  orderType: FuturesOrderType | SpotOrderType;
   quantity: number;
   price?: number;
   timeInForce?: TimeInForce;
@@ -122,16 +131,19 @@ interface CreateOrderParams {
 }
 ```
 
+> **注意**：期货必填 `quantity`，现货市价单可使用 `quoteOrderQty`（报价数量）
+
 ### 5.3 响应类型
 
 ```typescript
 interface Order {
-  clientOrderId: string;
-  binanceOrderId?: number;
-  marketType: MarketType;
+  // 查询/取消订单时，至少需要提供 orderId 或 origClientOrderId 之一
+  clientOrderId: string;  // 前端生成的客户端订单ID（必填）
+  binanceOrderId?: number;  // 币安订单ID（创建成功后有值）
+  // 市场类型通过 symbol 区分：BINANCE:BTCUSDT（现货），BINANCE:BTCUSDT.PERP（期货）
   symbol: string;
   side: OrderSide;
-  orderType: OrderType;
+  orderType: FuturesOrderType | SpotOrderType;
   status: OrderStatus;
   data: Record<string, unknown>;  // 币安API完整响应
   createdAt: string;
@@ -146,10 +158,9 @@ interface OrderListResponse {
 interface OrderUpdate {
   clientOrderId: string;
   binanceOrderId?: number;
-  marketType: MarketType;
   symbol: string;
   side: OrderSide;
-  orderType: OrderType;
+  orderType: FuturesOrderType | SpotOrderType;
   status: OrderStatus;
   data: Record<string, unknown>;
   updatedAt: string;
@@ -165,12 +176,29 @@ interface OrderUpdate {
 
 ### 6.2 订单类型
 
+#### 期货订单类型
+
 | 类型 | 说明 | 必需参数 |
 |------|------|----------|
 | LIMIT | 限价单 | price, quantity, timeInForce |
 | MARKET | 市价单 | quantity |
 | STOP | 止损单 | stopPrice, quantity |
+| STOP_MARKET | 止损市价单 | stopPrice |
 | TAKE_PROFIT | 止盈单 | stopPrice, quantity |
+| TAKE_PROFIT_MARKET | 止盈市价单 | stopPrice |
+| TRAILING_STOP_MARKET | 追踪止损 | callbackRate |
+
+#### 现货订单类型
+
+| 类型 | 说明 | 必需参数 |
+|------|------|----------|
+| LIMIT | 限价单 | price, quantity, timeInForce |
+| MARKET | 市价单 | quantity 或 quoteOrderQty |
+| LIMIT_MAKER | 限价只做maker | price, quantity |
+| STOP_LOSS | 止损单 | stopPrice, quantity |
+| STOP_LOSS_LIMIT | 止损限价单 | stopPrice, price, quantity, timeInForce |
+| TAKE_PROFIT | 止盈单 | stopPrice, quantity |
+| TAKE_PROFIT_LIMIT | 止盈限价单 | stopPrice, price, quantity, timeInForce |
 
 ### 6.3 持仓方向（仅期货）
 
@@ -191,8 +219,7 @@ interface OrderUpdate {
 
 ### 7.1 筛选条件
 
-- 市场类型
-- 交易对
+- 交易对（通过 symbol 前缀区分市场类型）
 - 订单状态
 - 订单方向
 

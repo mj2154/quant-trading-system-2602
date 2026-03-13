@@ -17,7 +17,7 @@
 | `GET_OPEN_ORDERS` | `ORDER_LIST_DATA` | 查询当前挂单 |
 
 **重要说明**：
-- 后端使用 WebSocket 协议，路径：`ws://localhost:8000/ws/trading`
+- 后端使用 WebSocket 协议，路径：`ws://localhost:8000/ws`
 - 当前**仅支持单笔订单**（SINGLE 模式），不支持 OCO/OTO/OTOCO 组合订单
 - 订单类型支持：LIMIT, MARKET, STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT, TAKE_PROFIT_LIMIT, LIMIT_MAKER
 

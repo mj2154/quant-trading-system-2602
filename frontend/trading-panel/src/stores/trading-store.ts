@@ -6,9 +6,8 @@ import type {
   OrderFilters,
   OrderUpdate,
   OrderListResponse,
-  MarketType,
-  TradingMessage,
-} from '../types/trading-types'
+} from '../types/api'
+import type { TradingMessage } from '../types/trading-types'
 
 // Development mode flag
 const isDev = import.meta.env.DEV
@@ -37,11 +36,11 @@ function getWebSocketUrl(): string {
   if (!host) {
     if (isDev) {
       log('log', 'VITE_WS_HOST not set, using localhost:8000 for development')
-      return `${wsProtocol}//localhost:8000/ws/trading`
+      return `${wsProtocol}//localhost:8000/ws`
     }
     throw new Error('VITE_WS_HOST environment variable is required')
   }
-  return `${wsProtocol}//${host}/ws/trading`
+  return `${wsProtocol}//${host}/ws`
 }
 
 function connectWebSocket(): Promise<WebSocket> {
@@ -140,13 +139,17 @@ export const useTradingStore = defineStore('trading', () => {
   // Computed
   const hasOpenOrders = computed(() => openOrders.value.length > 0)
 
+  // 通过 symbol 前缀区分市场类型：.PERP 结尾为期货
+  const isFuturesSymbol = (symbol: string) => symbol.endsWith('.PERP')
+
   const ordersByMarket = computed(() => {
-    const result: Record<MarketType, Order[]> = {
+    const result: Record<'FUTURES' | 'SPOT', Order[]> = {
       FUTURES: [],
       SPOT: [],
     }
     orders.value.forEach((order) => {
-      result[order.marketType].push(order)
+      const marketType = isFuturesSymbol(order.symbol) ? 'FUTURES' : 'SPOT'
+      result[marketType].push(order)
     })
     return result
   })
@@ -163,8 +166,10 @@ export const useTradingStore = defineStore('trading', () => {
       }
 
       // Validate quantity for MARKET orders (spot can use quoteOrderQty)
+      // 通过 symbol 前缀区分市场类型：.PERP 结尾为期货
+      const isSpot = !params.symbol.endsWith('.PERP')
       if (params.orderType === 'MARKET') {
-        if (params.marketType === 'SPOT') {
+        if (isSpot) {
           if (!params.quantity && !params.quoteOrderQty) {
             throw new Error('Quantity or quoteOrderQty is required for spot market orders')
           }
@@ -181,7 +186,7 @@ export const useTradingStore = defineStore('trading', () => {
 
       // Validate price for limit orders
       if (
-        (params.orderType === 'LIMIT' || params.orderType === 'STOP_LOSS_LIMIT' || params.orderType === 'TAKE_PROFIT_LIMIT') &&
+        (params.orderType === 'LIMIT' || params.orderType === 'STOP' || params.orderType === 'TAKE_PROFIT') &&
         !params.price &&
         !params.priceMatch  // priceMatch can replace price
       ) {
@@ -190,7 +195,7 @@ export const useTradingStore = defineStore('trading', () => {
 
       // Validate stopPrice for stop orders
       if (
-        (params.orderType === 'STOP' || params.orderType === 'STOP_LOSS' || params.orderType === 'STOP_LOSS_LIMIT' || params.orderType === 'TAKE_PROFIT' || params.orderType === 'TAKE_PROFIT_LIMIT') &&
+        (params.orderType === 'STOP' || params.orderType === 'STOP_MARKET' || params.orderType === 'TAKE_PROFIT' || params.orderType === 'TAKE_PROFIT_MARKET') &&
         !params.stopPrice &&
         !params.trailingDelta  // trailingDelta can replace stopPrice
       ) {
@@ -202,9 +207,10 @@ export const useTradingStore = defineStore('trading', () => {
         throw new Error('TrailingDelta is required for trailing stop orders')
       }
 
-      // Validate goodTillDate for GTD orders
-      if (params.timeInForce === 'GTD' && !params.goodTillDate) {
-        throw new Error('goodTillDate is required for GTD orders')
+      // Validate goodTillDate for GTD orders (GTD is only supported in futures)
+      // 期货使用 .PERP 后缀
+      if (params.goodTillDate && !isSpot && !params.timeInForce) {
+        throw new Error('timeInForce is required when goodTillDate is set')
       }
 
       const clientOrderId = generateRequestId()
@@ -212,7 +218,6 @@ export const useTradingStore = defineStore('trading', () => {
       // Create order locally first (optimistic update)
       const newOrder: Order = {
         clientOrderId,
-        marketType: params.marketType,
         symbol: params.symbol,
         side: params.side,
         orderType: params.orderType,
@@ -345,13 +350,13 @@ export const useTradingStore = defineStore('trading', () => {
     }
   }
 
-  async function fetchOpenOrders(marketType?: MarketType): Promise<Order[]> {
+  async function fetchOpenOrders(symbol?: string): Promise<Order[]> {
     isLoading.value = true
     error.value = null
 
     try {
-      // Fetch from server
-      const response = await sendMessage<Order[]>('GET_OPEN_ORDERS', { marketType })
+      // Fetch from server - 通过 symbol 参数筛选，不传则返回所有
+      const response = await sendMessage<Order[]>('GET_OPEN_ORDERS', { symbol })
 
       // 解析响应: 后端返回 { type: "open_orders", orders: [...] }
       // 需要从 response 中提取 orders 数组
@@ -440,10 +445,10 @@ export const useTradingStore = defineStore('trading', () => {
       }
     } else {
       // Add new order (from WebSocket push)
+      // 市场类型通过 symbol 区分：.PERP 结尾为期货
       const newOrder: Order = {
         clientOrderId: update.clientOrderId,
         binanceOrderId: update.binanceOrderId,
-        marketType: update.marketType,
         symbol: update.symbol,
         side: update.side,
         orderType: update.orderType,

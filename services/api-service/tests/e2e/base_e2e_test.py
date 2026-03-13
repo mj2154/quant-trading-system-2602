@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 class WebSocketTestClient:
     """WebSocket测试客户端"""
 
-    def __init__(self, uri: str = "ws://localhost:8000/ws/market"):
+    def __init__(self, uri: str = "ws://localhost:8000/ws"):
         self.uri = uri
         self.websocket: websockets.WebSocketServerProtocol | None = None
         self.connected = False

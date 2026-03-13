@@ -56,17 +56,17 @@
           </n-grid>
 
           <!-- 触发类型 -->
-          <n-form-item label="触发类型" path="trigger_type">
+          <n-form-item label="触发类型" path="triggerType">
             <n-select
-              v-model:value="formData.trigger_type"
+              v-model:value="formData.triggerType"
               :options="triggerTypeOptions"
             />
           </n-form-item>
 
           <!-- 策略类型 -->
-          <n-form-item label="策略类型" path="strategy_type">
+          <n-form-item label="策略类型" path="strategyType">
             <n-select
-              v-model:value="formData.strategy_type"
+              v-model:value="formData.strategyType"
               :options="strategyOptions"
               placeholder="请选择策略"
               @update:value="handleStrategyChange"
@@ -162,8 +162,8 @@
         </template>
 
         <!-- 启用状态 -->
-        <n-form-item label="状态" path="is_enabled">
-          <n-switch v-model:value="formData.is_enabled">
+        <n-form-item label="状态" path="isEnabled">
+          <n-switch v-model:value="formData.isEnabled">
             <template #checked>启用</template>
             <template #unchecked>禁用</template>
           </n-switch>
@@ -248,20 +248,20 @@ const isEdit = computed(() => !!props.alert)
 const formData = reactive({
   name: '',
   description: '',
-  trigger_type: 'each_kline_close',
+  triggerType: 'each_kline_close',
   symbol: 'BINANCE:BTCUSDT',
   interval: '60',
-  is_enabled: true,
-  strategy_type: 'MACDResonanceStrategyV5',
+  isEnabled: true,
+  strategyType: 'MACDResonanceStrategyV5',
   params: { ...DEFAULT_PARAMS },
 } as {
   name: string
   description: string
-  trigger_type: string
+  triggerType: string
   symbol: string
   interval: string
-  is_enabled: boolean
-  strategy_type: string
+  isEnabled: boolean
+  strategyType: string
   params: Record<string, number | boolean>
 })
 
@@ -363,7 +363,7 @@ const strategyOptions = computed(() =>
 
 // 当前策略的参数定义
 const currentParams = computed(() => {
-  const strategy = strategyStore.getStrategyByType(formData.strategy_type)
+  const strategy = strategyStore.getStrategyByType(formData.strategyType)
   return strategy?.params || []
 })
 
@@ -386,11 +386,11 @@ watch(
       // 编辑模式：填充表单数据
       formData.name = newAlert.name
       formData.description = newAlert.description || ''
-      formData.trigger_type = newAlert.trigger_type
+      formData.triggerType = newAlert.triggerType
       formData.symbol = newAlert.symbol
       formData.interval = newAlert.interval
-      formData.is_enabled = newAlert.is_enabled
-      formData.strategy_type = newAlert.strategy_type
+      formData.isEnabled = newAlert.isEnabled
+      formData.strategyType = newAlert.strategyType
       // 加载 params（如果存在）
       if (newAlert.params) {
         formData.params = { ...newAlert.params }
@@ -409,11 +409,11 @@ watch(
 function resetForm() {
   formData.name = ''
   formData.description = ''
-  formData.trigger_type = 'each_kline_close'
+  formData.triggerType = 'each_kline_close'
   formData.symbol = 'BINANCE:BTCUSDT'
   formData.interval = '60'
-  formData.is_enabled = true
-  formData.strategy_type = 'macd'
+  formData.isEnabled = true
+  formData.strategyType = 'macd'
   formData.params = { ...DEFAULT_PARAMS }
 }
 
@@ -432,15 +432,15 @@ async function handleSubmit() {
       id: props.alert?.id || '',
       name: formData.name,
       description: formData.description || null,
-      trigger_type: formData.trigger_type,
+      triggerType: formData.triggerType,
       symbol: formData.symbol,
       interval: formData.interval,
-      is_enabled: formData.is_enabled,
-      strategy_type: formData.strategy_type,
+      isEnabled: formData.isEnabled,
+      strategyType: formData.strategyType,
       params: { ...formData.params },
-      created_at: props.alert?.created_at || '',
-      updated_at: props.alert?.updated_at || '',
-      created_by: props.alert?.created_by || null,
+      createdAt: props.alert?.createdAt || '',
+      updatedAt: props.alert?.updatedAt || '',
+      createdBy: props.alert?.createdBy || null,
     }
 
     emit('submit', submitData)

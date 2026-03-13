@@ -8,7 +8,7 @@ import json
 import time
 import websockets
 
-WS_URL = "ws://localhost:8000/ws/market"
+WS_URL = "ws://localhost:8000/ws"
 
 async def test_klines():
     print(f"[{time.strftime('%H:%M:%S')}] 连接 {WS_URL}...")

@@ -30,7 +30,7 @@ function connectWebSocket() {
       return
     }
   }
-  const url = `${wsProtocol}//${host || 'localhost:8000'}/ws/trading`
+  const url = `${wsProtocol}//${host || 'localhost:8000'}/ws`
 
   try {
     ws = new WebSocket(url)

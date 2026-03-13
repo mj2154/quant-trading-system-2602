@@ -8,7 +8,7 @@ import json
 import time
 import websockets
 
-WS_URL = "ws://localhost:8000/ws/market"
+WS_URL = "ws://localhost:8000/ws"
 
 async def test_klines():
     start = time.time()

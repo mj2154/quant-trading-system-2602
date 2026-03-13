@@ -1541,17 +1541,31 @@ binance-service 需要监听以下数据库通知频道：
 
 #### 8.10.4.1 订单类型 (type)
 
-| 类型 | 说明 | 期货 | 现货 |
-|------|------|------|------|
-| LIMIT | 限价单 | 支持 | 支持 |
-| MARKET | 市价单 | 支持 | 支持 |
-| STOP | 止损单 | 支持 | 支持 |
-| STOP_LOSS | 止损单 | 支持 | 支持 |
-| STOP_LOSS_LIMIT | 止损限价单 | 支持 | 支持 |
-| TAKE_PROFIT | 止盈单 | 支持 | 支持 |
-| TAKE_PROFIT_LIMIT | 止盈限价单 | 支持 | 支持 |
-| LIMIT_MAKER | 被动限价单 | 支持 | 支持 |
-| TRAILING_STOP_MARKET | 追踪止损 | 支持 | 不支持 |
+> **重要**：期货和现货使用不同的订单类型命名，请勿混淆！
+
+**U本位合约/期货订单类型**
+
+| 类型 | 说明 | 必填参数 |
+|------|------|----------|
+| LIMIT | 限价单 | quantity, price, timeInForce |
+| MARKET | 市价单 | quantity |
+| STOP | 止损单 | quantity, stopPrice |
+| STOP_MARKET | 止损市价单 | stopPrice |
+| TAKE_PROFIT | 止盈单 | quantity, stopPrice |
+| TAKE_PROFIT_MARKET | 止盈市价单 | stopPrice |
+| TRAILING_STOP_MARKET | 追踪止损 | callbackRate |
+
+**现货订单类型**
+
+| 类型 | 说明 | 必填参数 |
+|------|------|----------|
+| LIMIT | 限价单 | quantity, price, timeInForce |
+| MARKET | 市价单 | quantity 或 quoteOrderQty |
+| LIMIT_MAKER | 被动限价单 | quantity, price |
+| STOP_LOSS | 止损单 | quantity, stopPrice 或 trailingDelta |
+| STOP_LOSS_LIMIT | 止损限价单 | quantity, price, timeInForce, stopPrice 或 trailingDelta |
+| TAKE_PROFIT | 止盈单 | quantity, stopPrice 或 trailingDelta |
+| TAKE_PROFIT_LIMIT | 止盈限价单 | quantity, price, timeInForce, stopPrice 或 trailingDelta |
 
 #### 8.10.4.2 时间策略 (timeInForce)
 
@@ -1560,7 +1574,9 @@ binance-service 需要监听以下数据库通知频道：
 | GTC | Good Till Cancel - 成交为止 | LIMIT, STOP_LOSS_LIMIT, TAKE_PROFIT_LIMIT |
 | IOC | Immediate or Cancel - 立即成交，否则取消 | LIMIT, MARKET |
 | FOK | Fill or Kill - 全部成交，否则取消 | LIMIT, MARKET |
+| GTX | Good Till Crossing - Post Only 仅做Maker | 期货专用 |
 | GTD | Good Till Date - 指定日期前有效 | 期货专用 |
+| RPI | Retail Price Improvement | 期货专用 |
 
 #### 8.10.4.3 持仓方向 (positionSide)
 
@@ -1729,15 +1745,28 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 class OrderType(str, Enum):
-    """订单类型"""
+    """订单类型
+
+    注意：现货和期货使用不同的订单类型命名！
+    - 现货: STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT_LIMIT
+    - 期货: STOP, STOP_MARKET, TAKE_PROFIT_MARKET
+    """
+    # 通用类型
     LIMIT = "LIMIT"
     MARKET = "MARKET"
+    LIMIT_MAKER = "LIMIT_MAKER"
+
+    # 止损止盈类型（期货命名）
+    STOP = "STOP"
+    STOP_MARKET = "STOP_MARKET"
+    TAKE_PROFIT = "TAKE_PROFIT"
+    TAKE_PROFIT_MARKET = "TAKE_PROFIT_MARKET"
+    TRAILING_STOP_MARKET = "TRAILING_STOP_MARKET"
+
+    # 止损止盈类型（现货命名）
     STOP_LOSS = "STOP_LOSS"
     STOP_LOSS_LIMIT = "STOP_LOSS_LIMIT"
-    TAKE_PROFIT = "TAKE_PROFIT"
     TAKE_PROFIT_LIMIT = "TAKE_PROFIT_LIMIT"
-    LIMIT_MAKER = "LIMIT_MAKER"
-    TRAILING_STOP_MARKET = "TRAILING_STOP_MARKET"
 
 class OrderSide(str, Enum):
     """订单方向"""

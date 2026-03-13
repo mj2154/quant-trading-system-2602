@@ -4,7 +4,7 @@ import json
 import time
 
 async def test():
-    uri = "ws://localhost:8000/ws/market"
+    uri = "ws://localhost:8000/ws"
     async with websockets.connect(uri, ping_interval=20, ping_timeout=60) as ws:
         end_time = int(time.time() * 1000)
         start_time = end_time - (24 * 60 * 60 * 1000)
