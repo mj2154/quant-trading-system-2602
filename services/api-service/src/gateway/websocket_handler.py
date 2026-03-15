@@ -9,6 +9,7 @@ import json
 import logging
 
 from fastapi import WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
 from .client_manager import ClientManager
 from .protocol import (
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _safe_send(
-    client_manager: ClientManager, client_id: str, message: dict
+    client_manager: ClientManager, client_id: str, message: BaseModel
 ) -> bool:
     """安全发送消息，捕获连接断开等异常
 

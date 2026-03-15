@@ -26,7 +26,7 @@
 ```sql
 CREATE TABLE IF NOT EXISTS alert_configs (
     -- 告警标识
-    id VARCHAR(36) PRIMARY KEY,  -- 前端生成的 UUIDv4（如 "0189a1b2-c3d4-5e6f-7890-abcd12345678"）
+    id VARCHAR(50) PRIMARY KEY,  -- 前端生成的 UUIDv4 hex 格式（32字符，如 "550e8400e29b41d4a716446655440000"）
 
     -- 告警信息
     name VARCHAR(100) NOT NULL,              -- 告警名称（用户友好，可重复）
@@ -84,14 +84,14 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
 ```
 
 **设计说明**：
-- **唯一标识**：所有字段都可重复，唯一标识为前端生成的 UUIDv4 `id`
-- **ID 生成**：前端使用 `crypto.randomUUID()` 生成（如 `0189a1b2-c3d4-5e6f-7890-abcd12345678`）
-- **订阅键格式**：`SIGNAL:{id}`（如 `SIGNAL:0189a1b2-c3d4-5e6f-7890-abcd12345678`）
+- **唯一标识**：所有字段都可重复，唯一标识为前端生成的 UUIDv4 hex 格式 `id`
+- **ID 生成**：前端使用 `crypto.randomUUID()` 生成 hex 格式（如 `550e8400e29b41d4a716446655440000`，32字符，无连字符）
+- **订阅键格式**：`SIGNAL:{id}`（如 `SIGNAL:550e8400e29b41d4a716446655440000`）
 
 **字段说明**：
 | 字段 | 说明 |
 |------|------|
-| `id` | 告警唯一标识，前端生成 UUIDv4 |
+| `id` | 告警唯一标识，前端生成 UUIDv4 hex 格式（32字符） |
 | `name` | 告警名称（可重复） |
 | `description` | 告警描述 |
 | `strategy_type` | 策略类型 |
@@ -239,16 +239,14 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
 | 创建告警 | `create_alert_config` | 创建新的告警规则 |
 | 获取告警 | `get_alert_config` | 获取单个告警详情 |
 | 列表告警 | `list_alert_configs` | 列出告警（支持分页和过滤） |
-| 更新告警 | `update_alert_config` | 更新告警配置 |
+| 更新告警 | `update_alert_config` | 更新告警配置（包含启用/禁用） |
 | 删除告警 | `delete_alert_config` | 删除告警 |
-| 启用告警 | `enable_alert_config` | 启用告警 |
-| 禁用告警 | `disable_alert_config` | 禁用告警 |
 
 #### 9.5.1 创建告警信号
 
 **前端生成 ID**：
 - 使用 JavaScript `crypto.randomUUID()` 生成 UUIDv4
-- 示例：`0189a1b2-c3d4-5e6f-7890-abcd12345678`
+- 示例：`550e8400e29b41d4a716446655440000`
 
 **请求格式**：
 ```json
@@ -259,7 +257,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
     "timestamp": 1704067200000,
     "data": {
         "type": "create_alert_config",
-        "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
+        "id": "550e8400e29b41d4a716446655440000",
         "name": "macd_resonance_btcusdt",
         "description": "BTCUSDT MACD共振告警",
         "strategy_type": "macd_resonance_v5",
@@ -303,7 +301,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
     "timestamp": 1704067201000,
     "data": {
         "type": "create_alert_config",
-        "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
+        "id": "550e8400e29b41d4a716446655440000",
         "name": "macd_resonance_btcusdt",
         "description": "BTCUSDT MACD共振告警",
         "strategy_type": "macd_resonance_v5",
@@ -334,7 +332,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
     "timestamp": 1704067200000,
     "data": {
         "subscriptions": [
-            "SIGNAL:0189a1b2-c3d4-5e6f-7890-abcd12345678"
+            "SIGNAL:550e8400e29b41d4a716446655440000"
         ]
     }
 }

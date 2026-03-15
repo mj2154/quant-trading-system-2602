@@ -13,10 +13,12 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from ..base import CamelCaseModel
 
 
-class AccountInfoCreate(BaseModel):
+class AccountInfoCreate(CamelCaseModel):
     """账户信息创建请求模型
 
     对应数据库 account_info 表的 id, account_type, data 字段。
@@ -28,13 +30,13 @@ class AccountInfoCreate(BaseModel):
     )
 
 
-class AccountInfoUpdate(BaseModel):
+class AccountInfoUpdate(CamelCaseModel):
     """账户信息更新请求模型"""
 
     data: dict[str, Any] | None = Field(None, description="账户原始数据")
 
 
-class AccountInfoResponse(BaseModel):
+class AccountInfoResponse(CamelCaseModel):
     """账户信息响应模型
 
     对应数据库 account_info 表的所有字段：
@@ -56,7 +58,7 @@ class AccountInfoResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AccountInfoListResponse(BaseModel):
+class AccountInfoListResponse(CamelCaseModel):
     """账户信息列表响应模型"""
 
     items: list[AccountInfoResponse] = Field(..., description="账户列表")
@@ -66,7 +68,7 @@ class AccountInfoListResponse(BaseModel):
 
 
 # 现货账户信息（从 data 字段解析的视图模型，非数据库映射）
-class SpotAccountInfo(BaseModel):
+class SpotAccountInfo(CamelCaseModel):
     """现货账户详细信息"""
 
     account_type: str = "SPOT"
@@ -80,7 +82,7 @@ class SpotAccountInfo(BaseModel):
 
 
 # 期货账户信息（从 data 字段解析的视图模型，非数据库映射）
-class FuturesAccountInfo(BaseModel):
+class FuturesAccountInfo(CamelCaseModel):
     """期货账户详细信息"""
 
     account_type: str = "FUTURES"
@@ -100,7 +102,7 @@ class FuturesAccountInfo(BaseModel):
 
 
 # 账户余额模型
-class AccountBalance(BaseModel):
+class AccountBalance(CamelCaseModel):
     """账户余额模型"""
 
     asset: str = Field(..., description="资产名称")
@@ -117,7 +119,7 @@ class AccountBalance(BaseModel):
 
 
 # 持仓信息模型
-class PositionInfo(BaseModel):
+class PositionInfo(CamelCaseModel):
     """持仓信息模型"""
 
     symbol: str = Field(..., description="交易对")

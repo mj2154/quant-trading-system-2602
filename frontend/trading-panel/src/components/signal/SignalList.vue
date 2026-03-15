@@ -55,7 +55,7 @@
       >
         <template #header>
           <div class="card-header">
-            <span class="strategy-name">{{ signal.strategyName }}</span>
+            <span class="strategy-name">{{ signal.name }}</span>
             <n-tag
               v-if="signal.signalValue !== null"
               :type="signal.signalValue ? 'success' : 'error'"
@@ -104,7 +104,7 @@
     <n-modal v-model:show="showDetail" preset="card" title="信号详情" style="width: 600px">
       <n-descriptions v-if="selectedSignal" :column="2" label-placement="top" bordered>
         <n-descriptions-item label="告警ID">{{ selectedSignal.alertId }}</n-descriptions-item>
-        <n-descriptions-item label="策略名称">{{ selectedSignal.strategyName }}</n-descriptions-item>
+        <n-descriptions-item label="告警名称">{{ selectedSignal.name }}</n-descriptions-item>
         <n-descriptions-item label="交易对">{{ selectedSignal.symbol }}</n-descriptions-item>
         <n-descriptions-item label="周期">{{ formatInterval(selectedSignal.interval) }}</n-descriptions-item>
         <n-descriptions-item label="信号值">
@@ -227,7 +227,7 @@ function handleFilterChange() {
   store.setAlertSignalFilter({
     symbol: filterSymbol.value || undefined,
     interval: filterInterval.value || undefined,
-    signal_value: filterSignal.value !== null ? filterSignal.value === 1 : undefined,
+    signalValue: filterSignal.value !== null ? filterSignal.value === 1 : undefined,
     page: 1,
   })
   store.fetchAlertSignals()

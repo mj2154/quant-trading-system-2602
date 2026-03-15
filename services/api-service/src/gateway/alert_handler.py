@@ -18,13 +18,20 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from ..db.alert_signal_repository import AlertSignalRepository
+from ..db.alert_signal_repository import AlertConfigRepository
 from ..db.strategy_signals_repository import StrategySignalsRepository
 from ..models.db.alert_config_models import (
-    AlertSignalCreate,
-    AlertSignalUpdate,
+    AlertConfigCreate,
+    AlertConfigData,
+    AlertConfigListData,
+    AlertConfigUpdate,
+    DeleteAlertData,
+    ListAlertConfigsRequest,
+    ListSignalsRequest,
+    SignalData,
+    SignalListData,
 )
-from ..models.db.signal_models import SignalListResponse, SignalRecordResponse
+from ..models.protocol.ws_message import MessageSuccess
 from .protocol import format_error_response, format_success_response
 
 logger = logging.getLogger(__name__)
@@ -35,7 +42,7 @@ class AlertHandler:
 
     def __init__(
         self,
-        alert_repo: AlertSignalRepository,
+        alert_repo: AlertConfigRepository,
         signals_repo: StrategySignalsRepository | None = None,
     ) -> None:
         """Initialize alert handler.
@@ -51,7 +58,7 @@ class AlertHandler:
         self,
         data: dict[str, Any],
         request_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """Handle create_alert_config request.
 
         Args:
@@ -66,7 +73,7 @@ class AlertHandler:
             logger.info("[DEBUG] handle_create_alert_config received data: %s", data)
 
             # Parse and validate request data
-            create_data = AlertSignalCreate.model_validate(data)
+            create_data = AlertConfigCreate.model_validate(data)
 
             # Handle threshold field: if sent by frontend, merge it into params
             # According to design docs, threshold should be stored in params JSON field
@@ -94,24 +101,27 @@ class AlertHandler:
                 create_data.name,
             )
 
-            # Return full alert config as per API spec
+            # 使用 AlertConfigData 数据载荷模型构建响应数据
+            alert_data = AlertConfigData(
+                id=str(alert_result.get("id")),
+                name=alert_result.get("name", ""),
+                description=alert_result.get("description"),
+                strategy_type=alert_result.get("strategy_type", ""),
+                symbol=alert_result.get("symbol", ""),
+                interval=alert_result.get("interval", ""),
+                trigger_type=alert_result.get("trigger_type", ""),
+                params=alert_result.get("params", {}),
+                is_enabled=alert_result.get("is_enabled", False),
+                created_at=alert_result.get("created_at"),
+                updated_at=alert_result.get("updated_at"),
+                created_by=alert_result.get("created_by"),
+            )
+
+            # Return full alert config using data model
             return format_success_response(
                 request_id=request_id,
                 response_type="ALERT_CONFIG_DATA",
-                data={
-                    "type": "create_alert_config",
-                    "id": str(alert_result.get("id")),
-                    "name": alert_result.get("name"),
-                    "description": alert_result.get("description"),
-                    "strategy_type": alert_result.get("strategy_type"),
-                    "symbol": alert_result.get("symbol"),
-                    "interval": alert_result.get("interval"),
-                    "trigger_type": alert_result.get("trigger_type"),
-                    "params": alert_result.get("params"),
-                    "is_enabled": alert_result.get("is_enabled"),
-                    "created_at": alert_result.get("created_at"),
-                    "created_by": alert_result.get("created_by"),
-                },
+                data=alert_data,
             )
 
         except Exception as e:
@@ -126,7 +136,7 @@ class AlertHandler:
         self,
         data: dict[str, Any],
         request_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """Handle list_alert_configs request.
 
         Args:
@@ -137,16 +147,20 @@ class AlertHandler:
             Response message dictionary.
         """
         try:
-            # Parse request data
-            limit = data.get("limit", 100)
-            offset = data.get("offset", 0)
-            is_enabled = data.get("is_enabled")
-            symbol = data.get("symbol")
-            strategy_type = data.get("strategy_type")
+            # 使用 Pydantic 模型自动转换 camelCase -> snake_case
+            # ListAlertConfigsRequest 使用 SnakeCaseModel 基类
+            list_request = ListAlertConfigsRequest.model_validate(data)
 
-            # Convert is_enabled from string if needed
-            if is_enabled is not None and isinstance(is_enabled, str):
-                is_enabled = is_enabled.lower() in ("true", "1", "yes")
+            # 分页参数
+            page = list_request.page
+            page_size = list_request.page_size
+            limit = page_size
+            offset = (page - 1) * page_size
+
+            # 筛选参数（已自动转换为 snake_case）
+            is_enabled = list_request.is_enabled
+            symbol = list_request.symbol
+            strategy_type = list_request.strategy_type
 
             # Query alert signals
             alerts, total = await self._alert_repo.find_all(
@@ -161,16 +175,37 @@ class AlertHandler:
             page = offset // limit + 1 if limit > 0 else 1
             page_size = limit
 
+            # 使用 AlertConfigData 数据载荷模型构建列表项
+            items = []
+            for alert in alerts:
+                alert_data = AlertConfigData(
+                    id=alert.get("id", ""),
+                    name=alert.get("name", ""),
+                    description=alert.get("description"),
+                    strategy_type=alert.get("strategy_type", ""),
+                    symbol=alert.get("symbol", ""),
+                    interval=alert.get("interval", ""),
+                    trigger_type=alert.get("trigger_type", ""),
+                    params=alert.get("params", {}),
+                    is_enabled=alert.get("is_enabled", False),
+                    created_at=alert.get("created_at"),
+                    updated_at=alert.get("updated_at"),
+                    created_by=alert.get("created_by"),
+                )
+                items.append(alert_data)
+
+            # 使用 AlertConfigListData 数据载荷模型构建响应数据
+            list_data = AlertConfigListData(
+                items=items,
+                total=total,
+                page=page,
+                page_size=page_size,
+            )
+
             return format_success_response(
                 request_id=request_id,
                 response_type="ALERT_CONFIG_DATA",
-                data={
-                    "type": "list_alert_configs",
-                    "items": alerts,
-                    "total": total,
-                    "page": page,
-                    "page_size": page_size,
-                },
+                data=list_data,
             )
 
         except Exception as e:
@@ -185,7 +220,7 @@ class AlertHandler:
         self,
         data: dict[str, Any],
         request_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """Handle update_alert_config request.
 
         Args:
@@ -219,7 +254,7 @@ class AlertHandler:
                 )
 
             # Parse update data
-            update_data = AlertSignalUpdate.model_validate(data)
+            update_data = AlertConfigUpdate.model_validate(data)
 
             # Handle threshold field: if sent by frontend, merge it into params
             # According to design docs, threshold should be stored in params JSON field
@@ -252,24 +287,26 @@ class AlertHandler:
 
             logger.info("Alert signal updated: id=%s", alert_id)
 
+            # 使用 AlertConfigData 数据载荷模型构建响应数据
+            alert_data = AlertConfigData(
+                id=str(updated_alert.get("id")),
+                name=updated_alert.get("name", ""),
+                description=updated_alert.get("description"),
+                strategy_type=updated_alert.get("strategy_type", ""),
+                symbol=updated_alert.get("symbol", ""),
+                interval=updated_alert.get("interval", ""),
+                trigger_type=updated_alert.get("trigger_type", ""),
+                params=updated_alert.get("params", {}),
+                is_enabled=updated_alert.get("is_enabled", False),
+                created_at=updated_alert.get("created_at"),
+                updated_at=updated_alert.get("updated_at"),
+                created_by=updated_alert.get("created_by"),
+            )
+
             return format_success_response(
                 request_id=request_id,
                 response_type="ALERT_CONFIG_DATA",
-                data={
-                    "type": "update_alert_config",
-                    "id": str(updated_alert.get("id")),
-                    "name": updated_alert.get("name"),
-                    "description": updated_alert.get("description"),
-                    "strategy_type": updated_alert.get("strategy_type"),
-                    "symbol": updated_alert.get("symbol"),
-                    "interval": updated_alert.get("interval"),
-                    "trigger_type": updated_alert.get("trigger_type"),
-                    "params": updated_alert.get("params"),
-                    "is_enabled": updated_alert.get("is_enabled"),
-                    "created_at": updated_alert.get("created_at"),
-                    "updated_at": updated_alert.get("updated_at"),
-                    "created_by": updated_alert.get("created_by"),
-                },
+                data=alert_data,
             )
 
         except Exception as e:
@@ -284,7 +321,7 @@ class AlertHandler:
         self,
         data: dict[str, Any],
         request_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """Handle delete_alert_config request.
 
         Args:
@@ -329,14 +366,13 @@ class AlertHandler:
 
             logger.info("Alert signal deleted: id=%s", alert_id_str)
 
+            # 使用 DeleteAlertData 数据载荷模型构建响应数据
+            delete_data = DeleteAlertData(id=alert_id_str)
+
             return format_success_response(
                 request_id=request_id,
                 response_type="ALERT_CONFIG_DATA",
-                data={
-                    "type": "delete_alert_config",
-                    "id": alert_id_str,
-                    "message": "Alert signal deleted successfully",
-                },
+                data=delete_data,
             )
 
         except Exception as e:
@@ -347,97 +383,14 @@ class AlertHandler:
                 error_message=f"Failed to delete alert signal: {str(e)}",
             )
 
-    async def handle_enable_alert_config(
-        self,
-        data: dict[str, Any],
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Handle enable_alert_config request.
-
-        Args:
-            data: Request data with alert ID and enabled status.
-            request_id: Request ID for response correlation.
-
-        Returns:
-            Response message dictionary.
-        """
-        try:
-            # DEBUG: Log received data
-            logger.info("[DEBUG] handle_enable_alert_config received data: %s", data)
-
-            # Parse alert ID
-            alert_id = data.get("id")
-            if not alert_id:
-                return format_error_response(
-                    request_id=request_id,
-                    error_code="INVALID_PARAMETERS",
-                    error_message="Missing required field: id",
-                )
-
-            # Validate UUID format
-            try:
-                UUID(alert_id)
-            except (ValueError, AttributeError):
-                return format_error_response(
-                    request_id=request_id,
-                    error_code="INVALID_PARAMETERS",
-                    error_message="Invalid alert ID format",
-                )
-
-            # Parse enabled status
-            is_enabled = data.get("is_enabled")
-            if is_enabled is None:
-                return format_error_response(
-                    request_id=request_id,
-                    error_code="INVALID_PARAMETERS",
-                    error_message="Missing required field: is_enabled",
-                )
-
-            # Convert from string if needed
-            if isinstance(is_enabled, str):
-                is_enabled = is_enabled.lower() in ("true", "1", "yes")
-
-            # Enable/disable alert signal (pass string, not UUID, since DB field is VARCHAR)
-            success = (
-                await self._alert_repo.enable(alert_id)
-                if is_enabled
-                else await self._alert_repo.disable(alert_id)
-            )
-
-            if not success:
-                return format_error_response(
-                    request_id=request_id,
-                    error_code="ALERT_NOT_FOUND",
-                    error_message="Alert signal not found",
-                )
-
-            action = "enabled" if is_enabled else "disabled"
-            logger.info("Alert signal %s: id=%s", action, alert_id)
-
-            return format_success_response(
-                request_id=request_id,
-                response_type="ALERT_CONFIG_DATA",
-                data={
-                    "type": "enable_alert_config",
-                    "id": str(alert_id),
-                    "is_enabled": is_enabled,
-                    "message": f"Alert signal {action} successfully",
-                },
-            )
-
-        except Exception as e:
-            logger.exception("Failed to enable/disable alert signal: %s", e)
-            return format_error_response(
-                request_id=request_id,
-                error_code="ENABLE_ALERT_FAILED",
-                error_message=f"Failed to enable/disable alert signal: {str(e)}",
-            )
+    # 注意：启用/禁用告警已合并到 handle_update_alert_config 中
+    # 使用 UPDATE_ALERT_CONFIG 并在 data 中包含 isEnabled 字段来启用/禁用告警
 
     async def handle_list_signals(
         self,
         data: dict[str, Any],
         request_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """Handle list_signals request.
 
         Queries historical signals from strategy_signals table.
@@ -458,21 +411,23 @@ class AlertHandler:
                     error_message="Strategy signals repository not initialized",
                 )
 
-            # Parse parameters
-            symbol = data.get("symbol")
-            strategy_type = data.get("strategy_type")
-            interval = data.get("interval")
-            signal_value = data.get("signal_value")
-            start_time = data.get("start_time")
-            end_time = data.get("end_time")
-            page = data.get("page", 1)
-            page_size = data.get("page_size", 20)
+            # 使用 Pydantic 模型自动转换 camelCase -> snake_case
+            # ListSignalsRequest 使用 SnakeCaseModel 基类
+            list_request = ListSignalsRequest.model_validate(data)
 
-            # Convert signal_value from string if needed
-            if signal_value is not None and isinstance(signal_value, str):
-                signal_value = signal_value.lower() in ("true", "1", "yes")
+            # 分页参数
+            page = list_request.page
+            page_size = list_request.page_size
+            # 筛选参数（已自动转换并类型校验）
+            symbol = list_request.symbol
+            strategy_type = list_request.strategy_type
+            interval = list_request.interval
+            signal_value = list_request.signal_value
+            start_time = list_request.start_time
+            end_time = list_request.end_time
 
-            # Convert start_time/end_time from milliseconds to datetime if needed
+            # 如果 start_time/end_time 是毫秒时间戳，转换为 datetime
+            # Pydantic 会尝试解析，但前端可能直接传数字
             if start_time and isinstance(start_time, int):
                 start_time = datetime.fromtimestamp(start_time / 1000)
             if end_time and isinstance(end_time, int):
@@ -489,14 +444,13 @@ class AlertHandler:
                 end_time=end_time,
             )
 
-            # 使用 Pydantic 模型自动转换字段名为 camelCase
-            # 响应模型使用 CamelCaseModel 基类，序列化时自动转为 camelCase
+            # 使用 SignalData 数据载荷模型构建列表项
             items = []
             for signal in signals:
-                signal_record = SignalRecordResponse(
+                signal_data = SignalData(
                     id=signal.id,
                     alert_id=signal.alert_id or "",
-                    config_id=None,
+                    name=signal.name or "",
                     strategy_type=signal.strategy_type,
                     symbol=signal.symbol,
                     interval=signal.interval,
@@ -506,13 +460,13 @@ class AlertHandler:
                     computed_at=signal.computed_at,
                     source_subscription_key=signal.source_subscription_key,
                     metadata=signal.metadata,
+                    created_by=None,  # SignalRecord 没有 created_by 字段
                 )
-                # model_dump() 自动将字段转换为 camelCase
-                items.append(signal_record.model_dump())
+                items.append(signal_data)
 
-            # 构建响应模型
-            SignalListResponse(
-                items=items,  # items 已是 camelCase 格式
+            # 使用 SignalListData 数据载荷模型构建响应数据
+            list_data = SignalListData(
+                items=items,
                 total=total,
                 page=page,
                 page_size=page_size,
@@ -521,13 +475,7 @@ class AlertHandler:
             return format_success_response(
                 request_id=request_id,
                 response_type="SIGNAL_DATA",
-                data={
-                    "type": "list_signals",
-                    "items": items,
-                    "total": total,
-                    "page": page,
-                    "page_size": page_size,
-                },
+                data=list_data,
             )
 
         except Exception as e:

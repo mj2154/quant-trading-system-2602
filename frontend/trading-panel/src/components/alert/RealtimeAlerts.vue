@@ -8,7 +8,7 @@
           :key="signal.alertId"
           class="signal-item"
           role="listitem"
-          :aria-label="`${signal.strategyName} - ${signal.signalValue === true ? '建仓信号' : signal.signalValue === false ? '清仓信号' : '观望'}`"
+          :aria-label="`${signal.name} - ${signal.signalValue === true ? '建仓信号' : signal.signalValue === false ? '清仓信号' : '观望'}`"
           :class="{
             'signal-long': signal.signalValue === true,
             'signal-short': signal.signalValue === false,
@@ -40,7 +40,7 @@
 
           <div class="signal-content">
             <div class="signal-header">
-              <span class="strategy-name">{{ signal.strategyName }}</span>
+              <span class="strategy-name">{{ signal.name }}</span>
               <span class="signal-type" :class="{
                 'type-long': signal.signalValue === true,
                 'type-short': signal.signalValue === false,

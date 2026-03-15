@@ -54,9 +54,6 @@ export class WSClient {
   // 重连定时器
   private reconnectTimeoutId: number | null = null
 
-  // 心跳定时器
-  private heartbeatIntervalId: number | null = null
-
   constructor(options: WSClientOptions) {
     this.options = {
       ...DEFAULT_WS_CLIENT_OPTIONS,
@@ -109,7 +106,6 @@ export class WSClient {
           this.connected = true
           this.connecting = false
           this.options.onConnect()
-          this.startHeartbeat()
           resolve()
         }
 
@@ -139,7 +135,6 @@ export class WSClient {
    * 断开连接
    */
   disconnect(): void {
-    this.stopHeartbeat()
     this.stopReconnect()
 
     if (this.ws) {
@@ -171,8 +166,6 @@ export class WSClient {
 
     this.connected = false
     this.ws = null
-
-    this.stopHeartbeat()
 
     // 清除所有待处理的请求
     for (const [, pending] of this.pendingRequests) {
@@ -217,34 +210,6 @@ export class WSClient {
     if (this.reconnectTimeoutId !== null) {
       clearTimeout(this.reconnectTimeoutId)
       this.reconnectTimeoutId = null
-    }
-  }
-
-  // ==================== 心跳 ====================
-
-  /**
-   * 启动心跳
-   */
-  private startHeartbeat(): void {
-    if (this.heartbeatIntervalId !== null) {
-      return
-    }
-
-    this.heartbeatIntervalId = window.setInterval(() => {
-      // 发送ping保持连接活跃
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        // WebSocket原生支持心跳，不需要额外发送消息
-      }
-    }, this.options.heartbeatInterval)
-  }
-
-  /**
-   * 停止心跳
-   */
-  private stopHeartbeat(): void {
-    if (this.heartbeatIntervalId !== null) {
-      clearInterval(this.heartbeatIntervalId)
-      this.heartbeatIntervalId = null
     }
   }
 
@@ -392,27 +357,71 @@ export class WSClient {
   /**
    * 订阅实时数据
    *
-   * @param subscriptionKey 订阅键 (如 SIGNAL:alert_id)
-   * @param handler 数据回调
+   * @param subscriptionKey 订阅键或订阅键数组 (如 'SIGNAL:alert_id' 或 ['key1', 'key2'])
+   * @param handler 数据回调或 key -> handler 映射
    * @returns 取消订阅函数
    */
-  subscribe(subscriptionKey: string, handler: (data: unknown, subscriptionKey?: string) => void): () => void {
+  subscribe(
+    subscriptionKey: string | string[],
+    handler: ((data: unknown, subscriptionKey?: string) => void) | Map<string, (data: unknown) => void>
+  ): () => void {
+    // 处理数组参数 - 批量订阅
+    if (Array.isArray(subscriptionKey)) {
+      return this.subscribeBatch(subscriptionKey, handler as Map<string, (data: unknown) => void>)
+    }
+
+    // 单个订阅键处理
+    const key = subscriptionKey
+    const singleHandler = handler as (data: unknown, subscriptionKey?: string) => void
+
     // 如果已经订阅，先取消
-    if (this.subscriptions.has(subscriptionKey)) {
-      this.unsubscribe(subscriptionKey)
+    if (this.subscriptions.has(key)) {
+      this.unsubscribe(key)
     }
 
     // 存储订阅者
-    this.subscriptions.set(subscriptionKey, { key: subscriptionKey, handler })
+    this.subscriptions.set(key, { key, handler: singleHandler })
 
     // 发送订阅请求
     if (this.connected && this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.sendSubscribeMessage('SUBSCRIBE', [subscriptionKey])
+      this.sendSubscribeMessage('SUBSCRIBE', [key])
     }
 
     // 返回取消订阅函数
     return () => {
-      this.unsubscribe(subscriptionKey)
+      this.unsubscribe(key)
+    }
+  }
+
+  /**
+   * 批量订阅实时数据
+   *
+   * @param subscriptionKeys 订阅键数组
+   * @param handlersMap key -> handler 映射
+   * @returns 取消订阅函数
+   */
+  private subscribeBatch(subscriptionKeys: string[], handlersMap: Map<string, (data: unknown) => void>): () => void {
+    // 存储所有订阅者
+    for (const key of subscriptionKeys) {
+      if (this.subscriptions.has(key)) {
+        this.unsubscribe(key)
+      }
+      const handler = handlersMap.get(key)
+      if (handler) {
+        this.subscriptions.set(key, { key, handler: (data, sk) => handler(data) })
+      }
+    }
+
+    // 发送订阅请求（一次发送所有 keys）
+    if (this.connected && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.sendSubscribeMessage('SUBSCRIBE', subscriptionKeys)
+    }
+
+    // 返回批量取消订阅函数
+    return () => {
+      for (const key of subscriptionKeys) {
+        this.unsubscribe(key)
+      }
     }
   }
 

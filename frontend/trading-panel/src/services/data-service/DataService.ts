@@ -19,7 +19,10 @@ import {
   type OrderResponse,
   type OrderListResponseData,
   type AlertConfigResponse,
+  type AlertConfigOperationResponse,
   type SignalResponse,
+  type StrategyMetadataListResponse,
+  type StrategyMetadataResponse,
 } from '../../libs/ws-client/types'
 import type {
   GetKlinesParams,
@@ -255,7 +258,305 @@ export class DataService {
       pageSize,
     })
 
-    return response.configs || []
+    // 后端返回 camelCase 格式
+    return (response.items || []).map(item => {
+      const rawItem = item as unknown as Record<string, unknown>
+      return {
+        ...item,
+        // 兼容 snake_case 和 camelCase
+        strategyType: (rawItem.strategyType as string) || (rawItem.strategy_type as string) || '',
+        triggerType: (rawItem.triggerType as string) || (rawItem.trigger_type as string) || '',
+        isEnabled: (rawItem.isEnabled as boolean) ?? (rawItem.is_enabled as boolean) ?? true,
+        createdAt: (rawItem.createdAt as string) || (rawItem.created_at as string) || '',
+        updatedAt: (rawItem.updatedAt as string) || (rawItem.updated_at as string) || '',
+        createdBy: (rawItem.createdBy as string) || (rawItem.created_by as string) || undefined,
+        params: this.convertParamsFromBackend(item.params),
+      }
+    })
+  }
+
+  /**
+   * 获取单个告警配置
+   *
+   * @param id - 告警ID
+   * @returns 告警配置
+   */
+  async getAlert(id: string): Promise<AlertConfig | null> {
+    const ws = await this.ensureConnected()
+
+    // GET_ALERT_CONFIG 后端未实现，暂时使用列表查询
+    // TODO: 后端实现 GET_ALERT_CONFIG 后改为直接查询
+    const response = await ws.request<AlertConfigResponse>('LIST_ALERT_CONFIGS', {
+      limit: 1,
+      offset: 0,
+    })
+
+    if (!response.items || response.items.length === 0) {
+      return null
+    }
+
+    const alert = response.items[0]
+    // 过滤参数值类型
+    return {
+      ...alert,
+      params: this.convertParamsFromBackend(alert.params),
+    }
+  }
+
+  /**
+   * 创建告警配置
+   *
+   * @param config - 告警配置
+   * @returns 创建的告警配置
+   */
+  async createAlert(config: {
+    name: string
+    description?: string
+    strategyType: string
+    symbol: string
+    interval: string
+    triggerType?: string
+    params?: Record<string, number | boolean>
+    isEnabled?: boolean
+  }): Promise<AlertConfig> {
+    const ws = await this.ensureConnected()
+
+    // 转换参数名称：前端使用简写，后端需要完整名称
+    const params = this.convertParamsToBackend(config.params)
+
+    const response = await ws.request<AlertConfigOperationResponse>('CREATE_ALERT_CONFIG', {
+      // 生成 UUIDv4 hex 格式（32字符无短横线），与订单ID格式一致
+      id: crypto.randomUUID().replace(/-/g, ''),
+      name: config.name,
+      description: config.description || '',
+      strategyType: config.strategyType,
+      symbol: config.symbol,
+      interval: config.interval,
+      triggerType: config.triggerType || 'each_kline_close',
+      params,
+      isEnabled: config.isEnabled ?? true,
+      // 创建者标识，使用默认用户（个人项目）
+      createdBy: 'local_user',
+    })
+
+    if (!response.id) {
+      throw new Error('Failed to create alert')
+    }
+
+    // 后端已自动转换为驼峰命名，直接返回
+    return {
+      id: response.id,
+      name: response.name || '',
+      description: response.description || '',
+      strategyType: response.strategyType || '',
+      symbol: response.symbol || '',
+      interval: response.interval || '',
+      triggerType: response.triggerType || 'each_kline_close',
+      params: this.convertParamsFromBackend(response.params),
+      isEnabled: response.isEnabled ?? true,
+      createdAt: response.createdAt,
+      updatedAt: response.updatedAt,
+    } as AlertConfig
+  }
+
+  /**
+   * 更新告警配置
+   *
+   * @param id - 告警ID
+   * @param updates - 更新内容
+   * @returns 更新后的告警配置
+   */
+  async updateAlert(
+    id: string,
+    updates: {
+      name?: string
+      description?: string
+      strategyType?: string
+      symbol?: string
+      interval?: string
+      triggerType?: string
+      params?: Record<string, number | boolean>
+      isEnabled?: boolean
+    }
+  ): Promise<AlertConfig> {
+    const ws = await this.ensureConnected()
+
+    // 转换参数名称
+    const params = updates.params ? this.convertParamsToBackend(updates.params) : undefined
+
+    const requestData: Record<string, unknown> = { id }
+    if (updates.name !== undefined) requestData.name = updates.name
+    if (updates.description !== undefined) requestData.description = updates.description
+    if (updates.strategyType !== undefined) requestData.strategyType = updates.strategyType
+    if (updates.symbol !== undefined) requestData.symbol = updates.symbol
+    if (updates.interval !== undefined) requestData.interval = updates.interval
+    if (updates.triggerType !== undefined) requestData.triggerType = updates.triggerType
+    if (params !== undefined) requestData.params = params
+    if (updates.isEnabled !== undefined) requestData.isEnabled = updates.isEnabled
+
+    const response = await ws.request<AlertConfigOperationResponse>('UPDATE_ALERT_CONFIG', requestData)
+
+    if (!response.id) {
+      throw new Error('Failed to update alert')
+    }
+
+    // 后端已自动转换为驼峰命名，直接返回
+    return {
+      id: response.id,
+      name: response.name || '',
+      description: response.description || '',
+      strategyType: response.strategyType || '',
+      symbol: response.symbol || '',
+      interval: response.interval || '',
+      triggerType: response.triggerType || 'each_kline_close',
+      params: this.convertParamsFromBackend(response.params),
+      isEnabled: response.isEnabled ?? true,
+      createdAt: response.createdAt,
+      updatedAt: response.updatedAt,
+    } as AlertConfig
+  }
+
+  /**
+   * 删除告警配置
+   *
+   * @param id - 告警ID
+   * @returns 是否删除成功
+   */
+  async deleteAlert(id: string): Promise<boolean> {
+    const ws = await this.ensureConnected()
+
+    await ws.request<{ success: boolean }>('DELETE_ALERT_CONFIG', { id })
+    return true
+  }
+
+  /**
+   * 启用告警
+   * 使用 UPDATE_ALERT_CONFIG + isEnabled 字段实现
+   *
+   * @param id - 告警ID
+   * @returns 启用结果
+   */
+  async enableAlert(id: string): Promise<{ id: string; isEnabled: boolean }> {
+    const ws = await this.ensureConnected()
+
+    const response = await ws.request<{ id: string; isEnabled: boolean }>('UPDATE_ALERT_CONFIG', {
+      id,
+      isEnabled: true,
+    })
+
+    return response
+  }
+
+  /**
+   * 禁用告警
+   * 使用 UPDATE_ALERT_CONFIG + isEnabled 字段实现
+   *
+   * @param id - 告警ID
+   * @returns 禁用结果
+   */
+  async disableAlert(id: string): Promise<{ id: string; isEnabled: boolean }> {
+    const ws = await this.ensureConnected()
+
+    const response = await ws.request<{ id: string; isEnabled: boolean }>('UPDATE_ALERT_CONFIG', {
+      id,
+      isEnabled: false,
+    })
+
+    return response
+  }
+
+  /**
+   * 批量订阅信号
+   *
+   * @param alertIds - 告警ID数组
+   * @param callback - 信号回调
+   * @returns 取消订阅函数
+   */
+  subscribeAllSignals(
+    alertIds: string[],
+    callback: (signal: SignalRecord) => void
+  ): () => void {
+    if (!this.wsClient) {
+      throw new Error('DataService not connected. Call connect() first.')
+    }
+
+    if (alertIds.length === 0) {
+      return () => {}
+    }
+
+    const unsubscribers: Array<() => void> = []
+
+    for (const alertId of alertIds) {
+      const subscriptionKey = `SIGNAL:${alertId}`
+
+      // 存储订阅信息
+      this.subscriptionInfos.set(subscriptionKey, {
+        key: subscriptionKey,
+        callback: callback as SubscriptionCallback<unknown>,
+        options: { reconnect: true },
+        subscribedAt: Date.now(),
+        status: 'active',
+      })
+
+      const unsub = this.subscribe(subscriptionKey, (data) => {
+        callback(data as SignalRecord)
+      })
+      unsubscribers.push(unsub)
+    }
+
+    // 返回批量取消订阅函数
+    return () => {
+      for (const unsub of unsubscribers) {
+        unsub()
+      }
+      for (const alertId of alertIds) {
+        this.subscriptionInfos.delete(`SIGNAL:${alertId}`)
+      }
+    }
+  }
+
+  // ==================== 参数转换 ====================
+
+  /**
+   * 将前端参数转换为后端API格式
+   * 前端使用 snake_case 格式，直接传递给后端
+   * 如果没有提供参数，返回 MACD 策略的默认值
+   */
+  private convertParamsToBackend(params?: Record<string, number | boolean>): Record<string, number | boolean> {
+    // 默认参数使用 snake_case 格式
+    const defaultParams: Record<string, number> = {
+      macd1_fastperiod: 12,
+      macd1_slowperiod: 26,
+      macd1_signalperiod: 9,
+      macd2_fastperiod: 5,
+      macd2_slowperiod: 10,
+      macd2_signalperiod: 4,
+    }
+
+    if (!params || Object.keys(params).length === 0) {
+      return { ...defaultParams }
+    }
+
+    // 返回前端传入的参数（已经是 snake_case 格式）
+    return { ...params }
+  }
+
+  /**
+   * 将后端返回的参数转换为前端格式
+   * 保留 snake_case 键名，让前端表单可以动态渲染
+   */
+  private convertParamsFromBackend(params?: Record<string, unknown> | null): Record<string, number | boolean> {
+    if (!params || Object.keys(params).length === 0) {
+      return {}
+    }
+
+    const converted: Record<string, number | boolean> = {}
+    for (const [key, value] of Object.entries(params)) {
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        converted[key] = value
+      }
+    }
+    return converted
   }
 
   // ==================== 信号管理 ====================
@@ -280,7 +581,7 @@ export class DataService {
 
     const response = await ws.request<SignalResponse>('LIST_SIGNALS', params || {})
 
-    return response.signals || []
+    return response.items || []
   }
 
   // ==================== 订单管理 ====================
@@ -324,6 +625,37 @@ export class DataService {
       orders: response.orders || [],
       count: response.count || 0,
     }
+  }
+
+  // ==================== 策略元数据 ====================
+
+  /**
+   * 获取所有策略元数据列表
+   *
+   * @returns 策略元数据列表
+   */
+  async getStrategyMetadata(): Promise<StrategyMetadataResponse[]> {
+    const ws = await this.ensureConnected()
+
+    const response = await ws.request<StrategyMetadataListResponse>('GET_STRATEGY_METADATA')
+
+    return response.strategies || []
+  }
+
+  /**
+   * 获取指定策略的元数据
+   *
+   * @param strategyType - 策略类型（如 MACDResonanceStrategyV5）
+   * @returns 策略元数据
+   */
+  async getStrategyMetadataByType(strategyType: string): Promise<StrategyMetadataResponse | null> {
+    const ws = await this.ensureConnected()
+
+    const response = await ws.request<{ strategy: StrategyMetadataResponse }>('GET_STRATEGY_METADATA_BY_TYPE', {
+      strategyType,
+    })
+
+    return response.strategy || null
   }
 
   /**
@@ -430,38 +762,40 @@ export class DataService {
     options?: SubscriptionOptions
   ): () => void {
     const finalOptions: SubscriptionOptions = { reconnect: true, ...options }
-    const unsubscribers: Array<() => void> = []
     const quotesMap = new Map<string, QuotesValue>()
 
-    // 为每个交易对创建订阅
+    // 收集所有 subscriptionKeys 和 handlers
+    const subscriptionKeys: string[] = []
+    const handlersMap = new Map<string, (data: unknown) => void>()
+
     for (const symbol of symbols) {
       const subscriptionKey = `${symbol}@QUOTES`
+      subscriptionKeys.push(subscriptionKey)
 
+      // 构建 handler
+      const handler = (data: unknown) => {
+        const quoteData = data as QuotesValue
+        quotesMap.set(symbol, quoteData)
+        callback(new Map(quotesMap))
+      }
+      handlersMap.set(subscriptionKey, handler)
+
+      // 存储订阅信息
       this.subscriptionInfos.set(subscriptionKey, {
         key: subscriptionKey,
-        callback: ((data: unknown) => {
-          const quoteData = data as QuotesValue
-          quotesMap.set(symbol, quoteData)
-          callback(new Map(quotesMap))
-        }) as SubscriptionCallback<unknown>,
+        callback: handler as SubscriptionCallback<unknown>,
         options: finalOptions,
         subscribedAt: Date.now(),
         status: 'active',
       })
-
-      const unsub = this.subscribe(subscriptionKey, (data, sk) => {
-        const quoteData = data as QuotesValue
-        quotesMap.set(symbol, quoteData)
-        callback(new Map(quotesMap))
-      })
-      unsubscribers.push(unsub)
     }
+
+    // 一次性订阅（WSClient 会将所有 keys 放入一个数组发送）
+    const unsubscribe = this.wsClient!.subscribe(subscriptionKeys, handlersMap)
 
     // 返回批量取消订阅函数
     return () => {
-      for (const unsub of unsubscribers) {
-        unsub()
-      }
+      unsubscribe()
       // 清理订阅信息
       for (const symbol of symbols) {
         this.subscriptionInfos.delete(`${symbol}@QUOTES`)

@@ -8,10 +8,12 @@ K线数据使用统一的 KlineBar 模型。
 版本: v2.0.0
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
+
+from ..base import CamelCaseModel
 
 
-class MarkPriceData(BaseModel):
+class MarkPriceData(CamelCaseModel):
     """标记价格数据
 
     包含期货特有的标记价格、指数价格和资金费率信息。
@@ -29,7 +31,7 @@ class MarkPriceData(BaseModel):
     next_funding_time: int
 
 
-class FundingRateData(BaseModel):
+class FundingRateData(CamelCaseModel):
     """资金费率数据
 
     用于表示期货资金费率信息，包括当前费率和结算时间。
@@ -44,7 +46,7 @@ class FundingRateData(BaseModel):
     funding_time: int
 
 
-class OpenInterestData(BaseModel):
+class OpenInterestData(CamelCaseModel):
     """持仓量数据
 
     用于表示期货持仓量信息，包括总持仓量和持仓量价值。
@@ -59,7 +61,7 @@ class OpenInterestData(BaseModel):
     open_interest_value: float
 
 
-class FuturesSymbolInfo(BaseModel):
+class FuturesSymbolInfo(CamelCaseModel):
     """期货交易对信息
 
     扩展了基础的 SymbolInfo，添加了期货特有的合约类型、保证金等信息。
@@ -96,7 +98,7 @@ class FuturesSymbolInfo(BaseModel):
     taker_commission: float  # 吃单手续费
 
 
-class PremiumIndexData(BaseModel):
+class PremiumIndexData(CamelCaseModel):
     """期货溢价指数数据"""
 
     symbol: str  # 交易对
@@ -108,7 +110,7 @@ class PremiumIndexData(BaseModel):
     time_to_funding: int  # 距离下次资金费率时间
 
 
-class OpenInterestStatsData(BaseModel):
+class OpenInterestStatsData(CamelCaseModel):
     """期货未平仓量统计数据"""
 
     symbol: str  # 交易对

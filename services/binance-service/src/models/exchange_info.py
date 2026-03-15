@@ -10,8 +10,10 @@ from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
+from .base import SnakeCaseModel
 
-class PriceFilter(BaseModel):
+
+class PriceFilter(SnakeCaseModel):
     """价格过滤器
 
     定义下单价格的最小值、最大值和步长。
@@ -37,7 +39,7 @@ class PriceFilter(BaseModel):
         return Decimal(self.tick_size)
 
 
-class LotSizeFilter(BaseModel):
+class LotSizeFilter(SnakeCaseModel):
     """数量过滤器
 
     定义下单数量的最小值、最大值和步长。
@@ -63,7 +65,7 @@ class LotSizeFilter(BaseModel):
         return Decimal(self.step_size)
 
 
-class MinNotionalFilter(BaseModel):
+class MinNotionalFilter(SnakeCaseModel):
     """最小名义价值过滤器
 
     定义下单的最小名义价值要求。
@@ -79,7 +81,7 @@ class MinNotionalFilter(BaseModel):
         return Decimal(self.min_notional)
 
 
-class ExchangeInfoSymbolFilter(BaseModel):
+class ExchangeInfoSymbolFilter(SnakeCaseModel):
     """交易所信息过滤器
 
     币安API返回的过滤器类型。
@@ -101,11 +103,13 @@ class ExchangeInfoSymbolFilter(BaseModel):
         populate_by_name = True
 
 
-class ExchangeInfoSymbol(BaseModel):
+class ExchangeInfoSymbol(SnakeCaseModel):
     """单个交易对信息
 
     来自币安exchangeInfo API的symbol对象。
-    字段严格对应币安API返回的字段。
+    继承 SnakeCaseModel，自动将 camelCase 转换为 snake_case。
+
+    例如: baseAsset -> base_asset, quoteAsset -> quote_asset
     """
 
     # 基本信息
@@ -266,7 +270,7 @@ class ExchangeInfoSymbol(BaseModel):
         )
 
 
-class ExchangeInfoResponse(BaseModel):
+class ExchangeInfoResponse(SnakeCaseModel):
     """交易所信息响应
 
     来自币安exchangeInfo API的根响应对象。
@@ -287,7 +291,7 @@ class ExchangeInfoResponse(BaseModel):
         return v
 
 
-class ExchangeInfo(BaseModel):
+class ExchangeInfo(SnakeCaseModel):
     """交易所信息模型
 
     用于数据库存储的交易所信息模型。

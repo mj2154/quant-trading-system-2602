@@ -10,12 +10,14 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from .base import SnakeCaseModel
+
 # =============================================================================
 # 期货账户信息模型
 # =============================================================================
 
 
-class FuturesAssetV2(BaseModel):
+class FuturesAssetV2(SnakeCaseModel):
     """期货账户资产V2
 
     WebSocket API v2/account.status 返回的资产信息。
@@ -62,7 +64,7 @@ class FuturesAssetV2(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class FuturesPositionV2(BaseModel):
+class FuturesPositionV2(SnakeCaseModel):
     """期货持仓V2
 
     WebSocket API v2/account.status 返回的持仓信息。
@@ -94,7 +96,7 @@ class FuturesPositionV2(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class FuturesAccountInfoV2WS(BaseModel):
+class FuturesAccountInfoV2WS(SnakeCaseModel):
     """期货账户信息V2 (WebSocket API)
 
     通过WebSocket API的v2/account.status接口返回。
@@ -139,7 +141,7 @@ class FuturesAccountInfoV2WS(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class FuturesAsset(BaseModel):
+class FuturesAsset(SnakeCaseModel):
     """期货账户资产
 
     字段说明：
@@ -163,7 +165,7 @@ class FuturesAsset(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class FuturesPosition(BaseModel):
+class FuturesPosition(SnakeCaseModel):
     """期货持仓
 
     字段说明：
@@ -193,7 +195,7 @@ class FuturesPosition(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class FuturesAccountInfoV2(BaseModel):
+class FuturesAccountInfoV2(SnakeCaseModel):
     """期货账户信息V2
 
     通过WebSocket API的account.getBalance接口返回。
@@ -237,7 +239,7 @@ class FuturesAccountInfoV2(BaseModel):
 # =============================================================================
 
 
-class CommissionRates(BaseModel):
+class CommissionRates(SnakeCaseModel):
     """现货手续费率
 
     字段说明：
@@ -251,7 +253,7 @@ class CommissionRates(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class SpotBalance(BaseModel):
+class SpotBalance(SnakeCaseModel):
     """现货余额
 
     字段说明：
@@ -267,7 +269,7 @@ class SpotBalance(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class SpotAccountInfo(BaseModel):
+class SpotAccountInfo(SnakeCaseModel):
     """现货账户信息
 
     通过WebSocket API的account.getInfo接口返回。

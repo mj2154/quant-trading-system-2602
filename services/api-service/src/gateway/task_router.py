@@ -4,7 +4,7 @@
 将客户端请求路由到相应的处理函数：
 - 直接查询类型：config, search_symbols, resolve_symbol（API网关直接处理）
 - 异步任务类型：get_klines, get_server_time, get_quotes（INSERT tasks表）
-- 告警类型：create_alert_config, list_alert_configs, update_alert_config, delete_alert_config, enable_alert_config, disable_alert_config, list_signals
+- 告警类型：create_alert_config, list_alert_configs, update_alert_config (包含启用/禁用), delete_alert_config, list_signals
 
 遵循 SUBSCRIPTION_AND_REALTIME_DATA.md 设计：
 - 异步任务通过 tasks 表触发通知
@@ -22,7 +22,11 @@ import json
 import logging
 from typing import Any
 
-from ..db.alert_signal_repository import AlertSignalRepository
+from pydantic import BaseModel
+
+from ..models.base import CamelCaseModel
+
+from ..db.alert_signal_repository import AlertConfigRepository
 from ..db.exchange_info_repository import ExchangeInfoRepository
 from ..db.order_tasks_repository import OrderTasksRepository
 from ..db.strategy_metadata_repository import StrategyMetadataRepository
@@ -34,18 +38,33 @@ from ..models.db.signal_models import (
 )
 from ..models.protocol.constants import PROTOCOL_VERSION
 from ..models.protocol.ws_message import (
+    ErrorData,
     KlinesRequest,
     MessageError,
     MessageSuccess,
     QuotesRequest,
 )
+from ..models.protocol.ws_payload import (
+    ConfigData,
+    MetricsData,
+    SearchSymbolsData,
+    SubscribeData,
+    SymbolType,
+    SystemMetrics,
+    UnsubscribeData,
+)
 from ..models.trading.kline_models import KlineBar, KlineBars
+from ..models.trading.symbol_models import SymbolInfo
 from ..models.trading.order_models import (
     CancelOrderRequest,
     CreateOrderRequest,
     GetOrderRequest,
+    OpenOrdersResponseData,
+    OrderCancelResponseData,
+    OrderData,
+    OrderListResponseData,
 )
-from ..protocol.messages import MessageAck
+from ..protocol.messages import AckData, MessageAck
 from ..utils.symbol import parse_semantic_symbol
 from .alert_handler import AlertHandler
 from .client_manager import ClientManager
@@ -130,14 +149,14 @@ class TaskRouter:
 
     def set_alert_repository(
         self,
-        alert_repo: AlertSignalRepository,
+        alert_repo: AlertConfigRepository,
         signals_repo: StrategySignalsRepository | None = None,
     ) -> None:
-        """设置告警仓储实例
+        """设置告警配置仓储实例
 
         Args:
-            alert_repo: 告警信号仓储实例
-            signals_repo: 可选，策略信号仓储实例
+            alert_repo: 告警配置仓储实例（操作 alert_configs 表）
+            signals_repo: 可选，策略信号仓储实例（操作 strategy_signals 表）
         """
         self._alert_handler = AlertHandler(alert_repo, signals_repo)
         logger.info("AlertHandler initialized")
@@ -147,26 +166,31 @@ class TaskRouter:
         """获取订阅管理器实例"""
         return self._subscription_manager
 
-    def _create_ack(self, request_id: str | None) -> dict[str, Any]:
+    def _create_ack(self, request_id: str | None) -> MessageAck:
         """创建 ACK 确认响应（三阶段模式第一阶段）
 
         严格遵循 07-websocket-protocol.md 规范：
-        - type 字段值为 "ACK"
+        - type 字段值为 "ACK"（在顶层）
         - data 为空对象 {}
-        - 返回 requestId 用于关联
 
         Args:
             request_id: 请求 ID（用于关联 ack 确认和最终响应）
 
         Returns:
-            ACK 确认消息字典
+            MessageAck 模型实例
         """
-        ack = MessageAck(request_id=request_id)
-        return ack.model_dump(by_alias=True)
+        import time as time_module
+
+        return MessageAck(
+            request_id=request_id or "",
+            type="ACK",
+            timestamp=int(time_module.time() * 1000),
+            data=AckData(),
+        )
 
     async def _send_ack_and_process(
         self, client_id: str, request_id: str | None, process_fn
-    ) -> dict[str, Any]:
+    ) -> None:
         """发送 ACK 并异步处理请求（三阶段模式）
 
         先立即发送 ACK 确认，然后异步执行实际处理逻辑，
@@ -198,7 +222,7 @@ class TaskRouter:
 
     async def handle(
         self, client_id: str, request: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    ) -> MessageSuccess | MessageError | None:
         """处理客户端请求（严格遵循07-websocket-protocol.md）
 
         协议格式：顶层type字段直接是具体操作类型（如GET_CONFIG, GET_KLINES等）
@@ -216,9 +240,9 @@ class TaskRouter:
             响应消息（返回 None 表示消息已由内部发送）
         """
         # 严格遵循07-websocket-protocol.md：type字段直接是操作类型
-        msg_type = request.get("type", "GET")
-        data = request.get("data", {})
-        request_id = request.get("requestId") or request.get("request_id")
+        msg_type = request.type
+        data = request.data
+        request_id = request.request_id
 
         logger.info(
             f"handle: msg_type={msg_type}, request_id={request_id}, request={request}"
@@ -381,23 +405,8 @@ class TaskRouter:
             await self._client_manager.send(client_id, result)
             return None
 
-        elif msg_type == "ENABLE_ALERT_CONFIG":
-            # 第一阶段：发送 ACK
-            await self._client_manager.send(client_id, self._create_ack(request_id))
-            # 第二阶段：处理请求
-            result = await self._handle_alert_request("enable", data, request_id)
-            # 第三阶段：发送结果
-            await self._client_manager.send(client_id, result)
-            return None
-
-        elif msg_type == "DISABLE_ALERT_CONFIG":
-            # 第一阶段：发送 ACK
-            await self._client_manager.send(client_id, self._create_ack(request_id))
-            # 第二阶段：处理请求
-            result = await self._handle_alert_request("disable", data, request_id)
-            # 第三阶段：发送结果
-            await self._client_manager.send(client_id, result)
-            return None
+        # 注意：启用/禁用告警已合并到 UPDATE_ALERT_CONFIG 中
+        # 使用 UPDATE_ALERT_CONFIG 并在 data 中包含 isEnabled 字段
 
         elif msg_type == "LIST_SIGNALS":
             # 第一阶段：发送 ACK
@@ -482,7 +491,7 @@ class TaskRouter:
 
     # ========== 直接查询处理方法（遵循07-websocket-protocol.md：顶层type是具体操作）==========
 
-    def _handle_get_config(self, request_id: str | None) -> dict[str, Any]:
+    def _handle_get_config(self, request_id: str | None) -> MessageSuccess:
         """处理 GET_CONFIG 请求
 
         Args:
@@ -491,51 +500,36 @@ class TaskRouter:
         Returns:
             配置数据响应
         """
+        # 使用 ConfigData 模型构建响应
+        config_data = ConfigData(
+            supports_search=True,
+            supports_group_request=False,
+            supports_marks=False,
+            supports_timescale_marks=False,
+            supports_time=True,
+            symbols_types=[
+                SymbolType(name="All types", value=""),
+                SymbolType(name="Crypto", value="crypto"),
+            ],
+            currency_codes=["USDT", "BTC", "ETH", "BNB", "BUSD", "USDC", "FDUSD"],
+            supported_resolutions=[
+                "1",
+                "5",
+                "15",
+                "60",
+                "240",
+                "1D",
+                "1W",
+                "1M",
+            ],
+        )
         return self._response(
             msg_type="CONFIG_DATA",
             request_id=request_id,
-            data={
-                "type": "config",
-                "supports_search": True,
-                "supports_group_request": False,
-                "supports_marks": False,
-                "supports_timescale_marks": False,
-                "supports_time": True,
-                "exchanges": [
-                    {
-                        "name": "BINANCE",
-                        "has_intraday": True,
-                        "has_daily": True,
-                        "has_weekly_and_monthly": True,
-                        "has_empty_bars": True,
-                        "shown_symbols": ["BINANCE:*"],
-                        "ticker": "BINANCE:*",
-                    }
-                ],
-                "symbols_types": [
-                    {"name": "Index", "value": "index"},
-                    {"name": "Stock", "value": "stock"},
-                    {"name": "Forex", "value": "forex"},
-                    {"name": "Futures", "value": "futures"},
-                    {"name": "Crypto", "value": "crypto"},
-                    {"name": "CFD", "value": "cfd"},
-                ],
-                "currency_codes": ["USDT", "BTC", "ETH", "BNB", "BUSD"],
-                "supported_resolutions": [
-                    "1",
-                    "5",
-                    "15",
-                    "60",
-                    "240",
-                    "1D",
-                    "1W",
-                    "1M",
-                ],
-                "intraday_multipliers": ["1", "5", "15", "60", "240"],
-            },
+            data=config_data,
         )
 
-    def _handle_get_metrics(self, request_id: str | None) -> dict[str, Any]:
+    def _handle_get_metrics(self, request_id: str | None) -> MessageSuccess:
         """处理 GET_METRICS 请求
 
         Args:
@@ -559,19 +553,23 @@ class TaskRouter:
             except Exception:
                 pass
 
+        # 使用 MetricsData 模型构建响应
+        metrics_data = MetricsData(
+            type="metrics",
+            metrics=SystemMetrics(
+                pending_tasks=pending_count,
+                connected_clients=0,
+            ),
+        )
         return self._response(
             msg_type="METRICS_DATA",
             request_id=request_id,
-            data={
-                "type": "metrics",
-                "pendingTasks": pending_count,
-                "connectedClients": 0,
-            },
+            data=metrics_data,
         )
 
     async def _handle_get_klines(
         self, client_id: str, data: dict[str, Any], request_id: str | None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理 GET_KLINES 请求（严格遵循07-websocket-protocol.md：三阶段模式）
 
         协议要求：无论缓存是否命中，都必须先返回 ACK 确认。
@@ -599,6 +597,17 @@ class TaskRouter:
             error_resp = self._error_response(
                 error_code="INVALID_PARAMETERS",
                 error_message=f"Missing required parameters: {str(e)}",
+            )
+            await self._client_manager.send(client_id, error_resp)
+            return None
+
+        # 验证时间范围：from_time 必须小于 to_time
+        if from_time >= to_time:
+            # 参数错误，也需要先发送 ACK 再发送错误
+            await self._client_manager.send(client_id, self._create_ack(request_id))
+            error_resp = self._error_response(
+                error_code="INVALID_PARAMETER",
+                error_message="from_time must be less than to_time",
             )
             await self._client_manager.send(client_id, error_resp)
             return None
@@ -651,10 +660,7 @@ class TaskRouter:
                 result = self._response(
                     msg_type="KLINES_DATA",
                     request_id=request_id,
-                    data={
-                        "type": "klines",
-                        **kline_data.model_dump(),
-                    },
+                    data=kline_data,
                 )
             else:
                 missing = []
@@ -696,10 +702,7 @@ class TaskRouter:
             result = self._response(
                 msg_type="KLINES_DATA",
                 request_id=request_id,
-                data={
-                    "type": "klines",
-                    **kline_data.model_dump(),
-                },
+                data=kline_data,
             )
 
         # 第三阶段：发送处理结果
@@ -708,7 +711,7 @@ class TaskRouter:
 
     async def _handle_get_search_symbols(
         self, data: dict[str, Any], request_id: str | None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理 GET_SEARCH_SYMBOLS 请求
 
         Args:
@@ -744,8 +747,8 @@ class TaskRouter:
                     market_type="FUTURES",
                     limit=limit,
                 )
-                # 合并结果，现货优先
-                symbols = spot_symbols + futures_symbols
+                # 合并结果，现货优先，限制总数不超过 limit
+                symbols = (spot_symbols + futures_symbols)[:limit]
                 total = len(symbols)
             else:
                 symbols = await self._exchange_repo.search_symbols(
@@ -760,15 +763,16 @@ class TaskRouter:
                     market_type=market_type,
                 )
 
+            # 使用 SearchSymbolsData 模型构建响应
+            search_data = SearchSymbolsData(
+                symbols=symbols,
+                total=total,
+                count=len(symbols),
+            )
             return self._response(
                 msg_type="SEARCH_SYMBOLS_DATA",
                 request_id=request_id,
-                data={
-                    "type": "search_symbols",
-                    "symbols": symbols,
-                    "total": total,
-                    "count": len(symbols),
-                },
+                data=search_data,
             )
         except Exception as e:
             logger.error(f"搜索交易对失败: {e}")
@@ -779,7 +783,7 @@ class TaskRouter:
 
     async def _handle_get_resolve_symbol(
         self, data: dict[str, Any], request_id: str | None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理 GET_RESOLVE_SYMBOL 请求
 
         Args:
@@ -829,13 +833,12 @@ class TaskRouter:
                     error_message=f"Symbol not found: {symbol}",
                 )
 
+            # 直接返回 SymbolInfo 模型，无需包装
+            # SymbolInfo 继承自 CamelCaseModel，序列化时自动转换为 camelCase
             return self._response(
                 msg_type="SYMBOL_DATA",
                 request_id=request_id,
-                data={
-                    "type": "resolve_symbol",
-                    "symbol": symbol_info,
-                },
+                data=symbol_info,
             )
         except ValueError as e:
             # 处理无效 symbol 格式
@@ -853,7 +856,7 @@ class TaskRouter:
 
     async def _handle_alert_request(
         self, action: str, data: dict[str, Any], request_id: str | None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理告警配置请求
 
         Args:
@@ -875,10 +878,7 @@ class TaskRouter:
             "list": self._alert_handler.handle_list_alert_configs,
             "update": self._alert_handler.handle_update_alert_config,
             "delete": self._alert_handler.handle_delete_alert_config,
-            "enable": self._alert_handler.handle_enable_alert_config,
-            "disable": lambda d, rid: self._alert_handler.handle_enable_alert_config(
-                {**d, "is_enabled": False}, rid
-            ),
+            # 注意：启用/禁用已合并到 UPDATE 操作中，通过 isEnabled 字段控制
             "list_signals": self._alert_handler.handle_list_signals,
         }
 
@@ -893,7 +893,7 @@ class TaskRouter:
 
     async def _handle_subscribe(
         self, client_id: str, data: dict[str, Any], request_id: str | None = None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理订阅请求
 
         Args:
@@ -923,18 +923,16 @@ class TaskRouter:
         )
 
         return self._response(
-            msg_type="SUBSCRIPTION_DATA",  # 遵循07-websocket-protocol.md规范
+            msg_type="SUBSCRIBE_DATA",  # 遵循07-websocket-protocol.md规范
             request_id=request_id,
-            data={
-                "type": "subscribe",
-                "subscriptions": subscriptions,
-                "new_entries": inserted_count,
-            },
+            data=SubscribeData(
+                subscriptions=subscriptions,
+            ),
         )
 
     async def _handle_unsubscribe(
         self, client_id: str, data: dict[str, Any], request_id: str | None = None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理取消订阅请求
 
         Args:
@@ -953,13 +951,11 @@ class TaskRouter:
             deleted_keys = await self._subscription_manager.unsubscribe_all(client_id)
             logger.info(f"客户端 {client_id} 取消全部 {len(deleted_keys)} 个订阅")
             return self._response(
-                msg_type="SUBSCRIPTION_DATA",  # 遵循07-websocket-protocol.md规范
+                msg_type="UNSUBSCRIBE_DATA",  # 遵循07-websocket-protocol.md规范
                 request_id=request_id,
-                data={
-                    "type": "unsubscribe",
-                    "unsubscribed": deleted_keys,
-                    "all": True,
-                },
+                data=UnsubscribeData(
+                    status="success",
+                ),
             )
 
         if not subscriptions:
@@ -979,14 +975,11 @@ class TaskRouter:
         )
 
         return self._response(
-            msg_type="SUBSCRIPTION_DATA",  # 遵循07-websocket-protocol.md规范
+            msg_type="UNSUBSCRIBE_DATA",  # 遵循07-websocket-protocol.md规范
             request_id=request_id,
-            data={
-                "type": "unsubscribe",
-                "unsubscribed": subscriptions,
-                "deleted_entries": deleted_count,
-                "all": False,
-            },
+            data=UnsubscribeData(
+                status="success",
+            ),
         )
 
     # ========== 订单交易处理方法 ==========
@@ -1166,7 +1159,7 @@ class TaskRouter:
 
     async def _handle_list_orders(
         self, client_id: str, data: dict[str, Any], request_id: str | None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理查询订单列表请求
 
         Args:
@@ -1200,28 +1193,31 @@ class TaskRouter:
                 offset=offset,
             )
 
-            orders = []
+            # 使用 OrderListResponseData 模型构建响应
+            order_list = []
             for task in tasks:
-                orders.append(
-                    {
-                        "taskId": task.get("id"),
-                        "type": task.get("type"),
-                        "status": task.get("status"),
-                        "payload": task.get("payload"),
-                        "result": task.get("result"),
-                        "createdAt": task.get("created_at"),
-                        "updatedAt": task.get("updated_at"),
-                    }
+                payload = task.get("payload", {})
+                order_data = OrderData(
+                    client_order_id=payload.get("new_client_order_id"),
+                    binance_order_id=task.get("result", {}).get("order_id"),
+                    market_type=payload.get("market_type", "FUTURES"),
+                    symbol=payload.get("symbol", ""),
+                    status=task.get("status"),
+                    data=task.get("result", {}),
+                    created_at=task.get("created_at"),
+                    updated_at=task.get("updated_at"),
                 )
+                order_list.append(order_data)
+
+            response_data = OrderListResponseData(
+                orders=order_list,
+                count=len(order_list),
+            )
 
             return self._response(
                 msg_type="ORDER_LIST_DATA",
                 request_id=request_id,
-                data={
-                    "type": "order_list",
-                    "orders": orders,
-                    "count": len(orders),
-                },
+                data=response_data,
             )
         except Exception as e:
             logger.error(f"查询订单列表失败: {e}")
@@ -1232,7 +1228,7 @@ class TaskRouter:
 
     async def _handle_cancel_order(
         self, client_id: str, data: dict[str, Any], request_id: str | None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理取消订单请求
 
         使用 Pydantic 模型验证取消订单参数。
@@ -1285,15 +1281,17 @@ class TaskRouter:
                 f"Created cancel order task: id={task_id}, origClientOrderId={orig_client_order_id}"
             )
 
+            # 使用 OrderCancelResponseData 模型构建响应
+            response_data = OrderCancelResponseData(
+                task_id=task_id,
+                status="PENDING",
+                orig_client_order_id=orig_client_order_id,
+            )
+
             return self._response(
                 msg_type="ORDER_DATA",
                 request_id=request_id,
-                data={
-                    "type": "order",
-                    "status": "PENDING",
-                    "taskId": task_id,
-                    "origClientOrderId": orig_client_order_id,
-                },
+                data=response_data,
             )
         except Exception as e:
             logger.error(f"创建取消订单任务失败: {e}")
@@ -1305,7 +1303,7 @@ class TaskRouter:
 
     async def _handle_get_open_orders(
         self, client_id: str, data: dict[str, Any], request_id: str | None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理查询当前挂单请求
 
         Args:
@@ -1331,28 +1329,31 @@ class TaskRouter:
                 offset=0,
             )
 
-            orders = []
+            # 使用 OpenOrdersResponseData 模型构建响应
+            order_list = []
             for task in tasks:
-                orders.append(
-                    {
-                        "taskId": task.get("id"),
-                        "type": task.get("type"),
-                        "status": task.get("status"),
-                        "payload": task.get("payload"),
-                        "result": task.get("result"),
-                        "createdAt": task.get("created_at"),
-                        "updatedAt": task.get("updated_at"),
-                    }
+                payload = task.get("payload", {})
+                order_data = OrderData(
+                    client_order_id=payload.get("new_client_order_id"),
+                    binance_order_id=task.get("result", {}).get("order_id"),
+                    market_type=payload.get("market_type", "FUTURES"),
+                    symbol=payload.get("symbol", ""),
+                    status=task.get("status"),
+                    data=task.get("result", {}),
+                    created_at=task.get("created_at"),
+                    updated_at=task.get("updated_at"),
                 )
+                order_list.append(order_data)
+
+            response_data = OpenOrdersResponseData(
+                orders=order_list,
+                count=len(order_list),
+            )
 
             return self._response(
                 msg_type="ORDER_LIST_DATA",
                 request_id=request_id,
-                data={
-                    "type": "order_list",
-                    "orders": orders,
-                    "count": len(orders),
-                },
+                data=response_data,
             )
         except Exception as e:
             logger.error(f"查询挂单失败: {e}")
@@ -1365,44 +1366,46 @@ class TaskRouter:
         self,
         msg_type: str,
         request_id: str | None,
-        data: dict[str, Any],
-    ) -> dict[str, Any]:
+        data: CamelCaseModel,
+    ) -> MessageSuccess:
         """构建成功响应
 
         使用 Pydantic 模型确保响应符合协议规范。
 
         严格遵循07-websocket-protocol.md规范：
         - 使用 type 字段表示数据类型（如 KLINES_DATA, CONFIG_DATA 等）
+        - data 必须是 Pydantic CamelCaseModel 实例
 
         Args:
             msg_type: 消息类型（如 KLINES_DATA, CONFIG_DATA, SUBSCRIPTION_DATA 等）
             request_id: 请求 ID
-            data: 响应数据
+            data: 响应数据（Pydantic CamelCaseModel 模型）
 
         Returns:
-            响应消息字典
+            MessageSuccess 模型实例
         """
         response = MessageSuccess(
             type=msg_type,
             request_id=request_id or "",
             protocol_version=PROTOCOL_VERSION,
             timestamp=self._timestamp_ms(),
-            data=data,
+            data=data,  # 直接传入模型实例，让 model_serializer 自动序列化
         )
-        return response.model_dump(by_alias=True)
+        return response
 
     def _error_response(
         self,
         error_code: str,
         error_message: str,
         request_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> MessageError:
         """构建错误响应
 
         使用 Pydantic 模型确保响应符合协议规范。
 
         严格遵循07-websocket-protocol.md规范：
-        - type 字段值为 "ERROR"
+        - type 字段值为 "ERROR"（在顶层）
+        - 错误详情放在 data 内部（使用 ErrorData 模型）
 
         Args:
             error_code: 错误代码
@@ -1410,19 +1413,17 @@ class TaskRouter:
             request_id: 请求 ID
 
         Returns:
-            错误响应字典
+            MessageError 模型实例
         """
-        response = MessageError(
-            type="ERROR",
-            request_id=request_id or "",
-            protocol_version=PROTOCOL_VERSION,
-            timestamp=self._timestamp_ms(),
-            data={
-                "errorCode": error_code,
-                "errorMessage": error_message,
-            },
+        error_data = ErrorData(
+            error_code=error_code,
+            error_message=error_message,
         )
-        return response.model_dump(by_alias=True)
+        return MessageError(
+            request_id=request_id or "",
+            timestamp=self._timestamp_ms(),
+            data=error_data,
+        )
 
     async def _create_async_task(
         self,
@@ -1431,7 +1432,7 @@ class TaskRouter:
         payload: dict[str, Any],
         store_result: bool = True,
         request_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess | MessageError:
         """创建异步任务（异步任务三阶段模式第一阶段）
 
         Args:
@@ -1533,7 +1534,7 @@ class TaskRouter:
 
     async def _handle_get_strategy_metadata(
         self, data: dict[str, Any], request_id: str | None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理获取所有策略元数据请求
 
         严格遵循 07-websocket-protocol.md 设计：
@@ -1587,7 +1588,7 @@ class TaskRouter:
             return self._response(
                 msg_type="STRATEGY_METADATA_DATA",
                 request_id=request_id,
-                data=response.model_dump(),
+                data=response,
             )
         except Exception as e:
             logger.exception("Failed to get strategy metadata: %s", e)
@@ -1599,7 +1600,7 @@ class TaskRouter:
 
     async def _handle_get_strategy_metadata_by_type(
         self, data: dict[str, Any], request_id: str | None
-    ) -> dict[str, Any]:
+    ) -> MessageSuccess:
         """处理获取指定策略元数据请求
 
         严格遵循 07-websocket-protocol.md 设计：
@@ -1638,18 +1639,20 @@ class TaskRouter:
                     request_id=request_id,
                 )
 
-            # 转换 datetime 为 ISO 字符串
-            if strategy.get("created_at"):
-                strategy["created_at"] = strategy["created_at"].isoformat()
-            if strategy.get("updated_at"):
-                strategy["updated_at"] = strategy["updated_at"].isoformat()
+            # 转换数据库字典为 StrategyMetadataResponse 模型
+            strategy_resp = StrategyMetadataResponse(
+                type=strategy.get("type", ""),
+                name=strategy.get("name", ""),
+                description=strategy.get("description", ""),
+                params=strategy.get("params", []),
+                created_at=strategy.get("created_at"),
+                updated_at=strategy.get("updated_at"),
+            )
 
             return self._response(
                 msg_type="STRATEGY_METADATA_DATA",
                 request_id=request_id,
-                data={
-                    "strategy": strategy,
-                },
+                data=strategy_resp,
             )
         except Exception as e:
             logger.exception("Failed to get strategy metadata by type: %s", e)

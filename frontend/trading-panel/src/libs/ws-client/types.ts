@@ -42,17 +42,18 @@ export type ClientRequestType =
   | 'SUBSCRIBE'
   | 'UNSUBSCRIBE'
   | 'CREATE_ALERT_CONFIG'
+  | 'GET_ALERT_CONFIG'
   | 'LIST_ALERT_CONFIGS'
   | 'UPDATE_ALERT_CONFIG'
   | 'DELETE_ALERT_CONFIG'
-  | 'ENABLE_ALERT_CONFIG'
-  | 'DISABLE_ALERT_CONFIG'
   | 'LIST_SIGNALS'
   | 'CREATE_ORDER'
   | 'GET_ORDER'
   | 'LIST_ORDERS'
   | 'CANCEL_ORDER'
   | 'GET_OPEN_ORDERS'
+  | 'GET_STRATEGY_METADATA'
+  | 'GET_STRATEGY_METADATA_BY_TYPE'
 
 /** 服务端响应类型 */
 export type ServerResponseType =
@@ -70,6 +71,7 @@ export type ServerResponseType =
   | 'ORDER_DATA'
   | 'ORDER_LIST_DATA'
   | 'ORDER_UPDATE'
+  | 'STRATEGY_METADATA_DATA'
   | 'ERROR'
 
 /** 推送类型 */
@@ -111,8 +113,6 @@ export interface WSClientOptions {
   reconnectInterval?: number
   /** 请求超时时间 (毫秒) */
   requestTimeout?: number
-  /** 心跳间隔 (毫秒) */
-  heartbeatInterval?: number
   /** 连接成功回调 */
   onConnect?: () => void
   /** 断开连接回调 */
@@ -129,7 +129,6 @@ export const DEFAULT_WS_CLIENT_OPTIONS: Required<WSClientOptions> = {
   autoReconnect: true,
   reconnectInterval: DEFAULT_RECONNECT_INTERVAL,
   requestTimeout: DEFAULT_REQUEST_TIMEOUT,
-  heartbeatInterval: 30000,
   onConnect: () => {},
   onDisconnect: () => {},
   onError: () => {},
@@ -211,21 +210,145 @@ export interface OrderListResponseData {
   count: number
 }
 
-/** 告警配置响应 */
+/** 告警配置响应 - 对应后端 handle_list_alert_configs 返回的 data 字段（后端使用 CamelCaseModel 自动转换） */
 export interface AlertConfigResponse {
-  configs: AlertConfig[]
+  type: string
+  items: AlertConfig[]
   total: number
+  page: number
+  pageSize: number
 }
 
-/** 信号响应 */
+/** 告警配置操作响应 - 对应后端 create/update/delete/enable/disable 操作返回的 data 字段（后端使用 CamelCaseModel 自动转换） */
+export interface AlertConfigOperationResponse {
+  type: string
+  id: string
+  message?: string
+  name?: string
+  description?: string
+  strategyType?: string
+  symbol?: string
+  interval?: string
+  triggerType?: string
+  params?: Record<string, unknown>
+  isEnabled?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** 信号响应 - 对应后端 handle_list_signals 返回的 data 字段（后端使用 CamelCaseModel 自动转换） */
 export interface SignalResponse {
-  signals: SignalRecord[]
+  type: string
+  items: SignalRecord[]
   total: number
+  page: number
+  pageSize: number
 }
 
-/** 订阅响应 */
+/** 订阅响应 - 对应后端 SubscribeData */
 export interface SubscriptionResponse {
+  status: string
   subscriptions: string[]
+  failed?: Array<{
+    subscriptionKey: string
+    reason: string
+  }>
+}
+
+/** 订阅列表响应 - 对应后端 SubscriptionsData */
+export interface SubscriptionsResponse {
+  type: string
+  subscriptions: Array<{
+    subscriptionKey: string
+    dataType: string
+    exchange: string
+    symbol: string
+    interval?: string
+    productType: string
+    status: string
+    subscribedAt: number
+    messageCount: number
+    lastMessageAt?: number
+  }>
+  total: number
+  activeCount: number
+  inactiveCount: number
+}
+
+/** 配置响应 - 对应后端 ConfigData */
+export interface ConfigResponse {
+  supportsSearch: boolean
+  supportsGroupRequest: boolean
+  supportsMarks: boolean
+  supportsTimescaleMarks: boolean
+  supportsTime: boolean
+  supportedResolutions: string[]
+  currencyCodes: string[]
+  symbolsTypes: Array<{
+    name: string
+    value: string
+  }>
+}
+
+/** 搜索响应 - 对应后端 SearchSymbolsData */
+export interface SearchSymbolsResponse {
+  symbols: Array<{
+    symbol: string
+    fullName: string
+    description: string
+    exchange: string
+    ticker: string
+    type: string
+  }>
+  total: number
+  count: number
+}
+
+/** 指标响应 - 对应后端 MetricsData */
+export interface MetricsResponse {
+  type: string
+  metrics: {
+    pendingTasks: number
+    connectedClients: number
+  }
+  activeConnections: number
+  subscriptionCount: number
+}
+
+/** 服务器时间响应 - 对应后端 ServerTimeData */
+export interface ServerTimeResponse {
+  serverTime: number
+  timezone: string
+}
+
+/** 策略参数定义 - 对应后端 StrategyParam */
+export interface StrategyParamResponse {
+  name: string
+  type: string
+  default: number | boolean
+  min?: number
+  max?: number
+  description: string
+}
+
+/** 策略元数据 - 对应后端 StrategyMetadataResponse */
+export interface StrategyMetadataResponse {
+  type: string
+  name: string
+  description: string
+  params: StrategyParamResponse[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** 策略元数据列表响应 - 对应后端 StrategyMetadataListResponse */
+export interface StrategyMetadataListResponse {
+  strategies: StrategyMetadataResponse[]
+}
+
+/** 策略元数据单个响应 - GET_STRATEGY_METADATA_BY_TYPE 返回 */
+export interface StrategyMetadataSingleResponse {
+  strategy: StrategyMetadataResponse
 }
 
 // ==================== 客户端接口 ====================

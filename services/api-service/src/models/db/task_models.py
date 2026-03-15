@@ -11,7 +11,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from ..base import CamelCaseModel
 
 
 class TaskStatus(StrEnum):
@@ -71,7 +73,7 @@ def convert_legacy_task_type(task_type: str) -> str:
     return TASK_NAMESPACE_MAP.get(task_type, f"tv.{task_type}")
 
 
-class UnifiedTaskPayload(BaseModel):
+class UnifiedTaskPayload(CamelCaseModel):
     """统一任务载荷 - 支持 TradingView 和系统管理任务
 
     用于存储在 tasks 表的 payload 字段中。
@@ -112,7 +114,7 @@ class UnifiedTaskPayload(BaseModel):
         return self.action
 
 
-class TaskCreate(BaseModel):
+class TaskCreate(CamelCaseModel):
     """任务创建请求模型"""
 
     type: str = Field(..., description="任务类型")
@@ -132,7 +134,7 @@ class TaskCreate(BaseModel):
     )
 
 
-class TaskResponse(BaseModel):
+class TaskResponse(CamelCaseModel):
     """任务响应模型"""
 
     id: int = Field(..., description="任务ID")
@@ -146,14 +148,14 @@ class TaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class TaskUpdate(BaseModel):
+class TaskUpdate(CamelCaseModel):
     """任务更新请求模型"""
 
     status: TaskStatus | None = Field(None, description="任务状态")
     result: dict[str, Any] | None = Field(None, description="任务结果")
 
 
-class TaskListResponse(BaseModel):
+class TaskListResponse(CamelCaseModel):
     """任务列表响应模型"""
 
     items: list[TaskResponse] = Field(..., description="任务列表")

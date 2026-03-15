@@ -128,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useMessage, NIcon, NSwitch, NTooltip } from 'naive-ui'
 import {
   AlertCircleOutline,
@@ -151,6 +151,11 @@ import { useAlertSettings, SOUND_TYPE_NAMES, type SoundType } from '../composabl
 // Store
 const store = useAlertStore()
 const message = useMessage()
+
+// 页面加载时初始化 store
+onMounted(() => {
+  store.initialize()
+})
 
 // 告警设置
 const alertSettings = useAlertSettings().settings
@@ -208,10 +213,10 @@ const soundDurationText = computed(() => {
 const soundTypeText = computed(() => {
   return SOUND_TYPE_NAMES[alertSettings.value.soundType]
 })
-const activeAlertCount = computed(() => store.alerts.filter(a => a.is_enabled).length)
+const activeAlertCount = computed(() => store.alerts.filter(a => a.isEnabled).length)
 const todaySignalCount = computed(() => {
   const today = new Date().toDateString()
-  return store.alertSignals.filter(s => new Date(s.computed_at).toDateString() === today).length
+  return store.alertSignals.filter(s => new Date(s.computedAt).toDateString() === today).length
 })
 
 // 处理返回列表
@@ -247,12 +252,12 @@ async function handleSubmitForm(data: AlertConfig) {
     const updateData: AlertConfigUpdate = {
       name: data.name,
       description: data.description ?? undefined,
-      trigger_type: data.trigger_type,
-      params: data.params ?? undefined,
+      triggerType: data.triggerType,
+      params: data.params as Record<string, number | boolean> | undefined,
       symbol: data.symbol,
       interval: data.interval,
-      is_enabled: data.is_enabled,
-      strategy_type: data.strategy_type,
+      isEnabled: data.isEnabled,
+      strategyType: data.strategyType,
     }
     const result = await store.updateAlert(editingAlert.value.id, updateData)
     success = !!result
@@ -266,12 +271,12 @@ async function handleSubmitForm(data: AlertConfig) {
     const createData: AlertConfigCreate = {
       name: data.name,
       description: data.description ?? undefined,
-      trigger_type: data.trigger_type,
-      params: data.params ?? undefined,
+      triggerType: data.triggerType,
+      params: data.params as Record<string, number | boolean> | undefined,
       symbol: data.symbol,
       interval: data.interval,
-      is_enabled: data.is_enabled,
-      strategy_type: data.strategy_type,
+      isEnabled: data.isEnabled,
+      strategyType: data.strategyType,
     }
     const result = await store.createAlert(createData)
     success = !!result
@@ -283,6 +288,8 @@ async function handleSubmitForm(data: AlertConfig) {
   }
 
   if (success) {
+    // 刷新告警列表以显示最新数据
+    store.fetchAlerts()
     handleCancelForm()
   }
 }

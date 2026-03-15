@@ -47,16 +47,16 @@ from .db.account_models import (
 
 # 告警配置模型
 from .db.alert_config_models import (
-    AlertSignalCreate,
-    AlertSignalListResponse,
-    AlertSignalResponse,
-    AlertSignalUpdate,
-    CreateAlertSignalRequest,
-    DeleteAlertSignalRequest,
-    EnableAlertSignalRequest,
+    AlertConfigCreate,
+    AlertConfigListResponse,
+    AlertConfigResponse,
+    AlertConfigUpdate,
+    CreateAlertConfigRequest,
+    DeleteAlertConfigRequest,
+    EnableAlertConfigRequest,
     EnableDisableResponse,
-    ListAlertSignalsRequest,
-    UpdateAlertSignalRequest,
+    ListAlertConfigsRequest,
+    UpdateAlertConfigRequest,
 )
 
 # 交易所信息模型
@@ -69,7 +69,7 @@ from .db.exchange_models import (
 # K线历史模型
 from .db.kline_history_models import (
     KlineCreate,
-    KlineData,
+    KlineRecord,
     KLineHistoryQuery,
     KLineHistoryResponse,
     KlineInterval,
@@ -85,7 +85,7 @@ from .db.realtime_data_models import (
     ProductTypeInfo,
     SubscriptionBatch,
     SubscriptionChange,
-    SubscriptionInfo,
+    SubscriptionDetail,
     SubscriptionKey,
     SubscriptionRequest,
     SubscriptionStats,
@@ -143,10 +143,8 @@ from .protocol.constants import (
 from .protocol.ws_message import (
     ConfigRequest,
     KlinesRequest,
-    MessageAck,
     MessageError,
     MessageRequest,
-    MessageResponse,
     MessageResponseBase,
     MessageSuccess,
     MessageUpdate,
@@ -164,26 +162,16 @@ from .protocol.ws_message import (
 # WebSocket载荷模型
 from .protocol.ws_payload import (
     ConfigData,
-    # 别名
-    ConfigResponse,
     ErrorData,
-    KlinesResponse,
+    KlineBars,
     MetricsData,
-    MetricsResponse,
-    QuotesResponse,
-    ResolveSymbolData,
-    ResolveSymbolResponse,
+    QuotesData,
     SearchSymbolsData,
-    SearchSymbolsResponse,
     ServerTimeData,
-    ServerTimeResponse,
     SubscribeData,
-    SubscribeResponse,
     SubscriptionsData,
-    SubscriptionsResponse,
-    TaskResultData,
+    SystemMetrics,
     UnsubscribeData,
-    UnsubscribeResponse,
 )
 from .protocol.ws_payload import (
     SubscriptionInfo as WSSubscriptionInfo,
@@ -203,13 +191,12 @@ from .trading.futures_models import (
 
 # ==================== 交易相关模型 ====================
 # K线模型
-# 注意：KlineData 和 KlineResponse 已在 db/kline_history_models 中导入，避免重复定义
+# 注意：KlineRecord 和 KlineResponse 已在 db/kline_history_models 中导入，避免重复定义
 from .trading.kline_models import (
     KlineBar,
     KlineBars,
+    KlineData,
     KlineMeta,
-    KlinesData,
-    WSKlineData,
 )
 
 # 报价模型
@@ -226,6 +213,25 @@ from .trading.symbol_models import (
     SymbolInfo,
     SymbolSearchResult,
     SymbolSearchResults,
+)
+
+# 订单模型
+from .trading.order_models import (
+    CancelOrderRequest,
+    CreateOrderRequest,
+    GetOpenOrdersRequest,
+    GetOrderRequest,
+    ListOrdersRequest,
+    MarketType,
+    OpenOrdersResponseData,
+    OrderCancelResponseData,
+    OrderData,
+    OrderListData,
+    OrderListResponseData,
+    OrderSide,
+    OrderTimeInForce,
+    OrderType,
+    OrderUpdateData,
 )
 
 # ==================== 统一导出 ====================
@@ -247,7 +253,7 @@ __all__ = [
     "convert_legacy_task_type",
     # 订阅模型
     "SubscriptionKey",
-    "SubscriptionInfo",
+    "SubscriptionDetail",
     "ClientSubscriptions",
     "ExchangeSubscriptions",
     "SubscriptionChange",
@@ -261,6 +267,7 @@ __all__ = [
     "KlineBar",
     "KlineBars",
     "KlineData",
+    "KlineRecord",
     "KlineMeta",
     "KlineResponse",
     "KlineCreate",
@@ -268,8 +275,6 @@ __all__ = [
     "KlineInterval",
     "KLineHistoryQuery",
     "KLineHistoryResponse",
-    "KlinesData",
-    "WSKlineData",
     # 账户模型
     "AccountInfoCreate",
     "AccountInfoUpdate",
@@ -284,20 +289,17 @@ __all__ = [
     "RichExchangeInfo",
     "SymbolMetadata",
     # 告警配置模型
-    "AlertSignalCreate",
-    "AlertSignalUpdate",
-    "AlertSignalResponse",
-    "AlertSignalListResponse",
+    "AlertConfigCreate",
+    "AlertConfigUpdate",
+    "AlertConfigResponse",
+    "AlertConfigListResponse",
     "EnableDisableResponse",
-    "CreateAlertSignalRequest",
-    "ListAlertSignalsRequest",
-    "UpdateAlertSignalRequest",
-    "DeleteAlertSignalRequest",
-    "EnableAlertSignalRequest",
+    "CreateAlertConfigRequest",
+    "ListAlertConfigsRequest",
+    "UpdateAlertConfigRequest",
+    "DeleteAlertConfigRequest",
+    "EnableAlertConfigRequest",
     # 信号模型
-    "StrategyConfigCreate",
-    "StrategyConfigUpdate",
-    "StrategyConfigResponse",
     # 交易对模型
     "SymbolInfo",
     "SymbolSearchResult",
@@ -307,6 +309,22 @@ __all__ = [
     "QuotesData",
     "QuotesList",
     "PriceLevel",
+    # 订单模型
+    "CreateOrderRequest",
+    "GetOrderRequest",
+    "ListOrdersRequest",
+    "CancelOrderRequest",
+    "GetOpenOrdersRequest",
+    "OrderData",
+    "OrderListData",
+    "OrderUpdateData",
+    "OrderListResponseData",
+    "OrderCancelResponseData",
+    "OpenOrdersResponseData",
+    "OrderSide",
+    "OrderType",
+    "OrderTimeInForce",
+    "MarketType",
     "OrderBookData",
     # 期货模型
     "MarkPriceData",
@@ -331,32 +349,19 @@ __all__ = [
     "SubscriptionsRequest",
     "MetricsRequest",
     "MessageResponseBase",
-    "MessageResponse",
     "MessageSuccess",
-    "MessageAck",
     "MessageError",
     "MessageUpdate",
     # WebSocket载荷
     "ConfigData",
-    "ConfigResponse",
-    "KlinesResponse",
-    "MetricsResponse",
-    "QuotesResponse",
-    "ResolveSymbolResponse",
-    "SearchSymbolsResponse",
-    "ServerTimeResponse",
-    "SubscribeResponse",
-    "SubscriptionsResponse",
-    "UnsubscribeResponse",
     "SearchSymbolsData",
-    "ResolveSymbolData",
     "ServerTimeData",
     "SubscribeData",
     "UnsubscribeData",
     "SubscriptionsData",
     "MetricsData",
+    "SystemMetrics",
     "ErrorData",
-    "TaskResultData",
     "WSSubscriptionInfo",
     # 协议常量
     "WSAction",

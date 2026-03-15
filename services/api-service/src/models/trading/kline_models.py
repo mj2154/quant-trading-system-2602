@@ -7,10 +7,12 @@ TradingView 兼容的K线数据模型。
 版本: v2.0.0
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
+
+from ..base import CamelCaseModel
 
 
-class KlineBar(BaseModel):
+class KlineBar(CamelCaseModel):
     """
     K线Bar数据
 
@@ -28,7 +30,7 @@ class KlineBar(BaseModel):
         return f"KlineBar(t={self.time}, o={self.open}, h={self.high}, l={self.low}, c={self.close}, v={self.volume})"
 
 
-class KlineData(BaseModel):
+class KlineData(CamelCaseModel):
     """
     单个K线数据
 
@@ -38,7 +40,7 @@ class KlineData(BaseModel):
     symbol: str  # 交易对，如"BINANCE:BTCUSDT"
     interval: str  # K线周期，如"1", "5", "60", "1D"（与数据库interval字段一致）
     bar: KlineBar  # Bar数据
-    is_bar_closed: bool  # Bar是否已关闭
+    is_bar_closed: bool = False  # Bar是否已关闭
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -46,7 +48,7 @@ class KlineData(BaseModel):
         return f"KlineData({self.symbol}, {self.interval}, closed={self.is_bar_closed})"
 
 
-class KlineBars(BaseModel):
+class KlineBars(CamelCaseModel):
     """
     K线数据列表
 
@@ -63,7 +65,7 @@ class KlineBars(BaseModel):
         return f"KlineBars({self.symbol}, {self.interval}, {len(self.bars)} bars)"
 
 
-class KlineMeta(BaseModel):
+class KlineMeta(CamelCaseModel):
     """
     K线元数据
 
@@ -75,14 +77,14 @@ class KlineMeta(BaseModel):
     from_time: int | None = None  # 开始时间
     to: int | None = None  # 结束时间
     count: int  # Bar数量
-    no_data: bool  # 是否无数据
+    no_data: bool = False  # 是否无数据
     next_time: int | None = None  # 下一页时间
 
     def __str__(self) -> str:
         return f"KlineMeta({self.symbol}, {self.interval}, {self.count} bars)"
 
 
-class KlineResponse(BaseModel):
+class KlineResponse(CamelCaseModel):
     """
     K线响应数据
 
@@ -94,8 +96,3 @@ class KlineResponse(BaseModel):
 
     def __str__(self) -> str:
         return f"KlineResponse({self.meta.symbol}, {self.meta.resolution}, {len(self.data)} bars)"
-
-
-# WebSocket K线数据别名
-KlinesData = KlineBars
-WSKlineData = KlineBar

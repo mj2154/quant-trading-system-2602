@@ -12,12 +12,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
+
+from ..base import CamelCaseModel
 
 
-class KlineData(BaseModel):
+class KlineRecord(CamelCaseModel):
     """
-    K线数据模型
+    K线数据模型（数据库记录）
 
     表示一根K线的所有数据，包括OHLCV价格信息、成交量、交易次数等。
 
@@ -105,7 +107,7 @@ class KlineData(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_ohlc_consistency(self) -> KlineData:
+    def validate_ohlc_consistency(self) -> KlineRecord:
         """验证OHLC价格的一致性"""
         # 最高价必须大于等于开盘价、收盘价、最低价
         if self.high_price < self.open_price:
@@ -138,7 +140,7 @@ class KlineData(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_time_consistency(self) -> KlineData:
+    def validate_time_consistency(self) -> KlineRecord:
         """验证时间字段的一致性"""
         if self.open_time > self.close_time:
             raise ValueError(
@@ -155,7 +157,7 @@ class KlineData(BaseModel):
     )
 
 
-class KlineCreate(BaseModel):
+class KlineCreate(CamelCaseModel):
     """
     创建K线数据的模型
 
@@ -252,9 +254,9 @@ class KlineCreate(BaseModel):
             )
         return self
 
-    def to_kline_data(self) -> KlineData:
-        """转换为 KlineData 模型"""
-        return KlineData(
+    def to_kline_record(self) -> KlineRecord:
+        """转换为 KlineRecord 模型"""
+        return KlineRecord(
             symbol=self.symbol,
             interval=self.interval,
             open_time=self.open_time,
@@ -282,7 +284,7 @@ class KlineCreate(BaseModel):
     )
 
 
-class KlineResponse(BaseModel):
+class KlineResponse(CamelCaseModel):
     """
     K线数据响应模型
 
@@ -342,12 +344,12 @@ class KlineResponse(BaseModel):
         return int(v)
 
     @classmethod
-    def from_kline_data(cls, kline: KlineData) -> KlineResponse:
+    def from_kline_record(cls, kline: KlineRecord) -> KlineResponse:
         """
-        从KlineData模型转换为响应格式
+        从KlineRecord模型转换为响应格式
 
         Args:
-            kline: KlineData实例
+            kline: KlineRecord实例
 
         Returns:
             KlineResponse实例
@@ -413,7 +415,7 @@ class KlineResponse(BaseModel):
     )
 
 
-class KlineWebSocket(BaseModel):
+class KlineWebSocket(CamelCaseModel):
     """
     WebSocket K线数据模型
 
@@ -426,7 +428,7 @@ class KlineWebSocket(BaseModel):
         ..., description="语义化交易对符号，格式: EXCHANGE:SYMBOL[.CONTRACT_TYPE]"
     )
 
-    kline: KlineData = Field(..., description="K线数据")
+    kline: KlineRecord = Field(..., description="K线数据")
 
     @field_validator("event_time", mode="before")
     @classmethod
@@ -530,7 +532,7 @@ class KlineInterval:
 
 
 # 历史K线查询参数模型
-class KLineHistoryQuery(BaseModel):
+class KLineHistoryQuery(CamelCaseModel):
     """历史K线查询参数"""
 
     symbol: str = Field(..., description="交易对符号")
@@ -541,12 +543,12 @@ class KLineHistoryQuery(BaseModel):
 
 
 # 历史K线响应模型
-class KLineHistoryResponse(BaseModel):
+class KLineHistoryResponse(CamelCaseModel):
     """历史K线响应"""
 
     symbol: str = Field(..., description="交易对符号")
     interval: str = Field(..., description="K线间隔")
-    bars: list[KlineData] = Field(..., description="K线数据列表")
+    bars: list[KlineRecord] = Field(..., description="K线数据列表")
     count: int = Field(..., description="返回数量")
     start_time: int | None = Field(None, description="实际开始时间")
     end_time: int | None = Field(None, description="实际结束时间")

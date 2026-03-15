@@ -7,10 +7,11 @@ TradingView 兼容的交易对数据模型。
 版本: v2.0.0
 """
 
-from pydantic import BaseModel
+
+from ..base import CamelCaseModel
 
 
-class SymbolInfo(BaseModel):
+class SymbolInfo(CamelCaseModel):
     """
     交易对详细信息
 
@@ -75,7 +76,7 @@ class SymbolInfo(BaseModel):
         return f"SymbolInfo({self.ticker}, {self.exchange})"
 
 
-class SymbolSearchResult(BaseModel):
+class SymbolSearchResult(CamelCaseModel):
     """
     交易对搜索结果
 
@@ -93,7 +94,7 @@ class SymbolSearchResult(BaseModel):
         return f"SymbolSearchResult({self.symbol})"
 
 
-class SymbolSearchResults(BaseModel):
+class SymbolSearchResults(CamelCaseModel):
     """
     交易对搜索结果列表
 

@@ -15,7 +15,10 @@ K线数据模型
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .base import SnakeCaseModel, CamelCaseModel
 
 # 使用本地基类
 
@@ -93,7 +96,7 @@ class KlineValidatorMixin:
 # ========== K线数据模型 ==========
 
 
-class KlineData(KlineValidatorMixin, BaseModel):
+class KlineData(KlineValidatorMixin, SnakeCaseModel):
     """
     K线数据模型
 
@@ -185,7 +188,7 @@ class KlineData(KlineValidatorMixin, BaseModel):
     )
 
 
-class KlineCreate(KlineValidatorMixin, BaseModel):
+class KlineCreate(KlineValidatorMixin, SnakeCaseModel):
     """
     创建K线数据的模型
 
@@ -275,11 +278,12 @@ class KlineCreate(KlineValidatorMixin, BaseModel):
     )
 
 
-class KlineResponse(BaseModel):
+class KlineResponse(SnakeCaseModel):
     """
-    K线数据响应模型
+    K线数据响应模型 (L1 层)
 
-    用于API响应中的K线数据格式
+    用于解析/验证币安API响应，camelCase → snake_case 自动转换。
+    继承 SnakeCaseModel 实现自动命名转换。
     """
 
     open_time: int = Field(..., description="K线开始时间戳（毫秒）", alias="0")
@@ -381,7 +385,7 @@ class KlineResponse(BaseModel):
     )
 
 
-class KlineWebSocketData(KlineValidatorMixin, BaseModel):
+class KlineWebSocketData(KlineValidatorMixin, SnakeCaseModel):
     """
     WebSocket K线数据（嵌套格式）
 
@@ -470,7 +474,7 @@ class KlineWebSocketData(KlineValidatorMixin, BaseModel):
     )
 
 
-class KlineWebSocket(BaseModel):
+class KlineWebSocket(SnakeCaseModel):
     """
     WebSocket K线数据模型
 

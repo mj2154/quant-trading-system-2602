@@ -10,7 +10,8 @@ models/
 │   ├── kline_models.py           # K线数据
 │   ├── symbol_models.py          # 交易对信息
 │   ├── quote_models.py           # 报价/深度数据
-│   └── futures_models.py         # 期货扩展数据
+│   ├── futures_models.py         # 期货扩展数据
+│   └── order_models.py          # 交易订单模型
 │
 ├── db/                    # 数据库表对应模型
 │   ├── task_models.py           # 任务模型
@@ -19,8 +20,7 @@ models/
 │   ├── account_models.py        # 账户信息
 │   ├── exchange_models.py       # 交易所信息
 │   ├── alert_config_models.py   # 告警配置
-│   └── signal_models.py         # 信号模型（仅启用/禁用响应）
-│   └── order_models.py          # 交易订单模型
+│   └── signal_models.py         # 信号模型
 │
 ├── protocol/              # WebSocket 协议层模型
 │   ├── ws_message.py             # 消息协议
@@ -66,6 +66,55 @@ models/
 **设计原则**：
 - CamelCaseModel: 用于API响应，序列化时自动转为 camelCase
 - SnakeCaseModel: 用于接收外部输入，自动将 camelCase 转为 snake_case
+
+**命名规范 - 核心原则**：
+> **后端内部使用 snake_case（蛇形命名），自动转换为 camelCase（驼峰）发送给前端**
+
+| 层级 | 命名风格 | 说明 |
+|------|----------|------|
+| 后端代码（内部） | snake_case | Python 惯例，如 `open_time`, `close_price` |
+| 响应输出（前端） | camelCase | API 服务自动转换后发给前端 |
+| 前端输入（请求） | camelCase | 前端发送，后端 SnakeCaseModel 自动转换 |
+
+**转换机制**：使用 Pydantic v2 的 `to_camel` / `to_snake` 自动转换。
+
+```python
+from pydantic import ConfigDict
+from pydantic.alias_generators import to_camel
+
+class OrderResponse(CamelCaseModel):
+    """API 响应模型 - 序列化时自动转为 camelCase"""
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        by_alias=True,
+    )
+
+    order_id: int        # 内部使用 snake_case
+    client_order_id: str # 序列化后: "clientOrderId": "xxx"
+    created_at: int      # 序列化后: "createdAt": 1234567890
+```
+
+**示例 - WS协议 JSON vs 后端模型**：
+
+```json
+// 前端接收的响应（camelCase）
+{
+    "orderId": 22542179,
+    "clientOrderId": "660e8400e29b41d4a716446655440001",
+    "symbol": "BTCUSDT",
+    "side": "BUY"
+}
+```
+
+```python
+# 后端模型定义（snake_case）
+class OrderData(CamelCaseModel):
+    order_id: int = Field(..., alias="orderId")
+    client_order_id: str = Field(..., alias="clientOrderId")
+    symbol: str
+    side: str
+```
 
 **引用**：`docs/backend/design/DATABASE_COORDINATED_ARCHITECTURE.md#44-数据命名规范`
 
@@ -241,7 +290,7 @@ models/
 | 模型名称 | 用途 | 主要字段 |
 |---------|------|---------|
 | `SubscriptionKey` | 订阅键解析 | `exchange`, `symbol`, `subscription_type`, `interval` |
-| `SubscriptionInfo` | 订阅详情 | `client_id`, `subscription_key`, `symbol`, `subscription_type`, `created_at` |
+| `SubscriptionDetail` | 订阅详情 | `client_id`, `subscription_key`, `symbol`, `subscription_type`, `created_at` |
 | `ClientSubscriptions` | 客户端订阅 | `client_id`, `subscriptions[]`, `created_at` |
 | `ExchangeSubscriptions` | 交易所订阅 | `exchange`, `streams[]`, `created_at` |
 | `SubscriptionChange` | 订阅变更 | `exchange`, `subscribe[]`, `unsubscribe[]`, `total_required` |
@@ -261,8 +310,8 @@ models/
 
 | 模型名称 | 用途 | 主要字段 |
 |---------|------|---------|
-| `KlineData` | K线数据（数据库） | `symbol`, `interval`, `open_time`, `close_time`, `open_price`, `high_price`, `low_price`, `close_price`, `volume`, `quote_volume`, `number_of_trades` |
-| `KlineCreate` | K线创建 | 与 KlineData 类似，用于插入数据库 |
+| `KlineRecord` | K线数据（数据库） | `symbol`, `interval`, `open_time`, `close_time`, `open_price`, `high_price`, `low_price`, `close_price`, `volume`, `quote_volume`, `number_of_trades` |
+| `KlineCreate` | K线创建 | 与 KlineRecord 类似，用于插入数据库 |
 | `KlineResponse` | K线响应格式 | 使用数字索引 `0`-`11` 的数组格式 |
 | `KlineWebSocket` | WebSocket K线 | `event_type`, `event_time`, `symbol`, `kline` |
 | `KlineInterval` | K线间隔常量 | `INTERVAL_1M`, `INTERVAL_5M` 等 |
@@ -334,16 +383,16 @@ models/
 
 | 模型名称 | 用途 | 主要字段 |
 |---------|------|---------|
-| `AlertSignalCreate` | 告警创建 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `is_enabled`, `created_by` |
-| `AlertSignalUpdate` | 告警更新 | `name`, `description`, `is_enabled` |
-| `AlertSignalResponse` | 告警响应 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `is_enabled`, `created_at`, `updated_at` |
-| `AlertSignalListResponse` | 告警列表 | `items[]`, `total` |
+| `AlertConfigCreate` | 告警创建 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `is_enabled`, `created_by` |
+| `AlertConfigUpdate` | 告警更新 | `name`, `description`, `is_enabled` |
+| `AlertConfigResponse` | 告警响应 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `is_enabled`, `created_at`, `updated_at` |
+| `AlertConfigListResponse` | 告警列表 | `items[]`, `total` |
 | `EnableDisableResponse` | 启用/禁用响应 | `id`, `name`, `is_enabled`, `message` |
-| `CreateAlertSignalRequest` | 创建请求 | `type`, `id`, `name`, `description`, `strategy_type`, `symbol`, `interval` |
-| `ListAlertSignalsRequest` | 列表请求 | `type`, `symbol`, `is_enabled`, `limit`, `offset` |
-| `UpdateAlertSignalRequest` | 更新请求 | `type`, `id`, `name`, `description`, `is_enabled` |
-| `DeleteAlertSignalRequest` | 删除请求 | `type`, `id` |
-| `EnableAlertSignalRequest` | 启用请求 | `type`, `id` |
+| `CreateAlertConfigRequest` | 创建请求 | `type`, `id`, `name`, `description`, `strategy_type`, `symbol`, `interval` |
+| `ListAlertConfigsRequest` | 列表请求 | `type`, `symbol`, `is_enabled`, `limit`, `offset` |
+| `UpdateAlertConfigRequest` | 更新请求 | `type`, `id`, `name`, `description`, `is_enabled` |
+| `DeleteAlertConfigRequest` | 删除请求 | `type`, `id` |
+| `EnableAlertConfigRequest` | 启用请求 | `type`, `id` |
 
 **使用场景**：
 - 告警配置 CRUD 操作（通过 WebSocket 消息）
@@ -353,21 +402,158 @@ models/
 
 | 模型名称 | 用途 | 主要字段 |
 |---------|------|---------|
+| `StrategyParam` | 策略参数 | `name`, `type`, `required`, `default`, `description` |
+| `StrategyMetadataResponse` | 策略元数据响应 | `strategy_type`, `name`, `description`, `params[]` |
+| `StrategyMetadataListResponse` | 策略元数据列表 | `strategies[]`, `total` |
+| `SignalRecordResponse` | 信号记录响应 | `id`, `alert_id`, `strategy_type`, `symbol`, `signal_time`, `signal_value` |
+| `SignalListResponse` | 信号列表响应 | `signals[]`, `total` |
 | `EnableDisableResponse` | 启用/禁用响应 | `id`, `name`, `is_enabled`, `message` |
+
+**字段详情 - StrategyParam**：
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `name` | str | 参数名称 | `name` |
+| `type` | str | 参数类型 | `type` |
+| `required` | bool | 是否必填 | `required` |
+| `default` | any | 默认值 | `default` |
+| `description` | str | 参数描述 | `description` |
+
+**字段详情 - StrategyMetadataResponse**：
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `strategy_type` | str | 策略类型 | `strategyType` |
+| `name` | str | 策略名称 | `name` |
+| `description` | str | 策略描述 | `description` |
+| `params` | list[StrategyParam] | 参数列表 | `params` |
+
+**字段详情 - SignalRecordResponse**：
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `id` | int | 信号ID | `id` |
+| `alert_id` | str | 告警ID | `alertId` |
+| `strategy_type` | str | 策略类型 | `strategyType` |
+| `symbol` | str | 交易对 | `symbol` |
+| `signal_time` | int | 信号时间 | `signalTime` |
+| `signal_value` | any | 信号值 | `signalValue` |
+
+**JSON 示例（前端接收 - camelCase）**：
+```json
+{
+    "id": 1,
+    "alertId": "550e8400e29b41d4a716446655440001",
+    "strategyType": "price_breakout",
+    "symbol": "BTCUSDT",
+    "signalTime": 1704067200000,
+    "signalValue": {
+        "breakoutPrice": 50000.0,
+        "direction": "long"
+    }
+}
+```
 
 **说明**：API 服务只负责接收信号通知（通过 WebSocket），不存储或管理信号。信号由 signal-service 处理。
 
 ### order_models.py - 交易订单模型
 
+> **重要**：订单模型完全采用币安官方蛇形命名，与 WS协议设计文档 中的 JSON 示例完全对应
+
+**枚举类型**：
+
+| 枚举名称 | 值 | 说明 |
+|---------|-----|------|
+| `OrderSide` | `BUY`, `SELL` | 订单方向 |
+| `OrderType` (现货) | `LIMIT`, `LIMIT_MAKER`, `MARKET`, `STOP_LOSS`, `STOP_LOSS_LIMIT`, `TAKE_PROFIT`, `TAKE_PROFIT_LIMIT` | 订单类型（现货） |
+| `OrderType` (期货) | `LIMIT`, `MARKET`, `STOP`, `STOP_MARKET`, `TAKE_PROFIT`, `TAKE_PROFIT_MARKET`, `TRAILING_STOP_MARKET` | 订单类型（期货） |
+| `OrderTimeInForce` | `GTC`, `IOC`, `FOK` | 订单时效 |
+| `MarketType` | `SPOT`, `FUTURES` | 市场类型 |
+
+**请求模型**：
+
+| 模型名称 | 用途 | 蛇形字段 | JSON字段(camelCase) |
+|---------|------|---------|---------------------|
+| `CreateOrderRequest` | 创建订单 | `symbol`, `side`, `type`, `quantity`, `new_client_order_id` | `symbol`, `side`, `type`, `quantity`, `newClientOrderId` |
+| `GetOrderRequest` | 查询订单 | `symbol`, `order_id`, `orig_client_order_id` | `symbol`, `orderId`, `origClientOrderId` |
+| `ListOrdersRequest` | 查询列表 | `symbol`, `start_time`, `end_time`, `limit` | `symbol`, `startTime`, `endTime`, `limit` |
+| `CancelOrderRequest` | 取消订单 | `symbol`, `order_id`, `orig_client_order_id`, `new_client_order_id` | `symbol`, `orderId`, `origClientOrderId`, `newClientOrderId` |
+| `GetOpenOrdersRequest` | 查询挂单 | `symbol` | `symbol` |
+
+**字段详情 - CreateOrderRequest**（期货）：
+
+| 字段名 | 类型 | 必填 | 说明 | JSON字段 |
+|--------|------|-----|------|----------|
+| `symbol` | str | ✅ | 交易对 | `symbol` |
+| `side` | str | ✅ | 方向 BUY/SELL | `side` |
+| `type` | str | ✅ | 订单类型 | `type` |
+| `quantity` | float | ✅ | 数量 | `quantity` |
+| `new_client_order_id` | str | ✅ | 客户端订单ID | `newClientOrderId` |
+| `price` | float | 条件必填 | 价格（LIMIT类型） | `price` |
+| `time_in_force` | str | 条件必填 | 时效 GTC/IOC/FOK | `timeInForce` |
+| `position_side` | str | 否 | 持仓方向 BOTH/LONG/SHORT | `positionSide` |
+| `reduce_only` | bool | 否 | 是否只减仓 | `reduceOnly` |
+
+**字段详情 - CreateOrderRequest**（现货）：
+
+| 字段名 | 类型 | 必填 | 说明 | JSON字段 |
+|--------|------|-----|------|----------|
+| `symbol` | str | ✅ | 交易对 | `symbol` |
+| `side` | str | ✅ | 方向 BUY/SELL | `side` |
+| `type` | str | ✅ | 订单类型 | `type` |
+| `quantity` | float | ✅ | 数量 | `quantity` |
+| `new_client_order_id` | str | ✅ | 客户端订单ID | `newClientOrderId` |
+| `price` | float | 条件必填 | 价格（LIMIT类型） | `price` |
+| `time_in_force` | str | 条件必填 | 时效 GTC/IOC/FOK | `timeInForce` |
+| `quote_order_qty` | float | 否 | 报价数量 | `quoteOrderQty` |
+
+**响应模型**：
+
 | 模型名称 | 用途 | 主要字段 |
 |---------|------|---------|
-| `CreateOrderRequest` | 创建订单请求 | `market_type`, `symbol`, `side`, `order_type`, `quantity` |
-| `GetOrderRequest` | 查询订单请求 | `client_order_id` 或 `binance_order_id` |
-| `ListOrdersRequest` | 查询订单列表请求 | `market_type`, `symbol`, `status`, `limit` |
-| `CancelOrderRequest` | 撤销订单请求 | `client_order_id` 或 `binance_order_id` |
-| `OrderData` | 订单数据 | `client_order_id`, `binance_order_id`, `market_type`, `symbol`, `status`, `data` |
-| `OrderListData` | 订单列表数据 | `orders[]`, `count` |
-| `OrderUpdateData` | 订单更新推送数据 | 继承 OrderData，额外包含 `updated_at` |
+| `OrderData` | 订单数据 | `order_id`, `client_order_id`, `symbol`, `side`, `status`, `type` |
+| `OrderListData` | 订单列表 | `orders[]`, `count` |
+| `OrderUpdateData` | 订单更新推送 | 继承 OrderData，额外包含 `updated_at` |
+| `OrderListResponseData` | 列表响应 | `orders[]`, `count` |
+| `OrderCancelResponseData` | 取消响应 | `order_id`, `client_order_id`, `symbol`, `status` |
+| `OpenOrdersResponseData` | 挂单响应 | `orders[]`, `count` |
+
+**字段详情 - OrderData**：
+
+> **重要**：完全采用币安蛇形命名，序列化自动转驼峰
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `order_id` | int | 订单ID | `orderId` |
+| `client_order_id` | str | 客户端订单ID | `clientOrderId` |
+| `symbol` | str | 交易对 | `symbol` |
+| `side` | str | 方向 | `side` |
+| `type` | str | 类型 | `type` |
+| `price` | str | 价格 | `price` |
+| `orig_qty` | str | 原数量 | `origQty` |
+| `executed_qty` | str | 已执行数量 | `executedQty` |
+| `status` | str | 状态 | `status` |
+| `time_in_force` | str | 时效 | `timeInForce` |
+| `create_time` | int | 创建时间 | `createTime` |
+| `update_time` | int | 更新时间 | `updateTime` |
+
+**JSON 示例（前端接收 - camelCase）**：
+```json
+{
+    "orderId": 22542179,
+    "clientOrderId": "660e8400e29b41d4a716446655440001",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "price": "50000.00000000",
+    "origQty": "0.00200000",
+    "executedQty": "0.00200000",
+    "status": "FILLED",
+    "timeInForce": "GTC",
+    "createTime": 1704067200000,
+    "updateTime": 1704067200000
+}
+```
 
 **说明**：交易订单模型与 trading_orders 表和 04-trading-orders.md 设计保持一致。data 字段存储币安 API 返回的完整 JSON 数据。
 
@@ -406,16 +592,104 @@ models/
 
 | 模型名称 | 用途 | 主要字段 |
 |---------|------|---------|
+| `SymbolType` | 交易对类型 | `crypto`, `forex`, `stock` |
 | `ConfigData` | 配置数据 | `supports_search`, `supports_group_request`, `supported_resolutions[]` |
 | `SearchSymbolsData` | 搜索数据 | `symbols[]`, `total` |
 | `ServerTimeData` | 时间数据 | `server_time`, `timezone` |
+| `FailedSubscription` | 失败的订阅 | `symbol`, `error_code`, `error_message` |
 | `SubscribeData` | 订阅确认 | `subscriptions[]` |
 | `UnsubscribeData` | 取消确认 | `subscriptions[]` |
+| `SubscriptionItem` | 订阅项 | `symbol`, `subscriptions[]` |
 | `SubscriptionsData` | 订阅列表 | `subscriptions[]` |
+| `SystemMetrics` | 系统指标 | `active_connections`, `total_subscriptions`, `unique_symbols` |
 | `MetricsData` | 指标数据 | `active_connections`, `total_subscriptions` |
-| `ErrorData` | 错误数据 | `code`, `message` |
+| `ErrorData` | 错误数据 | `error_code`, `error_message` |
 | `TaskResultData` | 任务结果 | `task_id`, `result` |
 | `SubscriptionInfo` | 订阅信息 | `symbol`, `subscriptions[]` |
+| `OrderResponseData` | 订单响应数据 | `type`, `status`, `task_id`, `result`, `payload` |
+| `AccountResponseData` | 账户响应数据 | `account_type`, `data` |
+| `SignalData` | 信号数据 | `signals[]` |
+
+**字段详情 - SymbolType**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `crypto` | str | 加密货币 |
+| `forex` | str | 外汇 |
+| `stock` | str | 股票 |
+
+**字段详情 - FailedSubscription**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `symbol` | str | 订阅的交易对 |
+| `error_code` | str | 错误码 |
+| `error_message` | str | 错误信息 |
+
+**字段详情 - SubscriptionItem**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `symbol` | str | 交易对 |
+| `subscriptions` | list[str] | 订阅列表 |
+
+**字段详情 - SystemMetrics**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `active_connections` | int | 活跃连接数 |
+| `total_subscriptions` | int | 总订阅数 |
+| `unique_symbols` | int | 唯一交易对数 |
+| `exchange_subscriptions` | dict | 各交易所订阅统计 |
+
+**字段详情 - OrderResponseData**（对应 WS协议 ORDER_DATA 响应）：
+
+> **重要**：此模型采用蛇形命名，序列化时自动转换为驼峰发送给前端
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `type` | str | 固定值 `"order"` | `"type"` |
+| `status` | str | 任务状态 | `"status"` |
+| `task_id` | int | 任务ID | `"taskId"` |
+| `result` | dict | 订单结果 | `"result"` |
+| `payload` | dict | 请求载荷 | `"payload"` |
+| `error_code` | str | 错误码（失败时） | `"errorCode"` |
+| `error_message` | str | 错误信息（失败时） | `"errorMessage"` |
+
+**JSON 示例（前端接收 - camelCase）**：
+```json
+{
+    "type": "order",
+    "status": "COMPLETED",
+    "taskId": 123,
+    "result": {
+        "orderId": 22542179,
+        "clientOrderId": "660e8400e29b41d4a716446655440001",
+        "symbol": "BTCUSDT",
+        "side": "BUY"
+    },
+    "payload": {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "quantity": 0.002
+    }
+}
+```
+
+**字段详情 - ErrorData**：
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `error_code` | str | 错误码 | `"errorCode"` |
+| `error_message` | str | 错误信息 | `"errorMessage"` |
+
+**JSON 示例**：
+```json
+{
+    "errorCode": "INVALID_SYMBOL",
+    "errorMessage": "交易对不存在"
+}
+```
 
 **使用场景**：
 - 响应消息中的 data 字段内容定义
@@ -429,13 +703,94 @@ models/
 | `WS_USER_DATA_PATH` | 用户数据路径 | `"/ws/user"` |
 | `PING_INTERVAL` | 心跳间隔 | `20` 秒 |
 | `PING_TIMEOUT` | 心跳超时 | `60` 秒 |
-| `WSAction` | 动作枚举 | `GET`, `SUBSCRIBE`, `UNSUBSCRIBE` |
-| `WSMessageType` | 消息类型 | `CONFIG`, `SEARCH_SYMBOLS`, `KLINES` 等 |
-| `SubscriptionType` | 订阅类型 | `KLINE`, `QUOTES`, `TRADE`, `ACCOUNT` |
-| `ProductType` | 产品类型 | `SPOT`, `FUTURES`, `PERPETUAL` |
-| `WSErrorCode` | 错误码 | `UNKNOWN`, `INVALID_REQUEST`, `AUTH_REQUIRED` 等 |
-| `RESOLUTION_TO_INTERVAL` | 分辨率→间隔 | TV分辨率到数据库间隔的映射 |
-| `INTERVAL_TO_RESOLUTION` | 间隔→分辨率 | 数据库间隔到TV分辨率的映射 |
+
+**WSAction - 动作枚举**：
+
+| 值 | 说明 |
+|-----|------|
+| `GET` | 获取数据 |
+| `SUBSCRIBE` | 订阅 |
+| `UNSUBSCRIBE` | 取消订阅 |
+
+**WSMessageType - 消息类型**：
+
+| 值 | 说明 |
+|-----|------|
+| `GET_CONFIG` | 获取配置 |
+| `GET_SERVER_TIME` | 获取服务器时间 |
+| `GET_METRICS` | 获取指标 |
+| `GET_KLINES` | 获取K线 |
+| `GET_SEARCH_SYMBOLS` | 搜索交易对 |
+| `GET_RESOLVE_SYMBOL` | 解析交易对 |
+| `GET_QUOTES` | 获取报价 |
+| `GET_SUBSCRIPTIONS` | 获取订阅列表 |
+| `GET_SPOT_ACCOUNT` | 获取现货账户 |
+| `GET_FUTURES_ACCOUNT` | 获取期货账户 |
+| `SUBSCRIBE` | 订阅 |
+| `UNSUBSCRIBE` | 取消订阅 |
+| `CREATE_ORDER` | 创建订单 |
+| `GET_ORDER` | 查询订单 |
+| `LIST_ORDERS` | 查询订单列表 |
+| `CANCEL_ORDER` | 取消订单 |
+| `GET_OPEN_ORDERS` | 查询挂单 |
+| `CREATE_ALERT_CONFIG` | 创建告警配置 |
+| `LIST_ALERT_CONFIGS` | 列出告警配置 |
+| `UPDATE_ALERT_CONFIG` | 更新告警配置 |
+| `DELETE_ALERT_CONFIG` | 删除告警配置 |
+| `LIST_SIGNALS` | 查询信号 |
+| `GET_STRATEGY_METADATA` | 获取策略元数据 |
+| `GET_STRATEGY_METADATA_BY_TYPE` | 获取指定策略元数据 |
+| `ACK` | 请求确认 |
+| `ERROR` | 错误响应 |
+| `UPDATE` | 实时数据推送 |
+| `CONFIG_DATA` | 配置数据响应 |
+| `KLINES_DATA` | K线数据响应 |
+| `QUOTES_DATA` | 报价数据响应 |
+| `SYMBOL_DATA` | 交易对详情响应 |
+| `SEARCH_SYMBOLS_DATA` | 搜索结果响应 |
+| `SUBSCRIPTION_DATA` | 订阅确认响应 |
+| `ACCOUNT_DATA` | 账户数据响应 |
+| `ORDER_DATA` | 订单数据响应 |
+| `ORDER_LIST_DATA` | 订单列表响应 |
+| `ORDER_UPDATE` | 订单更新推送 |
+| `ALERT_CONFIG_DATA` | 告警配置响应 |
+| `SIGNAL_DATA` | 信号数据响应 |
+| `STRATEGY_METADATA_DATA` | 策略元数据响应 |
+
+**SubscriptionType - 订阅类型**：
+
+| 值 | 说明 | 示例 |
+|-----|------|------|
+| `KLINE` | K线数据 | `BINANCE:BTCUSDT@KLINE_1` |
+| `QUOTES` | 报价数据 | `BINANCE:BTCUSDT@QUOTES` |
+| `TRADE` | 交易数据 | `BINANCE:BTCUSDT@TRADE` |
+| `ACCOUNT` | 账户数据 | `BINANCE:ACCOUNT@SPOT` |
+| `TICKER` | 24hr行情 | `BINANCE:BTCUSDT@TICKER` |
+
+**ProductType - 产品类型**：
+
+| 值 | 说明 |
+|-----|------|
+| `SPOT` | 现货 |
+| `FUTURES` | 期货（U本位永续） |
+| `PERPETUAL` | 永续合约 |
+
+**WSErrorCode - 错误码**：
+
+| 值 | 说明 |
+|-----|------|
+| `UNKNOWN` | 未知错误 |
+| `INVALID_REQUEST` | 无效请求 |
+| `AUTH_REQUIRED` | 需要认证 |
+| `INVALID_SYMBOL` | 无效交易对 |
+| `INVALID_INTERVAL` | 无效间隔 |
+| `SUBSCRIPTION_FAILED` | 订阅失败 |
+| `ORDER_FAILED` | 订单失败 |
+| `RATE_LIMIT` | 速率限制 |
+
+**RESOLUTION_TO_INTERVAL / INTERVAL_TO_RESOLUTION**：
+
+详见 [WS协议设计文档](./07-websocket-protocol.md#tv分辨率映射表) 的 TV 分辨率映射表。
 
 ---
 
@@ -463,5 +818,150 @@ models/
 
 ---
 
-**版本**：v1.1
-**更新**：2026-02-28 - 修复模型字段描述错误，对比实际代码更正 SymbolInfo、QuotesValue、ExchangeInfo、RichExchangeInfo、FuturesModel 等模型字段；新增 base.py 基础类说明
+## 🔗 前后端数据模型对齐说明
+
+### 架构原则
+
+本设计严格遵循"**契约驱动开发**"理念，后端数据模型严格按照前端 TypeScript 接口构建，实现零转换成本和完全类型对齐。
+
+### 数据流架构
+
+```
+前端 TypeScript 接口 ← → 后端 Python 模型 ← → TradingView 库
+     ↓                         ↓              ↓
+  类型定义              Pydantic 模型      官方标准
+  (单一事实来源)        (运行时验证)      (最终目标)
+```
+
+### 对齐策略
+
+1. **类型严格对齐**
+   - 前端 TypeScript 接口定义严格符合 TradingView 官方标准
+   - 后端 Pydantic 模型 100% 对齐前端接口字段
+   - 实现编译时和运行时双重类型验证
+
+2. **零转换设计**
+   - 后端直接输出 TradingView 兼容格式
+   - 避免 datafeed 层进行数据转换
+   - 减少错误源和性能开销
+
+3. **契约驱动开发**
+   - 前端接口变更自动影响后端实现
+   - 通过类型系统保证一致性
+   - API 文档与代码同步更新
+
+### 对齐验证
+
+**SymbolInfo 模型对齐度**: 100% ✅
+- 所有必需字段严格匹配
+- 可选字段完全覆盖
+- 严格类型定义完全一致
+
+**Bar 模型对齐度**: 100% ✅
+- 字段名、类型、含义完全一致
+- TradingView 标准完全兼容
+
+**QuotesValue 模型对齐度**: 100% ✅
+- 报价数据字段 100% 匹配
+- 扩展字段支持完整实现
+
+### 订单数据模型设计原则
+
+> **设计原则**：完全采用币安官方格式，避免参数命名混乱
+> - data 字段完全采用币安蛇形命名（与币安API完全一致）
+> - 前端发送 camelCase，后端 SnakeCaseModel 基类自动转换
+> - 期货与现货完全分开建模，结构清晰不混淆
+> - 区分 requestId（请求追踪）和 newClientOrderId（订单标识）
+
+#### 期货 vs 现货区分
+
+通过交易对符号前缀区分：
+
+| 前缀 | 市场 | 示例 |
+|------|------|------|
+| `BINANCE:` | 现货 | `BINANCE:BTCUSDT` |
+| `BINANCE:` + `.PERP` 后缀 | U本位永续合约 | `BINANCE:BTCUSDT.PERP` |
+
+> **注意**：不再使用 `marketType` 字段区分，通过 symbol 前缀自动识别
+
+#### Order Type 强制参数（U本位合约/期货）
+
+> 注意：期货使用不同的订单类型命名，与现货不同！
+
+| Order Type | 强制必填参数 |
+|------------|-------------|
+| `LIMIT` | `quantity`, `price`, `timeInForce` |
+| `MARKET` | `quantity` |
+| `STOP` | `quantity`, `stopPrice` |
+| `STOP_MARKET` | `stopPrice` |
+| `TAKE_PROFIT` | `quantity`, `stopPrice` |
+| `TAKE_PROFIT_MARKET` | `stopPrice` |
+| `TRAILING_STOP_MARKET` | `callbackRate` |
+
+#### Order Type 强制参数（现货）
+
+> 注意：现货使用不同的订单类型命名，与期货不同！
+
+| Order Type | 强制必填参数 |
+|------------|-------------|
+| `LIMIT` | `quantity`, `price`, `timeInForce` |
+| `LIMIT_MAKER` | `quantity`, `price` |
+| `MARKET` | `quantity` 或 `quoteOrderQty` |
+| `STOP_LOSS` | `quantity`, `stopPrice` 或 `trailingDelta` |
+| `STOP_LOSS_LIMIT` | `quantity`, `price`, `timeInForce`, `stopPrice` 或 `trailingDelta` |
+| `TAKE_PROFIT` | `quantity`, `stopPrice` 或 `trailingDelta` |
+| `TAKE_PROFIT_LIMIT` | `quantity`, `price`, `timeInForce`, `stopPrice` 或 `trailingDelta` |
+
+#### 期货特有参数
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `positionSide` | string | 持仓方向：`BOTH`(默认), `LONG`, `SHORT` |
+| `reduceOnly` | bool | 是否只减仓，默认 `false` |
+| `priceMatch` | string | 价格匹配：`OPPONENT`, `QUEUE` 等 |
+| `closePosition` | bool | 是否全平仓 |
+| `activationPrice` | float | 触发价格（追踪止损） |
+| `callbackRate` | float | 回调比例（0.1-10） |
+| `workingType` | string | 触发价格类型：`MARK_PRICE`, `CONTRACT_PRICE` |
+| `priceProtect` | bool | 价格保护 |
+
+#### 现货特有参数
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `quoteOrderQty` | float | 报价数量（以USDT计价） |
+| `icebergQty` | float | 冰山数量 |
+| `trailingDelta` | int | 追踪Delta |
+| `strategyId` | int | 策略ID |
+| `strategyType` | int | 策略类型 |
+| `selfTradePreventionMode` | string | 自成交预防模式 |
+| `newOrderRespType` | string | 响应格式：ACK/RESULT/FULL（默认FULL） |
+
+#### 订单ID说明
+
+| 字段 | 说明 | 用途 |
+|------|------|------|
+| `requestId` | WS请求追踪ID（UUID格式） | 用于关联请求与响应 |
+| `newClientOrderId` | 订单标识ID（UUID格式） | 创建订单时设置，用于追踪订单 |
+| `origClientOrderId` | 客户端订单ID（原值） | 查询/取消订单时使用 |
+
+> **重要**：取消和查询订单时使用 `origClientOrderId`（下单时传入的客户端订单ID），而非 `newClientOrderId`。
+
+#### ORDER_DATA 字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | string | 固定值 `"order"` |
+| `status` | string | 任务状态：`COMPLETED` / `FAILED` |
+| `taskId` | int | order_tasks 表的任务 ID |
+| `result` | object | 币安 API 返回的订单信息（成功时） |
+| `payload` | object | 下单时传入的参数（用于前端回显） |
+| `errorCode` | string | 错误码（失败时） |
+| `errorMessage` | string | 错误信息（失败时） |
+
+> **设计说明**：响应数据完全采用币安蛇形命名，与 [04-trading-orders.md](./04-trading-orders.md) 保持一致。
+
+---
+
+**版本**：v1.3
+**更新**：2026-03-15 - 补充缺失的数据模型设计（OrderSide/OrderType/MarketType等枚举、FailedSubscription、SignalRecordResponse等）；完善协议常量枚举值列表；强调蛇形命名与驼峰转换设计原则

@@ -18,6 +18,7 @@ import logging
 import uuid
 
 from fastapi import WebSocket
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -93,16 +94,20 @@ class ClientManager:
         """
         return self._clients.get(client_id)
 
-    async def send(self, client_id: str, message: dict) -> bool:
+    async def send(self, client_id: str, message: BaseModel) -> bool:
         """向指定客户端发送消息
+
+        强制要求 message 为 Pydantic 模型，确保类型安全贯穿整个链路。
 
         Args:
             client_id: 客户端 ID
-            message: 消息字典
+            message: 消息，必须是 Pydantic 模型
 
         Returns:
             发送是否成功
         """
+        # 将模型转换为字典进行序列化
+        message_dict = message.model_dump(by_alias=True)
         websocket = self.get_websocket(client_id)
         if websocket is None:
             logger.warning(f"ClientManager.send: 未找到客户端 {client_id}")
@@ -111,18 +116,17 @@ class ClientManager:
         try:
             # v2.1规范：type 在 data 内部
             msg_type = (
-                message.get("data", {}).get("type")
-                if message.get("data")
-                else message.get("type")
+                message_dict.get("data", {}).get("type")
+                if message_dict.get("data")
+                else message_dict.get("type")
             )
-            request_id = message.get("requestId", "N/A")
-            import json
+            request_id = message_dict.get("requestId", "N/A")
 
             logger.debug(
                 f"[ClientManager.send] 发送给 client_id={client_id}, requestId={request_id}, type={msg_type}"
             )
-            # 手动序列化以确保 UUID 被正确转换为字符串
-            json_str = json.dumps(message, default=str, ensure_ascii=False)
+            # 使用 model_dump_json 确保正确序列化
+            json_str = message.model_dump_json(by_alias=True, exclude_none=True)
             logger.debug(f"ClientManager.send: 完整消息: {json_str}")
             await websocket.send_text(json_str)
             logger.debug("ClientManager.send: 发送成功")
@@ -133,8 +137,10 @@ class ClientManager:
             await self.disconnect(client_id)
             return False
 
-    async def broadcast(self, subscription_key: str, message: dict) -> None:
+    async def broadcast(self, subscription_key: str, message: BaseModel) -> None:
         """广播消息给订阅指定键的所有客户端
+
+        强制要求 message 为 Pydantic 模型，确保类型安全。
 
         支持通配符匹配：
         - 精确匹配：订阅 'SIGNAL:123' 接收发送到 'SIGNAL:123' 的消息
@@ -143,7 +149,7 @@ class ClientManager:
 
         Args:
             subscription_key: 订阅键
-            message: 消息字典
+            message: 消息，必须是 Pydantic 模型
         """
         if not self._subscription_manager:
             return
@@ -202,14 +208,16 @@ class ClientManager:
         tasks = [self.send(client_id, message) for client_id in clients]
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def broadcast_pattern(self, pattern: str, message: dict, symbol: str) -> None:
+    async def broadcast_pattern(self, pattern: str, message: BaseModel, symbol: str) -> None:
         """按模式广播消息给匹配的订阅客户端
+
+        强制要求 message 为 Pydantic 模型。
 
         支持通配符匹配，如 `BINANCE:*` 匹配所有 BINANCE 订阅。
 
         Args:
             pattern: 订阅键模式
-            message: 消息字典
+            message: 消息，必须是 Pydantic 模型
             symbol: 消息相关的交易对
         """
         # 精确匹配

@@ -1,6 +1,11 @@
-"""AlertSignal - 策略配置 + 策略实例的封装
+"""LoadedAlertConfig - 已加载的告警配置 + 策略实例的封装
 
-将告警配置和策略实例封装在一起，作为信号服务的核心数据单元。
+概念澄清：
+- AlertConfig（告警配置）：用户创建的规则，存储在 alert_configs 表
+- Signal（信号记录）：根据配置计算出的结果，存储在 strategy_signals 表
+- LoadedAlertConfig：AlertConfig 的运行时加载实例，包含配置 + 策略实例
+
+注意：此类不是 Signal（信号记录），Signal 存储在 strategy_signals 表中。
 """
 
 from dataclasses import dataclass
@@ -18,10 +23,12 @@ REQUIRED_KLINES = 280
 
 
 @dataclass
-class AlertSignal:
-    """告警信号实例 - 策略配置 + 策略实例的封装
+class LoadedAlertConfig:
+    """已加载的告警配置 - 告警配置 + 策略实例的运行时封装
 
-    将告警配置和策略实例封装在一起，作为信号服务的核心数据单元。
+    将告警配置（AlertConfig）和策略实例封装在一起，作为信号服务的核心数据单元。
+    注意：此类不是 Signal（信号记录），Signal 存储在 strategy_signals 表中。
+
     这样设计的好处：
     1. 单一数据源：避免在多个 dict 中维护状态
     2. 简化更新逻辑：配置变更时直接删除重建

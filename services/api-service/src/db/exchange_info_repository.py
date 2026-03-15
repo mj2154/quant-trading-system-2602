@@ -8,6 +8,9 @@ from typing import Any
 
 import asyncpg
 
+from ..models.protocol.ws_payload import SymbolSearchItem
+from ..models.trading.symbol_models import SymbolInfo
+
 
 class ExchangeInfoRepository:
     """交易所信息仓储"""
@@ -47,7 +50,7 @@ class ExchangeInfoRepository:
         symbol: str,
         exchange: str = "BINANCE",
         market_type: str = "SPOT",
-    ) -> dict[str, Any] | None:
+    ) -> SymbolInfo | None:
         """精确解析单个交易对
 
         Args:
@@ -56,7 +59,7 @@ class ExchangeInfoRepository:
             market_type: 市场类型 (SPOT, FUTURES)
 
         Returns:
-            交易对信息字典，未找到返回 None
+            SymbolInfo 模型实例，未找到返回 None
         """
         # 解析交易对字符串
         parsed_exchange, ticker = self._parse_symbol(symbol)
@@ -98,25 +101,32 @@ class ExchangeInfoRepository:
                 if row is None:
                     return None
 
-                full_symbol = f"{exchange}:{row['symbol']}"
-                return {
-                    "symbol": full_symbol,
-                    "ticker": row["symbol"],
-                    "name": row["symbol"],
-                    "description": f"{row['base_asset']}/{row['quote_asset']}",
-                    "exchange": exchange,
-                    "listed_exchange": exchange,
-                    "type": "crypto",
-                    "session": "24x7",
-                    "timezone": "Etc/UTC",
-                    "minmov": 1,
-                    "pricescale": 100,
-                    "has_intraday": True,
-                    "has_daily": True,
-                    "has_weekly_and_monthly": True,
-                    "volume_precision": 2,
-                    "currency_code": row["quote_asset"],
-                }
+                # 返回 SymbolInfo 模型
+                # 注意：ticker 必须是 EXCHANGE:SYMBOL 格式，符合 TradingView 要求
+                return SymbolInfo(
+                    name=row["symbol"],
+                    ticker=f"{exchange}:{row['symbol']}",  # 修复：添加交易所前缀
+                    description=f"{row['base_asset']}/{row['quote_asset']}",
+                    exchange=exchange,
+                    listed_exchange=exchange,
+                    type="crypto",
+                    session="24x7",
+                    timezone="Etc/UTC",
+                    minmov=1,
+                    pricescale=100,
+                    supported_resolutions=["1", "5", "15", "60", "240", "1D", "1W", "1M"],
+                    intraday_multipliers=["1", "5", "15", "60"],
+                    daily_multipliers=["1"],
+                    weekly_multipliers=["1"],
+                    monthly_multipliers=["1"],
+                    has_intraday=True,
+                    has_daily=True,
+                    has_weekly_and_monthly=True,
+                    visible_plots_set="ohlcv",
+                    data_status="streaming",
+                    volume_precision=2,
+                    currency_code=row["quote_asset"],
+                )
         except Exception:
             return None
 
@@ -126,7 +136,7 @@ class ExchangeInfoRepository:
         exchange: str = "BINANCE",
         market_type: str = "SPOT",
         limit: int = 50,
-    ) -> list[dict[str, Any]]:
+    ) -> list[SymbolSearchItem]:
         """搜索交易对
 
         Args:
@@ -136,7 +146,7 @@ class ExchangeInfoRepository:
             limit: 返回数量限制
 
         Returns:
-            交易对信息列表
+            SymbolSearchItem 列表
         """
         query_sql = """
             SELECT
@@ -179,14 +189,14 @@ class ExchangeInfoRepository:
                 ticker = f"{row['symbol']}{symbol_suffix}"
                 full_symbol = f"BINANCE:{ticker}"
                 results.append(
-                    {
-                        "symbol": full_symbol,
-                        "full_name": full_symbol,  # TradingView格式: EXCHANGE:SYMBOL
-                        "description": f"{row['base_asset']}/{row['quote_asset']}",
-                        "exchange": "BINANCE",
-                        "ticker": ticker,
-                        "type": "crypto",
-                    }
+                    SymbolSearchItem(
+                        symbol=full_symbol,
+                        full_name=full_symbol,  # TradingView格式: EXCHANGE:SYMBOL
+                        description=f"{row['base_asset']}/{row['quote_asset']}",
+                        exchange="BINANCE",
+                        ticker=ticker,
+                        type="crypto",
+                    )
                 )
 
             return results

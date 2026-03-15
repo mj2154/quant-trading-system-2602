@@ -21,6 +21,7 @@ class SignalRecord:
 
     id: int
     alert_id: str | None
+    name: str | None
     strategy_type: str
     symbol: str
     interval: str
@@ -76,7 +77,7 @@ class StrategySignalsRepository:
         """
         query = """
             SELECT
-                id, alert_id, strategy_type, symbol, interval,
+                id, alert_id, name, strategy_type, symbol, interval,
                 trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals
@@ -171,7 +172,7 @@ class StrategySignalsRepository:
         offset = (page - 1) * page_size
         list_query = f"""
             SELECT
-                id, alert_id, strategy_type, symbol, interval,
+                id, alert_id, name, strategy_type, symbol, interval,
                 trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals
@@ -213,7 +214,7 @@ class StrategySignalsRepository:
 
         query = f"""
             SELECT
-                id, alert_id, strategy_type, symbol, interval,
+                id, alert_id, name, strategy_type, symbol, interval,
                 trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals
@@ -252,7 +253,7 @@ class StrategySignalsRepository:
         offset = (page - 1) * page_size
         query = """
             SELECT
-                id, alert_id, strategy_type, symbol, interval,
+                id, alert_id, name, strategy_type, symbol, interval,
                 trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals
@@ -282,7 +283,7 @@ class StrategySignalsRepository:
         """
         query = """
             SELECT
-                id, alert_id, strategy_type, symbol, interval,
+                id, alert_id, name, strategy_type, symbol, interval,
                 trigger_type, signal_value, signal_reason, computed_at,
                 source_subscription_key, metadata
             FROM strategy_signals

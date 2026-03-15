@@ -1,5 +1,5 @@
 """Services module for signal service."""
-from .alert_signal import AlertSignal
+from .alert_signal import LoadedAlertConfig
 from .constants import REQUIRED_KLINES, TV_INTERVAL_TO_MS, TV_TO_BINANCE_INTERVAL
 from .kline_cache import _init_kline_cache, _update_kline_cache
 from .kline_utils import (
@@ -28,7 +28,7 @@ from .trigger_engine import (
 __all__ = [
     # Main service
     "SignalService",
-    "AlertSignal",
+    "LoadedAlertConfig",
     # Constants
     "REQUIRED_KLINES",
     "TV_INTERVAL_TO_MS",

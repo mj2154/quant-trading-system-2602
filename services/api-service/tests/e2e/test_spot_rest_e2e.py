@@ -175,18 +175,18 @@ class TestSpotRestE2E(E2ETestBase):
 
         # 验证配置内容
         data = response.get("data", {})
-        assert "supported_resolutions" in data, "缺少supported_resolutions"
-        assert "currency_codes" in data, "缺少currency_codes"
-        assert "symbols_types" in data, "缺少symbols_types"
+        assert "supportedResolutions" in data, "缺少supportedResolutions"
+        assert "currencyCodes" in data, "缺少currencyCodes"
+        assert "symbolsTypes" in data, "缺少symbolsTypes"
 
         # 验证支持的分辨率
-        supported_resolutions = data.get("supported_resolutions", [])
+        supported_resolutions = data.get("supportedResolutions", [])
         expected_resolutions = ["1", "5", "15", "60", "240", "1D", "1W", "1M"]
         for res in expected_resolutions:
             assert res in supported_resolutions, f"不支持的分辨率: {res}"
 
         # 验证货币代码
-        currency_codes = data.get("currency_codes", [])
+        currency_codes = data.get("currencyCodes", [])
         assert "USDT" in currency_codes, "缺少USDT"
 
         logger.info(f"✅ 配置获取成功: 支持{len(supported_resolutions)}种分辨率")
@@ -216,10 +216,10 @@ class TestSpotRestE2E(E2ETestBase):
         symbols = data.get("symbols", [])
         assert len(symbols) > 0, "搜索结果为空"
 
-        # 验证符号格式
+        # 验证符号格式（CamelCaseModel 序列化后输出 CamelCase）
         for symbol_info in symbols[:5]:  # 检查前5个
             assert "symbol" in symbol_info, "缺少symbol字段"
-            assert "full_name" in symbol_info, "缺少full_name字段"
+            assert "fullName" in symbol_info, "缺少fullName字段"  # CamelCase 序列化
             assert "description" in symbol_info, "缺少description字段"
             assert "exchange" in symbol_info, "缺少exchange字段"
             assert "ticker" in symbol_info, "缺少ticker字段"
@@ -310,8 +310,8 @@ class TestSpotRestE2E(E2ETestBase):
                 logger.error(f"  ❌ {test_case['name']}: 缺少count字段")
                 self.test_results["failed"] += 1
                 continue
-            if "no_data" not in data:
-                logger.error(f"  ❌ {test_case['name']}: 缺少no_data字段")
+            if "noData" not in data:  # CamelCase 序列化
+                logger.error(f"  ❌ {test_case['name']}: 缺少noData字段")
                 self.test_results["failed"] += 1
                 continue
 
@@ -617,8 +617,8 @@ class TestSpotRestE2E(E2ETestBase):
             to_time=invalid_end_time,
         )
 
-        # 应该返回错误
-        if response.get("action") == "error":
+        # 应该返回错误（根据设计文档，错误响应 type 为 "ERROR"）
+        if response.get("type") == "ERROR":
             error_data = response.get("data", {})
             if error_data.get("errorCode") == "INVALID_PARAMETER":
                 if "from_time must be less than to_time" in error_data.get("errorMessage", ""):

@@ -98,7 +98,7 @@ class TestFuturesRestE2E(E2ETestBase):
 
             # 验证数据内容
             assert "symbol" in data, "缺少symbol字段"
-            assert "resolution" in data, "缺少resolution字段"
+            assert "interval" in data, "缺少interval字段"
             assert "bars" in data, "缺少bars字段"
 
             # 验证符号匹配
@@ -203,7 +203,7 @@ class TestFuturesRestE2E(E2ETestBase):
                 symbol, resolution, start_time, end_time
             )
             assert data["symbol"] == symbol, "符号不匹配"
-            assert data["resolution"] == resolution, "分辨率不匹配"
+            assert data["interval"] == resolution, "分辨率不匹配"
 
             bars = data.get("bars", [])
             count = data.get("count", 0)

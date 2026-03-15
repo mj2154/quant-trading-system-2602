@@ -11,8 +11,10 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .base import SnakeCaseModel
 
-class FuturesAsset(BaseModel):
+
+class FuturesAsset(SnakeCaseModel):
     """期货资产信息
 
     账户中特定资产的余额和保证金详情。
@@ -64,7 +66,7 @@ class FuturesAsset(BaseModel):
     }
 
 
-class FuturesPosition(BaseModel):
+class FuturesPosition(SnakeCaseModel):
     """期货持仓信息
 
     对应 /fapi/v3/account 响应中的 positions 数组元素。
@@ -108,7 +110,7 @@ class FuturesPosition(BaseModel):
     }
 
 
-class FuturesAccountInfo(BaseModel):
+class FuturesAccountInfo(SnakeCaseModel):
     """期货账户信息
 
     币安U本位合约账户的完整信息。

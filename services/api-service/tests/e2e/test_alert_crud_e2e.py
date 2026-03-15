@@ -9,16 +9,17 @@ Tests alert signal WebSocket operations:
 - Delete alert signal (WebSocket)
 - Enable/disable alert signal (WebSocket)
 
-Conforms to TradingView-完整API规范设计文档.md:
+Conforms to 07-websocket-protocol.md:
 - protocolVersion: "2.0"
-- action: "get" for all requests
-- type field inside data object
+- type: 顶层消息类型（如 CREATE_ALERT_CONFIG, LIST_ALERT_CONFIGS）
+- data: 请求参数对象
+- requestId: 请求追踪ID
 - page/page_size for pagination (not limit/offset)
 - Pure WebSocket (no REST API)
 - Three-phase response: ack -> success (if applicable)
 
 Author: Claude Code
-Version: v2.0.0
+Version: v3.0.0
 """
 
 import asyncio
@@ -110,7 +111,7 @@ class AlertTestClient:
                     logger.info(f"Received ack: {json.dumps(ack_dict, indent=2)[:300]}")
 
                     # Check if it's an ack response
-                    if ack_dict.get("action") == "ack":
+                    if ack_dict.get("type") == "ACK":
                         # Wait for final success/error response
                         final_response = await asyncio.wait_for(self.websocket.recv(), timeout=10)
                         final_dict = json.loads(final_response)
@@ -152,18 +153,19 @@ class AlertTestClient:
         import uuid
         message = {
             "protocolVersion": "2.0",
-            "action": "get",
+            "type": "CREATE_ALERT_CONFIG",  # 顶层 type
+            "requestId": self._generate_request_id(),
+            "timestamp": int(time.time() * 1000),
             "data": {
-                "type": "create_alert_config",
                 "id": str(uuid.uuid4()),
                 "name": name,
-                "strategy_type": strategy_type,
+                "strategyType": strategy_type,
                 "symbol": symbol,
                 "interval": interval,
-                "trigger_type": trigger_type,
+                "triggerType": trigger_type,
                 "params": params or {},
-                "is_enabled": is_enabled,
-                "created_by": created_by,
+                "isEnabled": is_enabled,
+                "createdBy": created_by,
             }
         }
         if description:
@@ -180,24 +182,25 @@ class AlertTestClient:
     ) -> dict[str, Any] | None:
         """List alert signals.
 
-        Conforms to TradingView API spec:
+        Conforms to 07-websocket-protocol.md:
         - Uses page/page_size for pagination (not limit/offset)
         """
         message = {
             "protocolVersion": "2.0",
-            "action": "get",
+            "type": "LIST_ALERT_CONFIGS",  # 顶层 type
+            "requestId": self._generate_request_id(),
+            "timestamp": int(time.time() * 1000),
             "data": {
-                "type": "list_alert_configs",
                 "page": page,
-                "page_size": page_size,
+                "pageSize": page_size,
             }
         }
         if is_enabled is not None:
-            message["data"]["is_enabled"] = is_enabled
+            message["data"]["isEnabled"] = is_enabled
         if symbol:
             message["data"]["symbol"] = symbol
         if strategy_type:
-            message["data"]["strategy_type"] = strategy_type
+            message["data"]["strategyType"] = strategy_type
         return await self.send_message(message, multi_phase=False)
 
     async def get_alert(self, alert_id: str) -> dict[str, Any] | None:
@@ -209,7 +212,7 @@ class AlertTestClient:
         # Use list_alerts with large page_size to find the alert
         response = await self.list_alerts(page=1, page_size=100)
 
-        if response and response.get("action") == "success":
+        if response and response.get("type") in ["LIST_ALERT_CONFIGS", "ALERT_CONFIG_DATA"]:
             data = response.get("data", {})
             items = data.get("items", [])
             # Find the specific alert
@@ -217,19 +220,16 @@ class AlertTestClient:
                 if alert.get("id") == alert_id:
                     return {
                         "protocolVersion": "2.0",
-                        "action": "success",
+                        "type": "ALERT_CONFIG_DATA",
                         "requestId": response.get("requestId"),
                         "timestamp": int(time.time() * 1000),
-                        "data": {
-                            "type": "get_alert_config",
-                            **alert
-                        }
+                        "data": alert
                     }
 
             # Alert not found
             return {
                 "protocolVersion": "2.0",
-                "action": "error",
+                "type": "ERROR",
                 "requestId": response.get("requestId"),
                 "timestamp": int(time.time() * 1000),
                 "data": {
@@ -255,9 +255,10 @@ class AlertTestClient:
         """Update an alert signal."""
         message = {
             "protocolVersion": "2.0",
-            "action": "get",
+            "type": "UPDATE_ALERT_CONFIG",  # 顶层 type
+            "requestId": self._generate_request_id(),
+            "timestamp": int(time.time() * 1000),
             "data": {
-                "type": "update_alert_config",
                 "id": alert_id,
             }
         }
@@ -266,26 +267,27 @@ class AlertTestClient:
         if description is not None:
             message["data"]["description"] = description
         if strategy_type is not None:
-            message["data"]["strategy_type"] = strategy_type
+            message["data"]["strategyType"] = strategy_type
         if symbol is not None:
             message["data"]["symbol"] = symbol
         if interval is not None:
             message["data"]["interval"] = interval
         if trigger_type is not None:
-            message["data"]["trigger_type"] = trigger_type
+            message["data"]["triggerType"] = trigger_type
         if params is not None:
             message["data"]["params"] = params
         if is_enabled is not None:
-            message["data"]["is_enabled"] = is_enabled
+            message["data"]["isEnabled"] = is_enabled
         return await self.send_message(message, multi_phase=False)
 
     async def delete_alert(self, alert_id: str) -> dict[str, Any] | None:
         """Delete an alert signal."""
         message = {
             "protocolVersion": "2.0",
-            "action": "get",
+            "type": "DELETE_ALERT_CONFIG",  # 顶层 type
+            "requestId": self._generate_request_id(),
+            "timestamp": int(time.time() * 1000),
             "data": {
-                "type": "delete_alert_config",
                 "id": alert_id,
             }
         }
@@ -297,11 +299,12 @@ class AlertTestClient:
         """Enable or disable an alert signal."""
         message = {
             "protocolVersion": "2.0",
-            "action": "get",
+            "type": "UPDATE_ALERT_CONFIG",  # 顶层 type (启用/禁用也是更新操作)
+            "requestId": self._generate_request_id(),
+            "timestamp": int(time.time() * 1000),
             "data": {
-                "type": "enable_alert_config",
                 "id": alert_id,
-                "is_enabled": is_enabled,
+                "isEnabled": is_enabled,
             }
         }
         return await self.send_message(message, multi_phase=False)
@@ -364,8 +367,8 @@ class TestAlertCRUD:
             self._record_fail(test_name, f"Response is not a dict: {type(response)}")
             return False
 
-        action = response.get("action")
-        if action == "error":
+        action = response.get("type")
+        if action == "ERROR":
             data = response.get("data", {})
             # Handle case where data might be a string or other non-dict type
             if isinstance(data, dict):
@@ -375,12 +378,14 @@ class TestAlertCRUD:
             self._record_fail(test_name, error_msg)
             return False
 
-        if action == "success":
+        # 根据设计文档，成功响应的 type 是具体的数据类型（如 ALERT_CONFIG_DATA）
+        # 而非 "success"。顶层 type 表示消息类型。
+        if action in ["ALERT_CONFIG_DATA", "LIST_ALERT_CONFIGS", "SIGNAL_DATA"]:
             self._record_pass(test_name)
             return True
 
-        # Also accept "ack" for async operations
-        if action == "ack":
+        # Also accept "ACK" for async operations
+        if action == "ACK":
             self._record_pass(test_name)
             return True
 
@@ -407,6 +412,20 @@ class TestAlertCRUD:
             is_enabled=True,
             description="Test alert description",
         )
+
+        # 使用三阶段模式：ACK -> 最终响应
+        # 手动处理响应，因为 create_alert 使用 multi_phase=True
+        if response and response.get("type") == "ACK":
+            # 等待最终响应
+            import asyncio
+            try:
+                final_response = await asyncio.wait_for(self.client.websocket.recv(), timeout=10)
+                import json
+                response = json.loads(final_response)
+                logger.info(f"Received final response: {json.dumps(response, indent=2)[:500]}")
+            except asyncio.TimeoutError:
+                self._record_fail(test_name, "Timeout waiting for final response")
+                return False
 
         if self._assert_response_success(response, test_name):
             # Extract alert ID from response
@@ -520,7 +539,7 @@ class TestAlertCRUD:
                 self._record_fail(f"{test_name}_disable", f"Response is not a dict: {type(response)}")
                 return False
 
-            action = response.get("action")
+            action = response.get("type")
             if action == "success":
                 self._record_pass(f"{test_name}_disable")
             else:
@@ -541,7 +560,7 @@ class TestAlertCRUD:
                 self._record_fail(f"{test_name}_enable", f"Response is not a dict: {type(response)}")
                 return False
 
-            action = response.get("action")
+            action = response.get("type")
             if action == "success":
                 self._record_pass(f"{test_name}_enable")
                 logger.info("Alert enabled/disabled successfully")

@@ -26,7 +26,7 @@ from ..db.tasks_repository import TasksRepository
 from ..listener.alert_signal_listener import AlertSignalListener
 from ..listener.realtime_update_listener import RealtimeUpdateListener
 from ..strategies.base import Strategy
-from .alert_signal import AlertSignal
+from .alert_signal import LoadedAlertConfig
 from .constants import REQUIRED_KLINES, TV_INTERVAL_TO_MS
 from .kline_cache import _init_kline_cache, _update_kline_cache
 from .kline_utils import (
@@ -73,8 +73,8 @@ class SignalService:
 
         # 告警信号实例字典（按 alert_id 索引）
         # key: alert_id (UUID)
-        # value: AlertSignal 实例（包含配置 + 策略实例）
-        self._alerts: dict[UUID, AlertSignal] = {}
+        # value: LoadedAlertConfig 实例（包含配置 + 策略实例）
+        self._alerts: dict[UUID, LoadedAlertConfig] = {}
 
         # 按订阅键索引（一个K线数据可能被多个告警使用）
         # key: subscription_key (如 "BINANCE:BTCUSDT@KLINE_60")
@@ -364,7 +364,7 @@ class SignalService:
             if not other_alerts_using_old_key:
                 await self._realtime_repo.remove_subscription(old_subscription_key)
 
-        # ========== Step 4: Create new AlertSignal ==========
+        # ========== Step 4: Create new LoadedAlertConfig ==========
         # Create trigger state for the alert
         try:
             trigger_type_enum = TriggerType(alert.trigger_type)
@@ -380,11 +380,11 @@ class SignalService:
         # Create strategy instance
         strategy = await self._create_strategy(alert)
 
-        # Store alert signal (AlertSignal contains both config and strategy)
+        # Store alert signal (LoadedAlertConfig contains both config and strategy)
         # If old_alert exists, preserve created_at; otherwise use now
         created_at = old_alert.created_at if old_alert else datetime.utcnow()
 
-        self._alerts[alert_id] = AlertSignal(
+        self._alerts[alert_id] = LoadedAlertConfig(
             alert_id=alert_id,
             name=alert.name,
             strategy_type=alert.strategy_type,
@@ -465,8 +465,8 @@ class SignalService:
             # Create strategy instance based on alert's strategy_type
             strategy = await self._create_strategy(alert)
 
-            # Store alert signal (AlertSignal contains both config and strategy)
-            self._alerts[alert_id] = AlertSignal(
+            # Store alert signal (LoadedAlertConfig contains both config and strategy)
+            self._alerts[alert_id] = LoadedAlertConfig(
                 alert_id=alert_id,
                 name=alert.name,
                 strategy_type=alert.strategy_type,
@@ -1271,7 +1271,7 @@ class SignalService:
 
             if not should_execute:
                 # Update trigger state but don't calculate
-                self._alerts[alert_id] = AlertSignal(
+                self._alerts[alert_id] = LoadedAlertConfig(
                     alert_id=loaded_alert.alert_id,
                     name=loaded_alert.name,
                     strategy_type=loaded_alert.strategy_type,
@@ -1319,11 +1319,11 @@ class SignalService:
             )
             return
 
-        # Get strategy from AlertSignal
+        # Get strategy from LoadedAlertConfig
         strategy = loaded_alert.strategy
 
-        # Create AlertSignal instance to use calculate method
-        alert_signal = AlertSignal(
+        # Create LoadedAlertConfig instance to use calculate method
+        alert_signal = LoadedAlertConfig(
             alert_id=str(alert_id),
             name=loaded_alert.name,
             strategy_type=loaded_alert.strategy_type,
@@ -1380,6 +1380,7 @@ class SignalService:
         # Write signal to database
         await self._signals_repo.insert_signal(
             alert_id=str(alert_id),
+            name=loaded_alert.name,
             strategy_type=loaded_alert.strategy_type,
             symbol=loaded_alert.symbol,
             interval=loaded_alert.interval,
@@ -1390,6 +1391,7 @@ class SignalService:
             metadata={
                 "processed_at": datetime.utcnow().isoformat(),
             },
+            created_by=loaded_alert.created_by,
         )
 
         logger.info(
@@ -1402,7 +1404,7 @@ class SignalService:
         )
 
         # Update trigger state
-        self._alerts[alert_id] = AlertSignal(
+        self._alerts[alert_id] = LoadedAlertConfig(
             alert_id=loaded_alert.alert_id,
             name=loaded_alert.name,
             strategy_type=loaded_alert.strategy_type,

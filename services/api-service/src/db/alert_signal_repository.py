@@ -9,7 +9,7 @@ import asyncpg
 logger = logging.getLogger(__name__)
 
 
-class AlertSignalRepository:
+class AlertConfigRepository:
     """Repository for alert_configs table operations.
 
     Uses asyncpg.Pool from the shared database module.

@@ -28,9 +28,18 @@ class CamelCaseModel(BaseModel):
     )
 
     def model_dump(self, **kwargs):
-        """序列化时默认使用 camelCase"""
+        """序列化时默认使用 camelCase
+
+        修复 Pydantic v2 中 BaseModel 类型字段序列化问题：
+        当字段类型是 BaseModel 时，需要手动序列化嵌套模型
+        """
         kwargs.setdefault("by_alias", True)
-        return super().model_dump(**kwargs)
+        # 修复 BaseModel 类型字段的序列化问题
+        result = super().model_dump(**kwargs)
+        # 手动序列化 data 字段中的嵌套 Pydantic 模型
+        if "data" in result and hasattr(result["data"], "model_dump"):
+            result["data"] = result["data"].model_dump(by_alias=True)
+        return result
 
     def model_dump_json(self, **kwargs):
         """JSON序列化时默认使用 camelCase"""

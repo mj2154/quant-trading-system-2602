@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS strategy_signals (
     id BIGSERIAL PRIMARY KEY,
 
     -- 关联告警（用于追溯配置来源）
-    alert_id VARCHAR(36) NOT NULL,   -- 关联 alert_configs.id
+    alert_id VARCHAR(50) NOT NULL,   -- 关联 alert_configs.id (UUIDv4 hex 格式，32字符)
 
     -- 用户标识
     created_by VARCHAR(100),                   -- 创建者标识
@@ -923,7 +923,12 @@ api-service 收到 `get_strategy_metadata` 请求时：
 - 同一策略/交易对/周期的多个告警会互相覆盖
 - `_strategies` 和 `_loaded_alerts` 两个 dict 分开维护，增加复杂度
 
-### 8.13.2 AlertSignal 告警信号类设计
+### 8.13.2 LoadedAlertConfig 运行时告警配置类设计
+
+> **概念澄清**：
+> - **AlertConfig（告警配置）**：用户创建的规则，存储在 `alert_configs` 表
+> - **Signal（信号记录）**：根据配置计算出的结果，存储在 `strategy_signals` 表
+> - **LoadedAlertConfig**：AlertConfig 的运行时加载实例，包含配置 + 策略实例
 
 ```python
 from dataclasses import dataclass
@@ -939,10 +944,12 @@ from .trigger_engine import TriggerState
 REQUIRED_KLINES = 280
 
 @dataclass
-class AlertSignal:
-    """告警信号实例 - 策略配置 + 策略实例的封装
+class LoadedAlertConfig:
+    """已加载的告警配置 - 告警配置 + 策略实例的运行时封装
 
-    将告警配置和策略实例封装在一起，作为信号服务的核心数据单元。
+    将告警配置（AlertConfig）和策略实例封装在一起，作为信号服务的核心数据单元。
+    注意：此类不是 Signal（信号记录），Signal 存储在 strategy_signals 表中。
+
     这样设计的好处：
     1. 单一数据源：避免在多个 dict 中维护状态
     2. 简化更新逻辑：配置变更时直接删除重建
@@ -1011,8 +1018,8 @@ class SignalService:
 
         # 告警信号实例字典（按 alert_id 索引）
         # key: alert_id (UUID)
-        # value: AlertSignal 实例（包含配置 + 策略实例）
-        self._alerts: dict[UUID, AlertSignal] = {}
+        # value: LoadedAlertConfig 实例（包含配置 + 策略实例）
+        self._alerts: dict[UUID, LoadedAlertConfig] = {}
 
         # 告警信号实例字典（按订阅键索引，支持一个订阅键对应多个告警）
         # key: subscription_key (如 "BINANCE:BTCUSDT@KLINE_60")
@@ -1039,7 +1046,7 @@ class SignalService:
 
 | key | value | 说明 |
 |-----|-------|------|
-| `alert_id` (UUID) | `AlertSignal` | 包含配置和策略实例的完整封装 |
+| `alert_id` (UUID) | `LoadedAlertConfig` | 包含配置和策略实例的完整封装 |
 | `subscription_key` | `set[alert_id]` | 按订阅键索引，一个K线数据可能被多个告警使用 |
 | `subscription_key` | `list[dict]` | K线缓存，避免重复查询数据库 |
 
@@ -1120,7 +1127,7 @@ def create_strategy(strategy_type: str, params: dict[str, Any] | None = None) ->
    ↓
 3. 从数据库加载告警配置
    ↓
-4. 创建 AlertSignal 实例:
+4. 创建 LoadedAlertConfig 实例:
    - 根据 strategy_type 创建策略实例
    - 将 params 传递给策略
    - 初始化 trigger_state
@@ -1143,7 +1150,7 @@ def create_strategy(strategy_type: str, params: dict[str, Any] | None = None) ->
 当告警配置更新时，采用**智能重建**逻辑：
 
 **设计原则**：
-1. 数据库通知中已包含重建 AlertSignal 所需的所有信息，无需再次查询数据库
+1. 数据库通知中已包含重建 LoadedAlertConfig 所需的所有信息，无需再次查询数据库
 2. 配置变更后 trigger_state 重置是合理的行为
 3. `is_enabled` 变化时不需要删除重建策略实例
 
@@ -1223,13 +1230,13 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
             del self._alerts[alert_id]
             logger.info("Alert removed for rebuild: alert_id=%s", alert_id)
 
-        # 直接从通知数据创建 AlertSignal（无需查库）
-        alert_signal = self._create_alert_signal_from_notify(alert_data)
-        self._alerts[alert_id] = alert_signal
+        # 直接从通知数据创建 LoadedAlertConfig（无需查库）
+        loaded_config = self._create_loaded_config_from_notify(alert_data)
+        self._alerts[alert_id] = loaded_config
         logger.info("Alert rebuilt from notification: alert_id=%s", alert_id)
 
-def _create_alert_signal_from_notify(self, data: dict[str, Any]) -> AlertSignal:
-    """从通知数据创建 AlertSignal 实例"""
+def _create_loaded_config_from_notify(self, data: dict[str, Any]) -> LoadedAlertConfig:
+    """从通知数据创建 LoadedAlertConfig 实例"""
     from datetime import datetime
     from .strategy_factory import create_strategy
 
@@ -1237,7 +1244,7 @@ def _create_alert_signal_from_notify(self, data: dict[str, Any]) -> AlertSignal:
     strategy_type = data.get("strategy_type", "macd")
     params = data.get("params", {})
 
-    return AlertSignal(
+    return LoadedAlertConfig(
         alert_id=alert_id,
         name=data.get("name", ""),
         strategy_type=strategy_type,
@@ -1261,8 +1268,8 @@ SignalService 需要管理两种索引：
 ```python
 # 按 alert_id 索引的告警信号实例
 # key: alert_id (UUID)
-# value: AlertSignal 实例
-self._alerts: dict[UUID, AlertSignal] = {}
+# value: LoadedAlertConfig 实例
+self._alerts: dict[UUID, LoadedAlertConfig] = {}
 ```
 
 **2. 订阅键索引（`_alerts_by_key`）**
@@ -1285,7 +1292,7 @@ self._kline_cache: dict[str, pd.DataFrame] = {}
 
 **索引关系**：
 ```
-_alerts[alert_id] → AlertSignal(包含 interval)
+_alerts[alert_id] → LoadedAlertConfig(包含 interval)
                            ↓
               _build_subscription_key(symbol, interval)
                            ↓
@@ -1310,7 +1317,7 @@ _alerts[alert_id] → AlertSignal(包含 interval)
 async def _handle_alert_update(self, data: dict[str, Any]) -> None:
     """处理告警配置更新 - 智能重建
 
-    数据库通知已包含重建 AlertSignal 所需的所有信息。
+    数据库通知已包含重建 LoadedAlertConfig 所需的所有信息。
     - 如果 is_enabled 变化，只更新字段
     - 如果其他字段变化，删除重建
     """
@@ -1383,9 +1390,9 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
         del self._alerts[alert_id]
         logger.info("Alert removed for rebuild: alert_id=%s", alert_id)
 
-    # 直接从通知数据创建 AlertSignal（无需查库）
-    alert_signal = self._create_alert_signal_from_notify(alert_data)
-    self._alerts[alert_id] = alert_signal
+    # 直接从通知数据创建 LoadedAlertConfig（无需查库）
+    loaded_config = self._create_loaded_config_from_notify(alert_data)
+    self._alerts[alert_id] = loaded_config
 
     # ========== 步骤5：建立新索引 ==========
     new_subscription_key = _build_subscription_key(
@@ -1414,7 +1421,7 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
 **关键点**：
 1. **旧值来源**：`self._alerts[alert_id]` 存储了旧配置，包含旧的 symbol 和 interval
 2. **清理顺序**：先清理旧索引，再建立新索引
-3. **双重索引**：`AlertSignal` 在 `_alerts` 中，alert_id 同时在 `_alerts_by_key` 中
+3. **双重索引**：`LoadedAlertConfig` 在 `_alerts` 中，alert_id 同时在 `_alerts_by_key` 中
 
 ### 8.13.7 设计优势
 
@@ -1430,7 +1437,7 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
 | 文件 | 说明 |
 |------|------|
 | `services/signal-service/src/services/signal_service.py` | 信号服务核心逻辑 |
-| `services/signal-service/src/services/alert_signal.py` | AlertSignal 类定义 |
+| `services/signal-service/src/services/alert_signal.py` | LoadedAlertConfig 类定义（原名 AlertSignal） |
 | `services/signal-service/src/services/strategy_factory.py` | 策略工厂函数 |
 | `services/signal-service/main.py` | 服务入口 |
 
@@ -1549,7 +1556,7 @@ async def _handle_alert_update(self, data: dict[str, Any]) -> None:
 
 | 章节 | 关注点 |
 |------|--------|
-| 8.13.6 | 内存中 `AlertSignal` 实例的更新（只更新字段 vs 删除重建） |
+| 8.13.6 | 内存中 `LoadedAlertConfig` 实例的更新（只更新字段 vs 删除重建） |
 | 8.14 | 数据库 `subscribers` 数组的更新（启用/禁用时的订阅管理） |
 
 两者协同工作：

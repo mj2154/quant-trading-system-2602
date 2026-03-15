@@ -8,10 +8,11 @@
 版本: v2.0.0
 """
 
-from pydantic import BaseModel
+
+from ..base import CamelCaseModel
 
 
-class SubscriptionKey(BaseModel):
+class SubscriptionKey(CamelCaseModel):
     """
     订阅键
 
@@ -109,9 +110,9 @@ class SubscriptionKey(BaseModel):
         )
 
 
-class SubscriptionInfo(BaseModel):
+class SubscriptionDetail(CamelCaseModel):
     """
-    订阅信息
+    订阅详情
 
     包含订阅的详细信息。
     """
@@ -125,10 +126,10 @@ class SubscriptionInfo(BaseModel):
     last_updated: float  # 最后更新时间
 
     def __str__(self) -> str:
-        return f"SubscriptionInfo({self.client_id}, {self.subscription_key})"
+        return f"SubscriptionDetail({self.client_id}, {self.subscription_key})"
 
 
-class ClientSubscriptions(BaseModel):
+class ClientSubscriptions(CamelCaseModel):
     """
     客户端订阅
 
@@ -144,7 +145,7 @@ class ClientSubscriptions(BaseModel):
         return f"ClientSubscriptions({self.client_id}, {len(self.subscriptions)} subs)"
 
 
-class ExchangeSubscriptions(BaseModel):
+class ExchangeSubscriptions(CamelCaseModel):
     """
     交易所订阅
 
@@ -160,7 +161,7 @@ class ExchangeSubscriptions(BaseModel):
         return f"ExchangeSubscriptions({self.exchange}, {len(self.streams)} streams)"
 
 
-class SubscriptionChange(BaseModel):
+class SubscriptionChange(CamelCaseModel):
     """
     订阅变更
 
@@ -177,7 +178,7 @@ class SubscriptionChange(BaseModel):
         return f"SubscriptionChange({self.exchange}, +{len(self.subscribe)}, -{len(self.unsubscribe)})"
 
 
-class SubscriptionStats(BaseModel):
+class SubscriptionStats(CamelCaseModel):
     """
     订阅统计
 
@@ -194,7 +195,7 @@ class SubscriptionStats(BaseModel):
         return f"SubscriptionStats(total={self.total_subscriptions}, clients={self.active_clients})"
 
 
-class ProductTypeInfo(BaseModel):
+class ProductTypeInfo(CamelCaseModel):
     """
     产品类型信息
 
@@ -215,7 +216,7 @@ class ProductTypeInfo(BaseModel):
         return f"ProductTypeInfo(type={self.type}, symbol={self.exchange_symbol})"
 
 
-class SubscriptionRequest(BaseModel):
+class SubscriptionRequest(CamelCaseModel):
     """
     订阅请求项
 
@@ -231,7 +232,7 @@ class SubscriptionRequest(BaseModel):
         return self.symbol
 
 
-class SubscriptionBatch(BaseModel):
+class SubscriptionBatch(CamelCaseModel):
     """
     批量订阅
 
@@ -246,7 +247,7 @@ class SubscriptionBatch(BaseModel):
         return f"SubscriptionBatch({self.client_id}, {len(self.subscriptions)} types)"
 
 
-class SubscriptionValidation(BaseModel):
+class SubscriptionValidation(CamelCaseModel):
     """
     订阅验证
 
@@ -263,7 +264,7 @@ class SubscriptionValidation(BaseModel):
         return f"SubscriptionValidation(valid=False, errors={self.errors})"
 
 
-class BatchSubscriptionResult(BaseModel):
+class BatchSubscriptionResult(CamelCaseModel):
     """
     批量订阅结果
 

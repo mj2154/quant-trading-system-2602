@@ -11,7 +11,24 @@
  * - account.ts  - 账户数据模型，对应 account_models.py
  * - signal.ts   - 信号数据模型，对应 signal_models.py
  * - alert.ts    - 告警数据模型，对应 alert_config_models.py
+ * - config.ts   - 配置/搜索/订阅/指标数据模型，对应 ws_payload.py
  */
+
+// ==================== 配置与搜索类型 ====================
+
+export type {
+  SymbolType,
+  ConfigData,
+  SymbolSearchItem,
+  SearchSymbolsData,
+  SubscriptionItem,
+  FailedSubscription,
+  SubscriptionsData,
+  SubscribeData,
+  SystemMetrics,
+  MetricsData,
+  ServerTimeData,
+} from './config'
 
 // ==================== K线类型 ====================
 

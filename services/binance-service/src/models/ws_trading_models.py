@@ -9,8 +9,10 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from .base import SnakeCaseModel
 
-class WSRequest(BaseModel):
+
+class WSRequest(SnakeCaseModel):
     """WebSocket请求基础模型
 
     字段说明：
@@ -24,7 +26,7 @@ class WSRequest(BaseModel):
     params: Optional[dict[str, Any]] = None
 
 
-class WSResponse(BaseModel):
+class WSResponse(SnakeCaseModel):
     """WebSocket响应模型
 
     字段说明：
@@ -40,7 +42,7 @@ class WSResponse(BaseModel):
     error: Optional[dict[str, Any]] = None
 
 
-class WSAuthParams(BaseModel):
+class WSAuthParams(SnakeCaseModel):
     """WebSocket session.logon 认证参数
 
     字段说明：
@@ -58,7 +60,7 @@ class WSAuthParams(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class WSOrderParams(BaseModel):
+class WSOrderParams(SnakeCaseModel):
     """WebSocket订单请求参数
 
     字段说明：
@@ -94,7 +96,7 @@ class WSOrderParams(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class WSAuthResponse(BaseModel):
+class WSAuthResponse(SnakeCaseModel):
     """WebSocket session.logon 认证响应
 
     基于官方期货WebSocket API文档：
@@ -114,7 +116,7 @@ class WSAuthResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class WSOrderResponse(BaseModel):
+class WSOrderResponse(SnakeCaseModel):
     """WebSocket订单响应
 
     基于官方U本位合约期货API文档：
@@ -196,7 +198,7 @@ class WSOrderResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class WSCancelOrderParams(BaseModel):
+class WSCancelOrderParams(SnakeCaseModel):
     """WebSocket撤单请求参数
 
     字段说明：
@@ -220,7 +222,7 @@ class WSCancelOrderParams(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class WSQueryOrderParams(BaseModel):
+class WSQueryOrderParams(SnakeCaseModel):
     """WebSocket查询订单请求参数
 
     字段说明：

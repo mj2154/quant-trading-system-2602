@@ -18,11 +18,15 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import asyncpg
+from pydantic import BaseModel
 
 from ..converters import convert_binance_to_tv
 from ..models.protocol.constants import PROTOCOL_VERSION
 from ..models.protocol.ws_message import MessageError, MessageSuccess, MessageUpdate
+from ..models.protocol.ws_payload import ErrorData
+from ..models.protocol.ws_payload import SignalData
 from ..models.trading.kline_models import KlineBar, KlineBars
+from ..models.trading.quote_models import QuotesData, QuotesList, QuotesValue
 from .client_manager import ClientManager
 
 if TYPE_CHECKING:
@@ -214,18 +218,38 @@ class DataProcessor:
             # 转换 UUID 为字符串（避免 JSON 序列化失败）
             event_data = self._convert_uuids_to_str(event_data)
 
+            # signal_new: 使用 SignalData 模型验证数据合规性
+            if channel == "signal_new":
+                try:
+                    validated_signal = SignalData(**event_data)
+                    event_data = validated_signal.model_dump(by_alias=True)
+                except Exception as e:
+                    logger.warning(
+                        "[SignalData validation] Invalid signal data: %s, error: %s",
+                        event_data,
+                        e,
+                    )
+                    # 验证失败仍然继续广播，但记录警告
+
             # 构建推送消息
             # 使用 MessageUpdate 模型确保符合协议规范
+            # 严格遵循07-websocket-protocol.md：subscription_key 提升到顶层，content 作为数据载荷
             subscription_key = self._get_subscription_key(event_type, event_data)
+
+            # 根据事件类型创建相应的数据模型
+            # signal_new 使用 SignalData，其他事件使用 dict
+            content_model: BaseModel
+            if channel == "signal_new":
+                content_model = SignalData(**event_data)
+            else:
+                # 其他事件使用 dict（动态数据）
+                content_model = event_data if event_data else {}
+
             message = MessageUpdate(
                 type="UPDATE",
-                protocol_version=PROTOCOL_VERSION,
                 timestamp=self._timestamp_ms(),
-                data={
-                    "eventType": event_type,
-                    "subscriptionKey": subscription_key,
-                    "content": event_data,
-                },
+                subscription_key=subscription_key,
+                content=content_model,
             ).model_dump(by_alias=True)
 
             logger.info(
@@ -471,19 +495,17 @@ class DataProcessor:
 
             # 构建响应
             # 严格遵循07-websocket-protocol.md规范：使用具体数据类型
-            kline_data_dict = kline_data.model_dump()
-            kline_data_dict["type"] = "klines"
+            # kline_data 已经是 KlineBars 类型，直接使用
             response = MessageSuccess(
                 type="KLINES_DATA",  # 遵循07-websocket-protocol.md规范
-                request_id=request_id,
+                request_id=request_id or "",
                 protocol_version=PROTOCOL_VERSION,
                 timestamp=self._timestamp_ms(),
-                data=kline_data_dict,
+                data=kline_data,
             )
 
-            success = await self._client_manager.send(
-                client_id, response.model_dump(by_alias=True)
-            )
+            # 直接传递 MessageSuccess 模型，保持类型安全
+            success = await self._client_manager.send(client_id, response)
             if success:
                 logger.info(
                     f"已推送 klines 数据给客户端 {client_id}: "
@@ -540,26 +562,28 @@ class DataProcessor:
                 )
                 return
 
-            # 构建响应 - 使用 content 字段符合文档规范
-            task_data = {
-                "type": task_type.replace("get_", "")
+            # 构建响应 - 使用 AccountResponseData 模型
+            from ..models.protocol.ws_payload import AccountResponseData
+
+            task_data = AccountResponseData(
+                type=task_type.replace("get_", "")
                 + "s",  # get_futures_account -> futures_account
-                "content": account_info.get("data"),
-                "update_time": account_info.get("update_time"),
-            }
+                content=account_info.get("data"),
+                update_time=account_info.get("update_time"),
+            )
 
             # 使用 MessageSuccess 模型构建响应
             # 严格遵循07-websocket-protocol.md规范：使用具体数据类型
             response = MessageSuccess(
                 type="ACCOUNT_DATA",  # 遵循07-websocket-protocol.md规范
-                request_id=request_id,
+                request_id=request_id or "",
                 protocol_version=PROTOCOL_VERSION,
                 timestamp=self._timestamp_ms(),
                 data=task_data,
             )
 
-            response_dict = response.model_dump(by_alias=True)
-            success = await self._client_manager.send(client_id, response_dict)
+            # 直接传递 MessageSuccess 模型，保持类型安全
+            success = await self._client_manager.send(client_id, response)
             if success:
                 logger.info(
                     f"已推送账户信息给客户端 {client_id}: "
@@ -595,35 +619,77 @@ class DataProcessor:
             # request_id 从方法参数获取（通知顶层）
             response_type = _map_task_type_to_response_type(task_type)
 
-            # 根据任务类型构建 data
+            # 根据任务类型构建 data（使用 Pydantic 模型确保类型安全）
+            task_data: BaseModel
             if task_type == "get_quotes":
-                task_data = {
-                    "type": response_type,
-                    "quotes": result.get("quotes", []) if result else [],
-                    "count": result.get("count", 0) if result else 0,
-                }
+                # 使用 QuotesList 模型（符合设计文档 07-websocket-protocol.md 格式）
+                # 设计文档格式: { "n": "BINANCE:BTCUSDT", "s": "ok", "v": { ... } }
+                quotes_raw = result.get("quotes", []) if result else []
+                quotes = []
+                for q in quotes_raw:
+                    if isinstance(q, dict):
+                        # 从 n 字段提取 short_name 和 exchange
+                        full_name = q.get("n", "")
+                        # 格式: "BINANCE:BTCUSDT" 或 "BINANCE:BTCUSDT.PERP"
+                        if ":" in full_name:
+                            exchange, symbol_part = full_name.split(":", 1)
+                        else:
+                            exchange = "BINANCE"
+                            symbol_part = full_name
+
+                        # 构建 QuotesValue 数据
+                        v_data = q.get("v", {})
+                        quotes_value_data = {
+                            "ch": v_data.get("ch", 0.0),
+                            "chp": v_data.get("chp", 0.0),
+                            "short_name": symbol_part,
+                            "exchange": exchange,
+                            "description": symbol_part,
+                            "lp": v_data.get("lp", 0.0),
+                            "ask": v_data.get("ask", 0.0),
+                            "bid": v_data.get("bid", 0.0),
+                            "spread": v_data.get("spread", 0.0),
+                            "open_price": v_data.get("open_price", v_data.get("open", 0.0)),
+                            "high_price": v_data.get("high_price", v_data.get("high", 0.0)),
+                            "low_price": v_data.get("low_price", v_data.get("low", 0.0)),
+                            "volume": v_data.get("volume", 0.0),
+                        }
+                        quotes_value = QuotesValue(**quotes_value_data)
+
+                        # 构建 QuotesData（符合设计文档格式：n, s, v）
+                        quotes_data = QuotesData(
+                            n=full_name,
+                            s=q.get("s", "ok"),
+                            v=quotes_value,
+                        )
+                        quotes.append(quotes_data)
+                    else:
+                        quotes.append(q)
+                task_data = QuotesList(
+                    quotes=quotes,
+                    count=result.get("count", 0) if result else 0,
+                )
             else:
-                task_data = {
-                    "type": response_type,
-                }
-                if result:
-                    for key, value in result.items():
-                        if key not in ["type", "taskType"]:
-                            task_data[key] = value
+                # 强制类型安全：未知任务类型必须创建对应的 Pydantic 模型
+                # 否则报错提醒工程师添加专用模型
+                raise ValueError(
+                    f"任务类型 '{task_type}' 未定义专用响应模型。"
+                    f"请在 ws_payload.py 中创建对应的 ResponseData 模型，"
+                    f"然后在 data_processor.py 中添加处理逻辑。"
+                )
 
             # 使用 MessageSuccess 模型构建响应
             # 严格遵循07-websocket-protocol.md规范：使用具体数据类型
             response = MessageSuccess(
                 type=response_type,  # 使用映射后的具体数据类型（如 KLINES_DATA）
-                request_id=request_id,
+                request_id=request_id or "",
                 protocol_version=PROTOCOL_VERSION,
                 timestamp=self._timestamp_ms(),
                 data=task_data,
             )
 
-            success = await self._client_manager.send(
-                client_id, response.model_dump(by_alias=True)
-            )
+            # 直接传递 MessageSuccess 模型，保持类型安全
+            success = await self._client_manager.send(client_id, response)
             if success:
                 logger.info(
                     f"已推送任务结果给客户端 {client_id}: "
@@ -706,20 +772,22 @@ class DataProcessor:
 
             # 构建响应消息 - 使用模型确保符合协议规范
             if status == "completed":
-                # 订单创建成功
+                # 订单创建成功 - 使用 OrderResponseData 模型
+                from ..models.protocol.ws_payload import OrderResponseData
+
                 message = MessageSuccess(
                     type="ORDER_DATA",
-                    request_id=request_id,
+                    request_id=request_id or "",
                     protocol_version=PROTOCOL_VERSION,
                     timestamp=self._timestamp_ms(),
-                    data={
-                        "type": "order",
-                        "status": "COMPLETED",
-                        "taskId": task_id,
-                        "result": result,
-                        "payload": payload_data,
-                    },
-                ).model_dump(by_alias=True)
+                    data=OrderResponseData(
+                        type="order",
+                        status="COMPLETED",
+                        task_id=task_id,
+                        result=result,
+                        payload=payload_data,
+                    ),
+                )
             else:
                 # 订单失败
                 error_message = (
@@ -729,14 +797,14 @@ class DataProcessor:
                 )
                 message = MessageError(
                     type="ERROR",
-                    request_id=request_id,
+                    request_id=request_id or "",
                     protocol_version=PROTOCOL_VERSION,
                     timestamp=self._timestamp_ms(),
-                    data={
-                        "errorCode": "ORDER_FAILED",
-                        "errorMessage": f"Order failed: {error_message}",
-                    },
-                ).model_dump(by_alias=True)
+                    data=ErrorData(
+                        errorCode="ORDER_FAILED",
+                        errorMessage=f"Order failed: {error_message}",
+                    ),
+                )
 
             # 发送给特定客户端（通过 task_id 找到的客户端）
             await self._client_manager.send(client_id, message)
@@ -782,11 +850,11 @@ class DataProcessor:
             request_id=request_id or "",
             protocol_version=PROTOCOL_VERSION,
             timestamp=self._timestamp_ms(),
-            data={
-                "errorCode": "TASK_FAILED",
-                "errorMessage": f"Task failed: {error_message}",
-            },
-        ).model_dump(by_alias=True)
+            data=ErrorData(
+                errorCode="TASK_FAILED",
+                errorMessage=f"Task failed: {error_message}",
+            ),
+        )
 
         await self._client_manager.send(client_id, message)
         logger.info(f"已发送任务失败通知给客户端 {client_id}: {error_message}")
@@ -810,11 +878,11 @@ class DataProcessor:
             request_id="",
             protocol_version=PROTOCOL_VERSION,
             timestamp=self._timestamp_ms(),
-            data={
-                "errorCode": error_code,
-                "errorMessage": error_message,
-            },
-        ).model_dump(by_alias=True)
+            data=ErrorData(
+                errorCode=error_code,
+                errorMessage=error_message,
+            ),
+        )
 
         await self._client_manager.send(client_id, message)
 
@@ -864,14 +932,14 @@ class DataProcessor:
                     tv_content["n"] = f"BINANCE:{parsed.symbol}"
 
             # 使用 MessageUpdate 模型确保符合协议规范
+            # 严格遵循07-websocket-protocol.md：subscription_key 提升到顶层，content 作为数据载荷
+            # tv_content 是 TradingView 兼容格式的字典，直接传递
+
             message = MessageUpdate(
                 type="UPDATE",
-                protocol_version=PROTOCOL_VERSION,
                 timestamp=self._timestamp_ms(),
-                data={
-                    "subscriptionKey": subscription_key,
-                    "content": tv_content,
-                },
+                subscription_key=subscription_key,
+                content=tv_content if tv_content else {},
             ).model_dump(by_alias=True)
 
             # 调试：获取订阅的客户端

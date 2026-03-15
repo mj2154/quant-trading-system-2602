@@ -8,12 +8,17 @@ WebSocket消息协议模型
 版本: v2.0.0
 """
 
+from __future__ import annotations
+
 from typing import Any
 
-from pydantic import Field
+from pydantic import BaseModel, Field, model_serializer
 
 # 使用本地基类进行命名转换
 from ..base import CamelCaseModel, SnakeCaseModel
+
+# 从 ws_payload 导入具体数据模型
+from .ws_payload import ErrorData  # noqa: E402
 
 # 从 trading 模块导入数据模型
 
@@ -186,6 +191,8 @@ class MessageResponseBase(CamelCaseModel):
     严格遵循07-websocket-protocol.md规范：
     - 使用 type 字段表示消息类型
     - type 字段放在顶层，不在 data 内部
+    - data 必须是 Pydantic BaseModel 实例
+
     内部使用snake_case，序列化输出camelCase。
     """
 
@@ -194,14 +201,17 @@ class MessageResponseBase(CamelCaseModel):
     request_id: str
     task_id: int | None = None
     timestamp: int
-    data: dict[str, Any]
+    data: CamelCaseModel  # 必须是 CamelCaseModel 实例，用于响应输出
+
+    @model_serializer(mode="wrap")
+    def serialize_model(self, handler):
+        """自动将 CamelCaseModel 序列化为字典"""
+        result = handler(self)
+        result["data"] = self.data.model_dump(by_alias=True) if isinstance(self.data, CamelCaseModel) else self.data
+        return result
 
     def __str__(self) -> str:
         return f"MessageResponseBase(type={self.type}, request_id={self.request_id})"
-
-
-# 向后兼容性别名
-MessageResponse = MessageResponseBase
 
 
 class MessageSuccess(MessageResponseBase):
@@ -218,23 +228,21 @@ class MessageSuccess(MessageResponseBase):
         return f"MessageSuccess(type={self.type}, request_id={self.request_id}, task_id={self.task_id})"
 
 
-# 向后兼容性别名
-MessageAck = MessageSuccess
-
-
 class MessageError(MessageResponseBase):
     """错误响应消息
 
     严格遵循07-websocket-protocol.md规范：
     - type 字段值为 "ERROR"
     - 错误详情放在 data 内部
+
+    使用 ErrorData 模型确保类型安全。
     """
 
     type: str = "ERROR"
-    data: dict = Field(default_factory=dict)
+    data: "ErrorData"
 
     def __str__(self) -> str:
-        return f"MessageError(code={self.data.get('errorCode')}, message={self.data.get('errorMessage')})"
+        return f"MessageError(code={self.data.error_code}, message={self.data.error_message})"
 
 
 class MessageUpdate(CamelCaseModel):
@@ -243,8 +251,8 @@ class MessageUpdate(CamelCaseModel):
 
     严格遵循07-websocket-protocol.md规范：
     - type 字段值为 "UPDATE"
-    - 包含 subscriptionKey 用于标识数据类型
-    - 包含 content 作为数据载荷（不是 payload，避免与数据库 payload 混淆）
+    - subscriptionKey 提升到顶层
+    - content 作为数据载荷（不是 payload，避免与数据库 payload 混淆）
     - 注意：不包含 requestId 字段（服务器主动推送）
 
     内部使用snake_case，序列化输出camelCase。
@@ -253,8 +261,8 @@ class MessageUpdate(CamelCaseModel):
     protocol_version: str = PROTOCOL_VERSION
     type: str = "UPDATE"
     timestamp: int
-    data: dict[str, Any]
+    subscription_key: str
+    content: dict[str, Any]
 
     def __str__(self) -> str:
-        subscription_key = self.data.get("subscriptionKey", "unknown")
-        return f"MessageUpdate(key={subscription_key})"
+        return f"MessageUpdate(key={self.subscription_key})"

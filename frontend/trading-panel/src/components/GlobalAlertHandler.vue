@@ -49,7 +49,7 @@ function handleGlobalAlert(signal: SignalRecord) {
   // 弹窗通知 - 左下角，不自动消失，最多10个（由 NNotificationProvider 控制）
   if (alertSettings.value.popupEnabled) {
     notification.info({
-      title: `交易信号 - ${signal.strategyName}`,
+      title: `交易信号 - ${signal.name}`,
       content: `${formatSymbolForDisplay(signal.symbol)} ${formatIntervalForDisplay(signal.interval)} ${signalType}`,
       duration: 0, // 不自动消失
     })

@@ -11,6 +11,9 @@
 //   - BINANCE:ACCOUNT@FUTURES     - 期货账户信息
 // ========================================
 
+// Import DataService for unified data access
+import { dataService } from '../../../services/data-service/DataService'
+
 const DataType = {
     KLINE: 'KLINE',
     QUOTES: 'QUOTES',
@@ -48,7 +51,7 @@ function parseSubscriptionKey(subscriptionKey) {
     const match = subscriptionKey.match(/^([^:]+):([^@]+)@([A-Z]+)(?:_(.+))?$/);
 
     if (!match) {
-        console.warn(`⚠️ 无法解析订阅键格式: ${subscriptionKey}`);
+        console.warn(`无法解析订阅键格式: ${subscriptionKey}`);
         return null;
     }
 
@@ -166,7 +169,7 @@ function handleAck(requestId, messageData) {
     if (!request) {
         // 从历史记录中获取信息用于调试
         const historyInfo = history ? `, 创建时间: ${new Date(history.createdAt).toISOString()}, 类型: ${history.type}` : '';
-        console.warn(`⚠️ 收到未知请求的 ACK: ${requestId}${historyInfo}`);
+        console.warn(`收到未知请求的 ACK: ${requestId}${historyInfo}`);
         return;
     }
 
@@ -183,7 +186,7 @@ function handleAck(requestId, messageData) {
         request.ackCallback(messageData);
     }
 
-    console.log(`✅ ACK 已处理: ${requestId}, 类型: ${request.type}`);
+    console.log(`ACK 已处理: ${requestId}, 类型: ${request.type}`);
 }
 
 /**
@@ -199,7 +202,7 @@ function handleSuccess(requestId, messageData, dataType) {
     if (!request) {
         // 从历史记录中获取信息用于调试
         const historyInfo = history ? `, 创建时间: ${new Date(history.createdAt).toISOString()}, 类型: ${history.type}, 删除原因: ${history.deleteReason || '未知'}` : '';
-        console.warn(`⚠️ 收到未知请求的 Success: ${requestId}${historyInfo}`);
+        console.warn(`收到未知请求的 Success: ${requestId}${historyInfo}`);
         return;
     }
 
@@ -250,7 +253,7 @@ function handleError(requestId, messageData) {
     if (!request) {
         // 从历史记录中获取信息用于调试
         const historyInfo = history ? `, 创建时间: ${new Date(history.createdAt).toISOString()}, 类型: ${history.type}, 删除原因: ${history.deleteReason || '未知'}` : '';
-        console.warn(`⚠️ 收到未知请求的 Error: ${requestId}${historyInfo}`);
+        console.warn(`收到未知请求的 Error: ${requestId}${historyInfo}`);
         return;
     }
 
@@ -287,7 +290,7 @@ function handleError(requestId, messageData) {
 
     // 移除请求记录
     pendingRequests.delete(requestId);
-    console.log(`❌ 请求错误: ${requestId}`, messageData);
+    console.log(`请求错误: ${requestId}`, messageData);
 }
 
 /**
@@ -299,14 +302,14 @@ function handleUpdate(data) {
     const { subscriptionKey, content } = data.data;
 
     if (!subscriptionKey) {
-        console.warn('⚠️ handleUpdate: 收到无效消息，缺少 subscriptionKey');
+        console.warn('handleUpdate: 收到无效消息，缺少 subscriptionKey');
         return;
     }
 
     // 解析 v2.0 格式的订阅键
     const parsedKey = parseSubscriptionKey(subscriptionKey);
     if (!parsedKey) {
-        console.warn(`⚠️ handleUpdate: 无法解析订阅键: ${subscriptionKey}`);
+        console.warn(`handleUpdate: 无法解析订阅键: ${subscriptionKey}`);
         return;
     }
 
@@ -364,7 +367,7 @@ function handleUpdate(data) {
     }
     // 未知数据类型
     else {
-        console.warn(`⚠️ handleUpdate: 未知数据类型 ${dataType}，订阅键: ${subscriptionKey}`);
+        console.warn(`handleUpdate: 未知数据类型 ${dataType}，订阅键: ${subscriptionKey}`);
     }
 }
 
@@ -452,7 +455,7 @@ function sendWSRequest(data, resultCallback, ackCallback = null, timeout = 10000
             history.deleteReason = 'SEND_FAILED';
         }
         pendingRequests.delete(requestId);
-        console.error(`❌ 发送请求失败: ${requestId}, 原因: ${error.message}`);
+        console.error(`发送请求失败: ${requestId}, 原因: ${error.message}`);
         // v2.0 协议: 错误通过 type: 'ERROR' 传递，但本地错误仍使用 action 保持兼容
         resultCallback({
             action: 'error',
@@ -551,7 +554,7 @@ function resetChartData() {
                 console.log('📊 图表数据已重置，准备重新订阅');
             }
         } catch (error) {
-            console.warn('⚠️ 重置图表数据失败:', error.message);
+            console.warn('重置图表数据失败:', error.message);
         }
     }
 }
@@ -561,7 +564,7 @@ function resetChartData() {
  */
 function resubscribeAllBars() {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.warn('⚠️ WebSocket 未连接，无法重新订阅K线');
+        console.warn('WebSocket 未连接，无法重新订阅K线');
         return;
     }
 
@@ -580,7 +583,7 @@ function resubscribeAllBars() {
         ws.send(JSON.stringify(subscribeMessage));
     });
 
-    console.log(`✅ 完成K线重新订阅，共 ${subscriptions.size} 个订阅`);
+    console.log(`完成K线重新订阅，共 ${subscriptions.size} 个订阅`);
 }
 
 /**
@@ -588,7 +591,7 @@ function resubscribeAllBars() {
  */
 function resubscribeAllQuotes() {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.warn('⚠️ WebSocket 未连接，无法重新订阅报价');
+        console.warn('WebSocket 未连接，无法重新订阅报价');
         return;
     }
 
@@ -622,7 +625,7 @@ function resubscribeAllQuotes() {
         ws.send(JSON.stringify(subscribeMessage));
     }
 
-    console.log(`✅ 完成报价重新订阅，共 ${newSubscriptions.length} 个订阅`);
+    console.log(`完成报价重新订阅，共 ${newSubscriptions.length} 个订阅`);
 }
 
 /**
@@ -683,7 +686,7 @@ function connectWebSocket(isManualReconnect = false) {
             wsIsReconnecting = false; // 重置重连状态
             wsReconnectAttempts = 0;
 
-            console.log(`✅ WebSocket 连接已建立${wasReconnecting ? '（重连成功）' : ''}`);
+            console.log(`WebSocket 连接已建立${wasReconnecting ? '（重连成功）' : ''}`);
 
             // 无论是首次连接还是重连，都需要处理待处理的请求队列
             processPendingRequestsQueue();
@@ -722,21 +725,21 @@ function connectWebSocket(isManualReconnect = false) {
             if (wsReconnectAttempts < wsMaxReconnectAttempts && hasActiveSubscriptions) {
                 wsReconnectAttempts++;
                 wsIsReconnecting = true; // 标记正在重连
-                console.log(`🔄 尝试第 ${wsReconnectAttempts} 次重连（${wsMaxReconnectAttempts} 次最大）...`);
+                console.log(`尝试第 ${wsReconnectAttempts} 次重连（${wsMaxReconnectAttempts} 次最大）...`);
 
                 setTimeout(() => {
                     // 传入 true 表示这是重连调用，会自动重置计数器
                     connectWebSocket(true)
                         .then(() => {
                             // 重连成功 - onopen 中的逻辑会自动处理重置和重新订阅
-                            console.log('✅ 重连成功，数据正在恢复中...');
+                            console.log('重连成功，数据正在恢复中...');
                         })
                         .catch((error) => {
-                            console.warn(`⚠️ 重连失败: ${error.message}`);
+                            console.warn(`重连失败: ${error.message}`);
                         });
                 }, wsReconnectDelay);
             } else if (wsReconnectAttempts >= wsMaxReconnectAttempts) {
-                console.warn('❌ 已达到最大重连次数，停止自动重连');
+                console.warn('已达到最大重连次数，停止自动重连');
                 wsReconnectAttempts = wsMaxReconnectAttempts; // 确保不再增加
             }
 
@@ -818,7 +821,7 @@ function handleWebSocketMessage(data) {
             break;
 
         default:
-            console.warn(`⚠️ 未知 WebSocket 消息类型: ${type}`, data);
+            console.warn(`未知 WebSocket 消息类型: ${type}`, data);
     }
 }
 
@@ -868,6 +871,15 @@ function getConfiguration(callback) {
         }
     });
 }
+
+// ========================================
+// 模块初始化：连接 DataService
+// ========================================
+// 当模块加载时自动连接 DataService
+// DataService 会自动处理重连逻辑
+dataService.connect().catch((error) => {
+    console.error('DataService 连接失败:', error.message);
+});
 
 export default {
     /**
@@ -996,48 +1008,53 @@ export default {
         const from_ts = originalFrom - extendMs;
         const to_ts = periodParams.to * 1000;
 
-        // 使用WebSocket GET请求获取K线数据
+        // 使用 DataService 获取K线数据 (替换原生 WebSocket)
         // interval 与数据库字段和后端API保持一致（设计文档 v2.1 规范）
         // 使用 camelCase 格式 (fromTime, toTime)，后端使用 SnakeCaseModel 自动转换
-        sendWSRequest({
-            type: "klines",
+        dataService.getKlines({
             symbol: symbol,
             interval: resolution,  // 使用 interval 而非 resolution
             fromTime: from_ts,
-            toTime: to_ts
-        }, (response) => {
-            // v2.0 协议: 使用 type === 'KLINES_DATA'
-            if (response.type === 'KLINES_DATA') {
-                let bars = response.data.bars.map(bar => ({
-                    time: bar.time,
-                    open: bar.open,
-                    high: bar.high,
-                    low: bar.low,
-                    close: bar.close,
-                    volume: bar.volume
-                }));
+            toTime: to_ts,
+            limit: countBack
+        }).then((response) => {
+            // DataService 返回格式: { bars: [], noData, nextTime }
+            let bars = response.bars.map(bar => ({
+                time: bar.time,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+                volume: bar.volume
+            }));
 
-                bars = bars.filter(bar => bar.time <= to_ts);
+            // 过滤超出请求范围的K线
+            bars = bars.filter(bar => bar.time <= to_ts);
 
-                if (bars.length > countBack) {
-                    bars = bars.slice(-countBack);
-                }
-
-                const meta = {
-                    noData: response.data.noData || bars.length === 0,
-                    nextTime: response.data.nextTime || null
-                };
-
-                onHistoryCallback(bars, meta);
-            } else if (response.type === 'ERROR') {
-                onErrorCallback(response.error?.message || 'Failed to load bars');
+            // 限制返回数量
+            if (bars.length > countBack) {
+                bars = bars.slice(-countBack);
             }
+
+            const meta = {
+                noData: response.noData || bars.length === 0,
+                nextTime: response.nextTime || null
+            };
+
+            onHistoryCallback(bars, meta);
+        }).catch((error) => {
+            onErrorCallback(error?.message || 'Failed to load bars');
         });
     },
 
     subscribeBars: (symbolInfo, resolution, onRealtimeCallback, subscriberUID, onResetCacheNeededCallback) => {
         // 构建 v2.0 格式的订阅键
         const subscriptionKey = buildKeyFromSymbolInfo(symbolInfo, DataType.KLINE, resolution);
+
+        // 解析 symbol 和 interval
+        const ticker = symbolInfo.ticker || symbolInfo.name || '';
+        const [exchange, ...symbolParts] = ticker.split(':');
+        const symbol = symbolParts.join(':') || symbolParts[0];
 
         const subscriptionInfo = {
             subscriberUID,
@@ -1051,28 +1068,30 @@ export default {
 
         subscriptions.set(subscriberUID, subscriptionInfo);
 
-        // 使用 sendWSRequest 发送订阅请求，以便正确追踪请求生命周期
-        sendWSRequest({
-            type: "SUBSCRIBE",
-            subscriptions: [subscriptionKey]
-        }, (response) => {
-            // 订阅响应处理（通常不需要，因为订阅是持续推送）
-            if (response.type === 'ERROR') {
-                console.warn(`⚠️ 订阅失败: ${subscriptionKey}`, response.error);
+        // 使用 DataService.subscribeKline 替换原生 WebSocket 订阅
+        // DataService 会自动处理连接和重连
+        const unsubscribe = dataService.subscribeKline(
+            `${exchange}:${symbol}`,
+            resolution,
+            (bar, sk) => {
+                // 将 K线数据转换为 TradingView 格式并回调
+                onRealtimeCallback(bar);
             }
-        });
+        );
+
+        // 存储取消订阅函数，以便后续调用
+        subscriptionInfo.unsubscribe = unsubscribe;
     },
 
     unsubscribeBars: (subscriberUID) => {
-        console.log('🔥 unsubscribeBars 被调用:', {
+        console.log('unsubscribeBars 被调用:', {
             subscriberUID,
             timestamp: new Date().toISOString(),
-            stack: new Error().stack
         });
 
         const subscriptionInfo = subscriptions.get(subscriberUID);
         if (!subscriptionInfo) {
-            console.log('⚠️  unsubscribeBars: 未找到 subscriberUID 对应的订阅信息');
+            console.log('unsubscribeBars: 未找到 subscriberUID 对应的订阅信息');
             return;
         }
 
@@ -1084,21 +1103,19 @@ export default {
 
         // 使用存储的 v2.0 订阅键
         const klineSubscription = subscriptionInfo.subscriptionKey;
-        console.log('🗑️  准备取消 K 线订阅:', klineSubscription);
+        console.log('准备取消 K 线订阅:', klineSubscription);
 
-        // 使用 sendWSRequest 发送取消订阅请求，以便正确追踪请求生命周期
-        sendWSRequest({
-            type: "UNSUBSCRIBE",
-            subscriptions: [klineSubscription]
-        }, (response) => {
-            // 取消订阅响应处理
-            if (response.type === 'ERROR') {
-                console.warn(`⚠️ 取消订阅失败: ${klineSubscription}`, response.error);
-            }
-        });
+        // 使用 DataService.unsubscribe 替换原生 WebSocket 取消订阅
+        if (subscriptionInfo.unsubscribe) {
+            // 调用 DataService 返回的取消订阅函数
+            subscriptionInfo.unsubscribe();
+        } else {
+            // 如果没有存储的取消订阅函数，直接调用 dataService.unsubscribe
+            dataService.unsubscribe(klineSubscription);
+        }
 
         subscriptions.delete(subscriberUID);
-        console.log('✅ 清理本地 K 线订阅记录完成，剩余订阅:', Array.from(subscriptions.keys()));
+        console.log('清理本地 K 线订阅记录完成，剩余订阅:', Array.from(subscriptions.keys()));
     },
 
     /**
@@ -1117,23 +1134,17 @@ export default {
         // 确保所有symbols都使用EXCHANGE:SYMBOL格式
         const formattedSymbols = symbols.map(symbol => formatSymbol(symbol));
 
-        // 使用WebSocket GET请求获取报价数据
-        sendWSRequest({
-            type: "quotes",
-            symbols: formattedSymbols
-        }, (response) => {
-            // v2.0 协议: 使用 type === 'QUOTES_DATA'
-            if (response.type === 'QUOTES_DATA') {
-                const quotes = response.data.quotes.map((item) => {
-                    return item;
-                });
-
+        // 使用 DataService.getQuotes 替换原生 WebSocket 请求
+        dataService.getQuotes(formattedSymbols)
+            .then((response) => {
+                // DataService 返回格式: { quotes: [] }
+                const quotes = response.quotes || [];
                 onDataCallback(quotes);
-            } else if (response.type === 'ERROR') {
-                const errorMsg = response.error?.message || 'Failed to get quotes';
+            })
+            .catch((error) => {
+                const errorMsg = error?.message || 'Failed to get quotes';
                 onErrorCallback(errorMsg);
-            }
-        });
+            });
     },
 
 
@@ -1147,46 +1158,13 @@ export default {
             return;
         }
 
-        // 🔧 修复：检查引用计数，只在最后一个引用时才取消 WebSocket 订阅
-        const subscriptionsToRemove = [];
-
-        subscriptionInfo.symbols.forEach(symbol => {
-            const formattedSymbol = formatSymbol(symbol);
-            // 使用 buildSubscriptionKey 构建 v2.0 格式的订阅键
-            const subscriptionKey = buildSubscriptionKey(
-                formattedSymbol.split(':')[0],
-                formattedSymbol.split(':')[1],
-                DataType.QUOTES
-            );
-
-            if (subscribedQuotes.has(subscriptionKey)) {
-                const count = subscribedQuotes.get(subscriptionKey);
-                if (count > 1) {
-                    // 还有其他引用，只递减计数，不发送取消订阅
-                    subscribedQuotes.set(subscriptionKey, count - 1);
-                } else {
-                    // 最后一个引用，需要发送取消订阅消息
-                    subscriptionsToRemove.push(subscriptionKey);
-                    subscribedQuotes.delete(subscriptionKey);
-                }
-            }
-        });
-
-        // 只有当需要真正取消时才发送WebSocket消息
-        // 使用 sendWSRequest 发送取消订阅请求，以便正确追踪请求生命周期
-        if (subscriptionsToRemove.length > 0) {
-            sendWSRequest({
-                type: "UNSUBSCRIBE",
-                subscriptions: subscriptionsToRemove
-            }, (response) => {
-                // 取消订阅响应处理
-                if (response.type === 'ERROR') {
-                    console.warn(`⚠️ 取消订阅报价失败: ${subscriptionsToRemove.join(', ')}`, response.error);
-                }
-            });
+        // 使用 DataService.unsubscribe 替换原生 WebSocket 取消订阅
+        // 注意：DataService 内部处理引用计数
+        if (subscriptionInfo.unsubscribe) {
+            subscriptionInfo.unsubscribe();
         }
 
-        // 清理订阅记录
+        // 清理本地订阅记录
         quotesSubscriptions.delete(listenerGUID);
     },
 
@@ -1197,7 +1175,7 @@ export default {
      * @param {Function} onRealtimeCallback - 实时数据回调函数
      * @param {string} listenerGUID - 唯一标识符
      */
-    subscribeQuotes: (symbols, fastSymbols, onRealtimeCallback, listenerGUID) => {
+    subscribeQuotes(symbols, fastSymbols, onRealtimeCallback, listenerGUID) {
         // 合并 symbols 和 fastSymbols，并去重
         const allSymbols = [...new Set([...symbols, ...fastSymbols])];
 
@@ -1206,56 +1184,27 @@ export default {
             this.unsubscribeQuotes(listenerGUID);
         }
 
-        // 存储订阅信息 - 使用构建后的订阅键格式以便匹配后端推送
-        const storedSymbols = allSymbols.map(s => {
-            const formattedSymbol = formatSymbol(s);
-            return buildSubscriptionKey(
-                formattedSymbol.split(':')[0],
-                formattedSymbol.split(':')[1],
-                DataType.QUOTES
-            ).replace('@QUOTES', '');  // 去掉 @QUOTES 后缀
-        });
-        quotesSubscriptions.set(listenerGUID, {
-            symbols: storedSymbols,
-            onRealtimeCallback
-        });
+        // 直接使用完整格式 EXCHANGE:SYMBOL（如 BINANCE:BTCUSDT）
+        // 无需去掉交易所前缀，后端需要完整格式进行订阅匹配
+        const formattedSymbols = allSymbols.map(symbol => formatSymbol(symbol));
 
-        // 🔧 修复：更新引用计数并找出真正需要发送的新订阅
-        const newSubscriptions = [];
-        allSymbols.forEach(symbol => {
-            // 使用 formatSymbol 确保格式正确
-            const formattedSymbol = formatSymbol(symbol);
-            // 使用 buildSubscriptionKey 构建 v2.0 格式的订阅键
-            const subscriptionKey = buildSubscriptionKey(
-                formattedSymbol.split(':')[0],
-                formattedSymbol.split(':')[1],
-                DataType.QUOTES
-            );
-
-            if (!subscribedQuotes.has(subscriptionKey)) {
-                // 新的订阅，需要发送
-                newSubscriptions.push(subscriptionKey);
-                subscribedQuotes.set(subscriptionKey, 1);
-            } else {
-                // 已存在，增加引用计数
-                const newCount = subscribedQuotes.get(subscriptionKey) + 1;
-                subscribedQuotes.set(subscriptionKey, newCount);
+        // 使用 DataService.subscribeQuotes 替换原生 WebSocket 订阅
+        const unsubscribe = dataService.subscribeQuotes(
+            formattedSymbols,
+            (quotesMap) => {
+                // DataService 返回 Map 格式，转换为 TradingView 期望的数组格式
+                // 修复：将 payload 包装成数组格式，以匹配 getQuotes 的数据格式
+                const quoteDataArray = Array.from(quotesMap.values());
+                onRealtimeCallback(quoteDataArray);
             }
-        });
+        );
 
-        // 只有当有新订阅时才发送WebSocket消息
-        // 使用 sendWSRequest 发送订阅请求，以便正确追踪请求生命周期
-        if (newSubscriptions.length > 0) {
-            sendWSRequest({
-                type: "SUBSCRIBE",
-                subscriptions: newSubscriptions
-            }, (response) => {
-                // 订阅响应处理（通常不需要，因为订阅是持续推送的）
-                if (response.type === 'ERROR') {
-                    console.warn(`⚠️ 订阅报价失败: ${newSubscriptions.join(', ')}`, response.error);
-                }
-            });
-        }
+        // 存储订阅信息
+        quotesSubscriptions.set(listenerGUID, {
+            symbols: formattedSymbols,
+            onRealtimeCallback,
+            unsubscribe  // 存储取消订阅函数
+        });
     },
 
     /**
@@ -1291,7 +1240,7 @@ export default {
      */
     clearRequestHistory: () => {
         requestHistory.clear();
-        console.log('✅ 请求历史记录已清空');
+        console.log('请求历史记录已清空');
     }
 
 };

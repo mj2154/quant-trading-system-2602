@@ -419,13 +419,51 @@ class SubscriptionSync:
 
 系统使用 Pydantic v2 的 `alias_generators` 实现自动命名转换：
 
+#### 7.3.1 数据模型分层架构
+
+币安服务的数据模型分为**两层**，每层有明确的职责：
+
+| 层级 | 模型类型 | 用途 | 命名风格 | 基类 |
+|------|---------|------|----------|------|
+| L1 | **币安API模型** | 解析/验证币安API响应，camelCase→snake_case | snake_case | `SnakeCaseModel` |
+| L2 | **数据库模型** | 数据库写入 | snake_case | `SnakeCaseModel` |
+
+```
+币安API响应 (camelCase)
+    ↓ model_validate()
+[L1] 币安API模型 (SnakeCaseModel)
+    ↓ 字段映射
+[L2] 数据库模型 (SnakeCaseModel)
+    ↓
+数据库 (snake_case)
+```
+
+> **关键设计**：L1层使用`SnakeCaseModel`，不仅完成数据验证，同时将camelCase自动转换为snake_case。转换后得到的是一个**蛇形命名的Pydantic模型实例**，直接用于字段映射到L2层。
+
+#### 7.3.2 各数据类型模型对应关系
+
+| 数据类型 | L1 币安API模型 | L2 数据库模型 | 说明 |
+|---------|---------------|--------------|------|
+| K线(历史) | `KlineResponse` (SnakeCaseModel) | `KlineCreate` | HTTP响应 → 数据库 |
+| K线(实时) | `KlineWebSocket` (SnakeCaseModel) | `KlineCreate` | WS消息 → 数据库 |
+| 24hr行情 | `Ticker24hrSpot/Futures` (SnakeCaseModel) | `TickerCreate` | 验证后转换为前端格式模型 |
+| 交易所信息 | `ExchangeInfoResponse` (SnakeCaseModel) | `ExchangeInfo` | 解析 → 数据库 |
+| 账户资产 | `FuturesAsset/SpotBalance` (SnakeCaseModel) | `AccountAssetCreate` | 验证后转换为前端格式模型 |
+
+#### 7.3.3 模型命名规范
+
+| 场景 | 命名规则 | 示例 |
+|------|---------|------|
+| 币安API响应模型 | `{Entity}Response` | `KlineResponse`, `ExchangeInfoResponse` |
+| WebSocket模型 | `WebSocket{Entity}` | `WebSocketKline`, `WebSocketTicker` |
+| 数据库模型 | `{Entity}Create` | `KlineCreate`, `ExchangeInfo` |
+
 #### 命名约定
 
 | 模型类型 | 命名风格 | 说明 |
 |---------|----------|------|
-| 内部模型 | snake_case | Python 惯例 |
-| 币安API | camelCase | 交易所标准 |
-| 数据库 | snake_case | PostgreSQL 惯例 |
+| 币安API模型 | snake_case | 使用SnakeCaseModel自动转换 |
+| 数据库模型 | snake_case | PostgreSQL 惯例 |
 
 #### 转换实现
 

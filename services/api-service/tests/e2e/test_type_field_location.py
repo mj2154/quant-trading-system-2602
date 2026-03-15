@@ -1,11 +1,25 @@
 """
 测试 type 字段位置验证
 
-根据TradingView API规范设计文档：
-- type 字段必须位于 data 内部
-- success 和 error action 必须有 data 字段且包含 type
-- update action 的 type 也在 data 中
-- get/subscribe/unsubscribe 是请求，不需要验证 type
+根据 WebSocket API 协议规范 (07-websocket-protocol.md)：
+- 顶层 type：消息类型（如 CONFIG_DATA, KLINES_DATA, ERROR, ACK）
+- data 内部 type：数据类型（如 search_symbols, klines, quotes）
+- 请求消息使用 action 字段（如 success, error, update）
+- 响应消息使用 type 字段（在顶层）
+
+设计文档示例：
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "CONFIG_DATA",    // 顶层：消息类型
+    "requestId": "...",
+    "timestamp": ...,
+    "data": {
+        "type": "search_symbols",   // data内部：数据类型
+        "symbols": [...]
+    }
+}
+```
 
 用法: python tests/e2e/test_type_field_location.py
 """
@@ -43,11 +57,26 @@ class TestTypeFieldLocation(unittest.TestCase):
         # 初始化test_results以避免KeyError
         self.test_base.test_results = {"passed": 0, "failed": 0, "errors": []}
 
-    def test_type_in_data_for_success(self):
-        """验证 success 响应的 type 在 data 内部"""
+    def test_type_in_top_level_for_success(self):
+        """验证 success 响应的 type 在顶层（设计文档 v16.2.2 规范）"""
+        # 根据设计文档：type 在顶层，data.type 是数据类型
         correct_message = {
             "protocolVersion": "2.0",
-            "action": "success",
+            "type": "KLINES_DATA",  # 顶层：消息类型
+            "requestId": "test_123",
+            "timestamp": 1234567890,
+            "data": {
+                "type": "klines",   # data内部：数据类型
+                "bars": []
+            }
+        }
+        result = self.test_base.assert_message_format(correct_message, "success with type in top level")
+        self.assertTrue(result)
+
+    def test_type_missing_in_top_level_for_success(self):
+        """验证 success 响应缺少顶层 type 会失败"""
+        wrong_message = {
+            "protocolVersion": "2.0",
             "requestId": "test_123",
             "timestamp": 1234567890,
             "data": {
@@ -55,160 +84,50 @@ class TestTypeFieldLocation(unittest.TestCase):
                 "bars": []
             }
         }
-        result = self.test_base.assert_message_format(correct_message, "success with type in data")
-        self.assertTrue(result)
-
-    def test_type_missing_in_data_for_success(self):
-        """验证 success 响应缺少 data.type 会失败"""
-        wrong_message = {
-            "protocolVersion": "2.0",
-            "action": "success",
-            "requestId": "test_123",
-            "timestamp": 1234567890,
-            "data": {
-                "bars": []
-            }
-        }
-        result = self.test_base.assert_message_format(wrong_message, "success without type in data")
+        result = self.test_base.assert_message_format(wrong_message, "success without type in top level")
         self.assertFalse(result)
 
     def test_type_in_data_for_error(self):
-        """验证 error 响应的 type 在 data 内部"""
+        """验证 error 响应的 type 在顶层（与 success 一致）"""
         correct_message = {
             "protocolVersion": "2.0",
-            "action": "error",
+            "type": "ERROR",  # 顶层：消息类型
             "requestId": "test_123",
             "timestamp": 1234567890,
             "data": {
-                "type": "error",
-                "errorCode": "INVALID_SYMBOL",
-                "errorMessage": "Invalid symbol"
+                "errorCode": "INVALID_PARAMETER",  # data内部：具体错误信息
+                "errorMessage": "Invalid parameter"
             }
         }
-        result = self.test_base.assert_message_format(correct_message, "error with type in data")
+        result = self.test_base.assert_message_format(correct_message, "error with type in top level")
         self.assertTrue(result)
-
-    def test_type_missing_in_data_for_error(self):
-        """验证 error 响应缺少 data.type 会失败"""
-        wrong_message = {
-            "protocolVersion": "2.0",
-            "action": "error",
-            "requestId": "test_123",
-            "timestamp": 1234567890,
-            "data": {
-                "errorCode": "INVALID_SYMBOL",
-                "errorMessage": "Invalid symbol"
-            }
-        }
-        result = self.test_base.assert_message_format(wrong_message, "error without type in data")
-        self.assertFalse(result)
 
     def test_type_in_data_for_update(self):
-        """验证 update 消息的 type 在 data 内部"""
+        """验证 update 消息的 type 在顶层（设计文档 v16.2.2 规范）"""
         correct_message = {
             "protocolVersion": "2.0",
-            "action": "update",
-            "timestamp": 1234567890,
+            "type": "UPDATE",  # 顶层：消息类型
             "data": {
-                "type": "klines",
-                "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
-                "bars": [{"time": 1234567890, "open": 50000, "high": 50100, "low": 49900, "close": 50050, "volume": 100}]
+                "content": {  # data内部：推送内容
+                    "type": "kline",
+                    "symbol": "BINANCE:BTCUSDT"
+                }
             }
         }
-        result = self.test_base.assert_message_format(correct_message, "update with type in data")
+        result = self.test_base.assert_message_format(correct_message, "update with type in top level")
         self.assertTrue(result)
 
-    def test_type_missing_in_data_for_update(self):
-        """验证 update 消息缺少 data.type 会失败"""
-        wrong_message = {
+    def test_ack_type_in_top_level(self):
+        """验证 ACK 响应的 type 在顶层"""
+        correct_message = {
             "protocolVersion": "2.0",
-            "action": "update",
-            "timestamp": 1234567890,
-            "data": {
-                "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
-                "bars": [{"time": 1234567890, "open": 50000, "high": 50100, "low": 49900, "close": 50050, "volume": 100}]
-            }
-        }
-        result = self.test_base.assert_message_format(wrong_message, "update without type in data")
-        self.assertFalse(result)
-
-    def test_no_type_validation_for_get_request(self):
-        """验证 get 请求不强制验证 type 字段"""
-        message = {
-            "protocolVersion": "2.0",
-            "action": "get",
+            "type": "ACK",  # 顶层：消息类型
             "requestId": "test_123",
             "timestamp": 1234567890,
-            "data": {
-                "type": "klines",
-                "symbol": "BINANCE:BTCUSDT",
-                "interval": "60",
-                "from_time": 1234567890,
-                "to_time": 1234567899
-            }
+            "data": {}  # ACK 的 data 为空对象
         }
-        result = self.test_base.assert_message_format(message, "get request")
+        result = self.test_base.assert_message_format(correct_message, "ACK with type in top level")
         self.assertTrue(result)
-
-    def test_no_type_validation_for_subscribe_request(self):
-        """验证 subscribe 请求不强制验证 type 字段"""
-        message = {
-            "protocolVersion": "2.0",
-            "action": "subscribe",
-            "requestId": "test_123",
-            "timestamp": 1234567890,
-            "data": {
-                "subscriptions": ["BINANCE:BTCUSDT@KLINE_1"]
-            }
-        }
-        result = self.test_base.assert_message_format(message, "subscribe request")
-        self.assertTrue(result)
-
-    def test_no_type_validation_for_unsubscribe_request(self):
-        """验证 unsubscribe 请求不强制验证 type 字段"""
-        message = {
-            "protocolVersion": "2.0",
-            "action": "unsubscribe",
-            "requestId": "test_123",
-            "timestamp": 1234567890,
-            "data": {
-                "subscriptions": ["BINANCE:BTCUSDT@KLINE_1"]
-            }
-        }
-        result = self.test_base.assert_message_format(message, "unsubscribe request")
-        self.assertTrue(result)
-
-    def test_data_missing_for_success(self):
-        """验证 success 响应缺少 data 字段会失败"""
-        wrong_message = {
-            "protocolVersion": "2.0",
-            "action": "success",
-            "requestId": "test_123",
-            "timestamp": 1234567890
-        }
-        result = self.test_base.assert_message_format(wrong_message, "success without data")
-        self.assertFalse(result)
-
-    def test_data_missing_for_error(self):
-        """验证 error 响应缺少 data 字段会失败"""
-        wrong_message = {
-            "protocolVersion": "2.0",
-            "action": "error",
-            "requestId": "test_123",
-            "timestamp": 1234567890
-        }
-        result = self.test_base.assert_message_format(wrong_message, "error without data")
-        self.assertFalse(result)
-
-    def test_data_missing_for_update(self):
-        """验证 update 消息缺少 data 字段会失败"""
-        wrong_message = {
-            "protocolVersion": "2.0",
-            "action": "update",
-            "timestamp": 1234567890
-        }
-        result = self.test_base.assert_message_format(wrong_message, "update without data")
-        self.assertFalse(result)
 
 
 if __name__ == "__main__":

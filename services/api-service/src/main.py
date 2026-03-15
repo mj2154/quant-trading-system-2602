@@ -15,7 +15,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .db.alert_signal_repository import AlertSignalRepository
+from .db.alert_signal_repository import AlertConfigRepository
 from .db.database import close_pool, get_pool, init_pool
 from .db.order_tasks_repository import OrderTasksRepository
 from .db.strategy_metadata_repository import StrategyMetadataRepository
@@ -45,7 +45,7 @@ _tasks_repo: TasksRepository | None = None
 _order_tasks_repo: OrderTasksRepository | None = None
 _strategy_signals_repo: StrategySignalsRepository | None = None
 _strategy_metadata_repo: StrategyMetadataRepository | None = None
-_alert_repo: AlertSignalRepository | None = None
+_alert_repo: AlertConfigRepository | None = None
 
 
 async def _create_initial_tasks(tasks_repo: TasksRepository) -> None:
@@ -112,9 +112,9 @@ async def lifespan(app: FastAPI):
     _strategy_signals_repo = StrategySignalsRepository(pool)
     logger.info("StrategySignalsRepository initialized")
 
-    # 1.2 初始化告警信号仓储
-    _alert_repo = AlertSignalRepository(pool)
-    logger.info("AlertSignalRepository initialized")
+    # 1.2 初始化告警配置仓储
+    _alert_repo = AlertConfigRepository(pool)
+    logger.info("AlertConfigRepository initialized")
 
     # 2. 初始化交易所信息仓储
     from .db.exchange_info_repository import ExchangeInfoRepository

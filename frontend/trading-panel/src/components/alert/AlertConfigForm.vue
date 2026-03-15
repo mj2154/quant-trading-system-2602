@@ -93,7 +93,7 @@
                         :path="`params.${param.name}`"
                       >
                         <n-input-number
-                          v-model:value="(formData.params[param.name] as number)"
+                          v-model:value="paramsData[param.name]"
                           :min="param.min"
                           :max="param.max"
                           :step="1"
@@ -115,7 +115,7 @@
                         :path="`params.${param.name}`"
                       >
                         <n-input-number
-                          v-model:value="(formData.params[param.name] as number)"
+                          v-model:value="paramsData[param.name]"
                           :min="param.min"
                           :max="param.max"
                           :step="1"
@@ -136,25 +136,29 @@
                 :label="param.description"
                 :path="`params.${param.name}`"
               >
-                <n-input-number
+                <input
                   v-if="param.type === 'int'"
-                  v-model:value="(formData.params[param.name] as number)"
+                  type="number"
+                  :value="paramsData[param.name]"
+                  @input="(e) => paramsData[param.name] = Number((e.target as HTMLInputElement).value)"
                   :min="param.min"
                   :max="param.max"
-                  :step="1"
-                  style="width: 100%"
+                  style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 4px; background: #1a1a1a; color: #fff;"
                 />
-                <n-input-number
+                <input
                   v-else-if="param.type === 'float'"
-                  v-model:value="(formData.params[param.name] as number)"
+                  type="number"
+                  :value="paramsData[param.name]"
+                  @input="(e) => paramsData[param.name] = Number((e.target as HTMLInputElement).value)"
                   :min="param.min"
                   :max="param.max"
-                  :step="0.01"
-                  style="width: 100%"
+                  step="0.01"
+                  style="width: 100%; padding: 8px; border: 1px solid #333; border-radius: 4px; background: #1a1a1a; color: #fff;"
                 />
                 <n-switch
                   v-else-if="param.type === 'bool'"
-                  v-model:value="formData.params[param.name]"
+                  :value="(paramsData[param.name] as boolean)"
+                  @update:value="(val) => paramsData[param.name] = (val as boolean)"
                 />
               </n-form-item>
             </template>
@@ -205,7 +209,9 @@ import {
   useAlertStore,
   type AlertConfig,
   ALERT_TRIGGER_TYPE_OPTIONS,
+  ALERT_STRATEGY_TYPE_OPTIONS,
   DEFAULT_PARAMS,
+  formatParamName,
 } from '../../stores/alert-store'
 import { useStrategyStore } from '../../stores/strategy-store'
 
@@ -230,8 +236,8 @@ const strategyStore = useStrategyStore()
 
 // 组件挂载时获取策略列表
 onMounted(async () => {
-  // 确保 WebSocket 已连接后再获取策略
-  await store.connectWebSocket()
+  // 确保 DataService 已连接后再获取策略
+  await store.initialize()
   strategyStore.fetchStrategies()
 })
 
@@ -253,17 +259,16 @@ const formData = reactive({
   interval: '60',
   isEnabled: true,
   strategyType: 'MACDResonanceStrategyV5',
-  params: { ...DEFAULT_PARAMS },
-} as {
-  name: string
-  description: string
-  triggerType: string
-  symbol: string
-  interval: string
-  isEnabled: boolean
-  strategyType: string
-  params: Record<string, number | boolean>
 })
+
+// 使用 ref 来存储参数，确保响应性
+const paramsData = ref<Record<string, number | boolean>>({ ...DEFAULT_PARAMS })
+
+// 计算属性访问 params
+const formDataWithParams = computed(() => ({
+  ...formData,
+  params: paramsData.value
+}))
 
 // 表单验证规则
 const formRules: FormRules = {
@@ -353,18 +358,58 @@ const intervalOptions = [
 // 触发类型选项
 const triggerTypeOptions = ALERT_TRIGGER_TYPE_OPTIONS
 
-// 策略选项（从 store 获取）
+// 将驼峰策略类型转换为可读显示格式
+function formatStrategyTypeForSelect(strategyType: string): string {
+  if (!strategyType) return ''
+  return strategyType
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([A-Z])(\d+)(?=[A-Z]|$)/g, '$1$2')
+    .replace(/(\d+)(?=[A-Z])/g, '$1 ')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// 策略选项（从 store 获取，使用转换后的 strategyType 作为显示）
 const strategyOptions = computed(() =>
   strategyStore.strategies.map(s => ({
-    label: s.name,
+    label: formatStrategyTypeForSelect(s.type),
     value: s.type
   }))
 )
 
 // 当前策略的参数定义
+// 优先使用表单中已存储的参数（编辑模式），否则使用策略默认参数
 const currentParams = computed(() => {
+  // 如果 paramsData 有内容，说明是编辑模式，使用实际存储的参数
+  if (paramsData.value && Object.keys(paramsData.value).length > 0) {
+    return Object.entries(paramsData.value).map(([name, value]) => ({
+      name,
+      // 使用 formatParamName 将参数名转换为友好显示格式
+      description: formatParamName(name),
+      type: typeof value === 'number' ? (Number.isInteger(value) ? 'int' : 'float') : typeof value === 'boolean' ? 'bool' : 'int',
+      default: value,
+      min: 0,
+      max: 9999,
+    }))
+  }
+
+  // 创建模式：使用策略默认参数
   const strategy = strategyStore.getStrategyByType(formData.strategyType)
-  return strategy?.params || []
+  if (strategy?.params && strategy.params.length > 0) {
+    return strategy.params
+  }
+
+  // 回退：使用 DEFAULT_PARAMS
+  return Object.entries(DEFAULT_PARAMS).map(([name, value]) => ({
+    name,
+    description: formatParamName(name),
+    type: 'int' as const,
+    default: value,
+    min: 0,
+    max: 9999,
+  }))
 })
 
 // 处理策略变更，重置参数为默认值
@@ -373,7 +418,7 @@ function handleStrategyChange(strategyType: string) {
   if (strategy) {
     // 重置参数为默认值
     strategy.params.forEach(param => {
-      formData.params[param.name] = param.default
+      paramsData.value[param.name] = param.default
     })
   }
 }
@@ -392,10 +437,10 @@ watch(
       formData.isEnabled = newAlert.isEnabled
       formData.strategyType = newAlert.strategyType
       // 加载 params（如果存在）
-      if (newAlert.params) {
-        formData.params = { ...newAlert.params }
+      if (newAlert.params && Object.keys(newAlert.params).length > 0) {
+        paramsData.value = { ...newAlert.params } as Record<string, number | boolean>
       } else {
-        formData.params = { ...DEFAULT_PARAMS }
+        paramsData.value = { ...DEFAULT_PARAMS }
       }
     } else {
       // 创建模式：重置表单
@@ -413,8 +458,9 @@ function resetForm() {
   formData.symbol = 'BINANCE:BTCUSDT'
   formData.interval = '60'
   formData.isEnabled = true
-  formData.strategyType = 'macd'
-  formData.params = { ...DEFAULT_PARAMS }
+  // 使用第一个可用的策略类型，如果没有则使用默认值
+  formData.strategyType = strategyStore.strategies[0]?.type || 'MACDResonanceStrategyV5'
+  paramsData.value = { ...DEFAULT_PARAMS }
 }
 
 // 提交表单
@@ -431,22 +477,43 @@ async function handleSubmit() {
     const submitData: AlertConfig = {
       id: props.alert?.id || '',
       name: formData.name,
-      description: formData.description || null,
+      description: formData.description || undefined,
       triggerType: formData.triggerType,
       symbol: formData.symbol,
       interval: formData.interval,
       isEnabled: formData.isEnabled,
       strategyType: formData.strategyType,
-      params: { ...formData.params },
+      params: { ...paramsData.value },
       createdAt: props.alert?.createdAt || '',
       updatedAt: props.alert?.updatedAt || '',
-      createdBy: props.alert?.createdBy || null,
+      createdBy: props.alert?.createdBy || undefined,
     }
 
     emit('submit', submitData)
   } finally {
     submitting.value = false
   }
+}
+
+// 获取参数值的辅助函数
+function getParamValue(name: string): number | undefined {
+  const val = paramsData.value[name]
+  return typeof val === 'number' ? val : undefined
+}
+
+// 设置参数值的辅助函数
+function setParamValue(name: string, value: number | boolean | null) {
+  if (value !== null) {
+    paramsData.value[name] = value as number | boolean
+  }
+}
+
+// 创建动态参数的计算属性
+function createParamModel(name: string) {
+  return computed({
+    get: () => getParamValue(name),
+    set: (val: number | boolean | null) => setParamValue(name, val)
+  })
 }
 
 // 取消

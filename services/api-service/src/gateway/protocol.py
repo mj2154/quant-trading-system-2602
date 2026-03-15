@@ -13,27 +13,30 @@
 import time
 from typing import Any
 
+from pydantic import BaseModel
+
 from ..models.protocol.constants import PROTOCOL_VERSION
 from ..models.protocol.ws_message import (
     KlinesRequest,
     MessageError,
     MessageRequest,
     MessageSuccess,
+    MessageUpdate,
     SubscribeRequest,
     UnsubscribeRequest,
 )
 
 
-def parse_message(raw: dict[str, Any]) -> dict[str, Any]:
+def parse_message(raw: dict[str, Any]) -> MessageRequest:
     """解析客户端消息
 
-    使用 Pydantic 模型验证必要字段并返回标准化的请求格式。
+    使用 Pydantic 模型验证必要字段并返回标准化的请求模型。
 
     Args:
         raw: 原始消息字典
 
     Returns:
-        解析后的请求字典
+        MessageRequest 模型实例
 
     Raises:
         ValueError: 消息格式无效
@@ -62,7 +65,7 @@ def parse_message(raw: dict[str, Any]) -> dict[str, Any]:
                 "data": raw.get("data", {}),
             }
         )
-        return validated.model_dump(by_alias=True)
+        return validated
     except Exception as e:
         raise ValueError(f"Invalid message format: {e}")
 
@@ -114,9 +117,9 @@ def validate_unsubscribe_request(data: dict[str, Any]) -> UnsubscribeRequest:
 
 def format_success_response(
     request_id: str | None,
-    data: dict[str, Any],
+    data: BaseModel,
     response_type: str = "SUCCESS",
-) -> dict[str, Any]:
+) -> MessageSuccess:
     """格式化成功响应
 
     使用 Pydantic 模型确保响应符合协议规范。
@@ -124,14 +127,18 @@ def format_success_response(
     严格遵循07-websocket-protocol.md规范：
     - type 字段使用具体数据类型（如 KLINES_DATA, CONFIG_DATA 等）
     - 不使用泛化的 "success"
+    - data 字段直接使用数据模型，确保类型安全
+
+    注意：此函数强制要求 data 为 Pydantic 模型，不接受字典。
+    返回 MessageSuccess 模型，调用者如需 JSON 可调用 model_dump_json()。
 
     Args:
         request_id: 请求 ID
-        data: 响应数据
+        data: 响应数据，必须是 Pydantic 模型
         response_type: 响应数据类型（如 KLINES_DATA, CONFIG_DATA 等）
 
     Returns:
-        响应消息字典
+        MessageSuccess 模型实例
     """
     response = MessageSuccess(
         type=response_type,
@@ -140,20 +147,21 @@ def format_success_response(
         timestamp=_timestamp_ms(),
         data=data,
     )
-    return response.model_dump(by_alias=True)
+    return response
 
 
 def format_error_response(
     request_id: str | None,
     error_code: str,
     error_message: str,
-) -> dict[str, Any]:
+) -> MessageError:
     """格式化错误响应
 
     使用 Pydantic 模型确保响应符合协议规范。
 
     严格遵循07-websocket-protocol.md规范：
-    - type 字段值为 "ERROR"
+    - type 字段值为 "ERROR"（在顶层）
+    - 错误详情放在 data 内部（使用 ErrorData 模型）
 
     Args:
         request_id: 请求 ID
@@ -161,82 +169,53 @@ def format_error_response(
         error_message: 错误信息
 
     Returns:
-        错误响应字典
+        MessageError 模型实例
     """
-    response = MessageError(
-        type="ERROR",
-        request_id=request_id or "",
-        protocol_version=PROTOCOL_VERSION,
-        timestamp=_timestamp_ms(),
-        data={
-            "errorCode": error_code,
-            "errorMessage": error_message,
-        },
+    from ..models.protocol.ws_payload import ErrorData
+
+    error_data = ErrorData(
+        error_code=error_code,
+        error_message=error_message,
     )
-    return response.model_dump(by_alias=True)
+    return MessageError(
+        request_id=request_id or "",
+        timestamp=_timestamp_ms(),
+        data=error_data,
+    )
 
 
 def format_update_message(
-    event_type: str,
-    content: dict[str, Any],  # 使用 content 避免与数据库 payload 混淆
     subscription_key: str,
-) -> dict[str, Any]:
+    content: BaseModel,
+) -> MessageUpdate:
     """格式化更新消息（服务器推送）
 
     使用 Pydantic 模型确保响应符合协议规范。
 
     严格遵循07-websocket-protocol.md规范：
     - type 字段值为 "UPDATE"
-    - 使用 content 字段存储实际数据，避免与数据库 payload 混淆
+    - subscriptionKey 提升到顶层
+    - content 作为数据载荷（不是 payload，避免与数据库 payload 混淆）
     - 不包含 requestId 字段（服务器主动推送）
 
+    结构设计遵循"信封和信"原则：
+    - subscriptionKey: 信封（标识数据类型）
+    - content: 信（实际数据内容）
+
+    注意：此函数强制要求 content 为 Pydantic 模型，不接受字典。
+
     Args:
-        event_type: 事件类型
-        content: 实时数据内容
-        subscription_key: 订阅键
+        subscription_key: 订阅键（标识数据类型）
+        content: 实时数据内容，必须是 Pydantic 模型
 
     Returns:
-        更新消息字典
+        MessageUpdate 模型实例
     """
-    from ..models.protocol.ws_message import MessageUpdate
-
-    response = MessageUpdate(
-        type="UPDATE",
-        protocol_version=PROTOCOL_VERSION,
+    return MessageUpdate(
         timestamp=_timestamp_ms(),
-        data={
-            "eventType": event_type,
-            "subscriptionKey": subscription_key,
-            "content": content,
-        },
+        subscription_key=subscription_key,
+        content=content,
     )
-    return response.model_dump(by_alias=True)
-
-
-def format_ping_message() -> dict[str, Any]:
-    """格式化心跳消息
-
-    Returns:
-        心跳消息字典
-    """
-    return {
-        "protocolVersion": PROTOCOL_VERSION,
-        "type": "PING",
-        "timestamp": _timestamp_ms(),
-    }
-
-
-def format_pong_message() -> dict[str, Any]:
-    """格式化心跳响应消息
-
-    Returns:
-        心跳响应消息字典
-    """
-    return {
-        "protocolVersion": PROTOCOL_VERSION,
-        "type": "PONG",
-        "timestamp": _timestamp_ms(),
-    }
 
 
 def _timestamp_ms() -> int:

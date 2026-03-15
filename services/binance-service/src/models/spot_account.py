@@ -9,8 +9,10 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .base import SnakeCaseModel
 
-class CommissionRates(BaseModel):
+
+class CommissionRates(SnakeCaseModel):
     """手续费率详情
 
     对应 API 返回的 commissionRates 对象
@@ -22,7 +24,7 @@ class CommissionRates(BaseModel):
     seller: Optional[str] = Field(None, description="卖出手续费率")
 
 
-class Balance(BaseModel):
+class Balance(SnakeCaseModel):
     """余额信息
 
     对应 API 返回的 balances 数组元素
@@ -33,7 +35,7 @@ class Balance(BaseModel):
     locked: Optional[str] = Field(None, description="锁定数量")
 
 
-class SpotAccountInfo(BaseModel):
+class SpotAccountInfo(SnakeCaseModel):
     """现货账户信息
 
     对应 /api/v3/account API 响应。

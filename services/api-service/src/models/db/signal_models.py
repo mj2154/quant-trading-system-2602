@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from ..base import CamelCaseModel
 
@@ -62,8 +62,8 @@ class SignalRecordResponse(CamelCaseModel):
 
     id: int = Field(..., description="信号数据库自增ID")
     alert_id: str = Field(..., description="关联的告警配置ID (UUID)")
-    config_id: str | None = Field(None, description="关联的配置ID（可选）")
-    strategy_type: str = Field(..., description="策略名称")
+    name: str = Field(..., description="告警配置名称（冗余存储，保留信号产生时的告警名称）")
+    strategy_type: str = Field(..., description="策略类型")
     symbol: str = Field(..., description="交易对")
     interval: str = Field(..., description="K线周期")
     trigger_type: str | None = Field(None, description="触发类型")
@@ -74,6 +74,7 @@ class SignalRecordResponse(CamelCaseModel):
     computed_at: datetime = Field(..., description="信号计算时间")
     source_subscription_key: str | None = Field(None, description="触发该信号的订阅键")
     metadata: dict[str, Any] = Field(default_factory=dict, description="附加元数据")
+    created_by: str | None = Field(None, description="创建者标识")
 
 
 class SignalListResponse(CamelCaseModel):
@@ -85,8 +86,11 @@ class SignalListResponse(CamelCaseModel):
     page_size: int = Field(..., description="每页数量")
 
 
-class EnableDisableResponse(BaseModel):
-    """启用/禁用响应模型"""
+class EnableDisableResponse(CamelCaseModel):
+    """启用/禁用响应模型
+
+    使用 CamelCaseModel 基类，序列化时自动将字段转换为 camelCase。
+    """
 
     id: UUID = Field(..., description="配置ID")
     name: str = Field(..., description="名称")

@@ -63,16 +63,16 @@ export interface StrategyMetadataListResponse {
  * 信号记录响应
  *
  * 对应后端 SignalRecordResponse
- * 用于 LIST_SIGNALS 响应
+ * 用于 LIST_SIGNALS 响应和信号推送
  */
 export interface SignalRecord {
   /** 信号数据库自增ID */
   id: number
   /** 关联的告警配置ID (UUID) */
   alertId: string
-  /** 关联的配置ID（可选） */
-  configId?: string
-  /** 策略名称 */
+  /** 告警配置名称（冗余存储，保留信号产生时的告警名称） */
+  name: string
+  /** 策略类型 */
   strategyType: string
   /** 交易对 */
   symbol: string
@@ -89,7 +89,9 @@ export interface SignalRecord {
   /** 触发该信号的订阅键 */
   sourceSubscriptionKey?: string
   /** 附加元数据 */
-  metadata: Record<string, unknown>
+  metadata?: Record<string, unknown>
+  /** 创建者标识 */
+  createdBy?: string
 }
 
 /**

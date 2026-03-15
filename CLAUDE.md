@@ -15,37 +15,20 @@
 
 ## 快速开始
 
-### 启动服务
-```bash
-cd docker && docker-compose up -d
-```
+| Command | Description |
+|---------|-------------|
+| `cd docker && docker-compose up -d` | 启动所有服务 |
+| `docker-compose logs -f [service]` | 查看服务日志 |
+| `docker-compose restart [service]` | 重启服务 |
+| `docker exec -it timescale-db psql -U dbuser -d trading_db` | 进入数据库 |
 
-### 前端调试
+> **注意**: 所有后端服务必须在 Docker 中运行，不支持本地直接运行
+
+### 前端开发
 ```bash
-# 进入前端目录并启动开发服务器
 cd frontend/trading-panel && pnpm dev
 ```
-
 访问地址: http://localhost:5173
-
-进入其他页面: 点击首页的 **加号(+)** 按钮可进入交易页面等不同功能页面。
-
-### 运行微服务
-- API服务: `cd services/api-service && uv run python src/main.py`
-- 币安服务: `cd services/binance-service && uv run python main.py`
-- 信号服务: `cd services/signal-service && uv run python main.py`
-- 交易系统: `cd services/trading && uv run python main.py`
-
-### 常用命令
-- 查看日志: `cd docker && docker-compose logs -f [service-name]`
-- 重启服务: `cd docker && docker-compose restart [service-name]`
-- 进入数据库: `docker exec -it timescale-db psql -U dbuser -d trading_db`
-
-### Python包管理
-> 详细规则由 hookify 自动强制执行
-
-- 添加依赖: `cd services/<name> && uv add <package>`
-- 运行脚本: `cd services/<name> && uv run python script.py`
 
 ## 核心文档
 
@@ -78,22 +61,7 @@ cd frontend/trading-panel && pnpm dev
 
 ### 📚 文档体系索引
 
-**《架构文档体系指南》** 位于 `docs/backend/README.md`
-
-该文档提供了完整的文档导航和阅读指南：
-- 文档体系介绍和阅读建议
-- 核心理念文档与实施文档的关系
-- 不同读者群体的阅读路径
-- 文档维护和同步机制
-
-### 📖 相关设计文档
-
-**《量化交易系统架构设计》** (`docs/backend/design/QUANT_TRADING_SYSTEM_ARCHITECTURE.md`) 包含：
-- 数据库协同架构详细设计
-- 任务调度和订阅管理机制
-- WebSocket API协议格式
-- REST API请求/响应结构
-- 完整的数据流设计
+详见 `docs/backend/README.md`
 
 ### 第三方API参考文档
 
@@ -115,7 +83,11 @@ cd frontend/trading-panel && pnpm dev
 - **数据库**: TimescaleDB (PostgreSQL扩展) - Docker容器运行
 - **后端**: Python 3.14+ (FastAPI/AsyncIO)
 - **容器**: Docker + Docker Compose
-- **包管理**: uv (Python包管理)
+- **包管理**: uv (强制使用)
+  - 所有 Python 依赖必须通过 `uv` 管理（禁止 pip/poetry/pipenv）
+  - 运行脚本必须使用 `uv run`（如 `uv run python script.py`）
+  - 安装依赖: `uv add <package>` 或 `uv pip install -r requirements.txt`
+  - 同步依赖: `uv sync`
 - **API网关**: Clash Proxy (网络代理)
 
 ## 设计原则：避免过度设计
@@ -174,6 +146,45 @@ cd frontend/trading-panel && pnpm dev
 - 使用async/await进行异步编程
 - Python类型注解是必须的
 
+### 4.1 类型安全设计原则
+
+**模型贯穿始终**:
+- 从业务逻辑到网络传输，全程使用 Pydantic(BaseModel) 模型
+- 禁止在响应处理中手动拼装字典
+- 响应数据必须使用 Pydantic 模型，禁止传递原始字典
+
+**命名策略**（强制使用基类）:
+- **SnakeCaseModel**: 用于接收外部输入，自动将camelCase转为snake_case
+  - 例如: `"priceChange"` → `price_change`
+  - 适用于解析币安API响应、WebSocket消息等外部数据
+- **CamelCaseModel**: 用于响应输出，序列化时自动转为camelCase
+  - 例如: `internal_field` → `"internalField"`
+  - 适用于API响应、WebSocket推送等对外数据
+- 参考实现: `services/{service}/src/models/base.py`
+
+**响应数据模型命名规范**:
+- 单个数据: `{Entity}Data` (如 `AlertConfigData`)
+- 列表数据: `{Entity}ListData` (如 `AlertConfigListData`)
+- 删除响应: `Delete{Entity}Data` (如 `DeleteAlertData`)
+- 响应数据: `{Entity}ResponseData` (如 `QuotesResponseData`)
+
+**类型约束**:
+- `format_success_response` 的 data 参数类型必须是 `BaseModel`
+- `client_manager.send()` 的 message 参数类型必须是 `BaseModel`
+- 利用类型系统拦截潜在问题，而非依赖运行时测试
+
+**实践示例**:
+```python
+# 错误：手动字典拼装（反模式）
+return self._response(
+    data={"type": "order_list", "orders": orders, "count": len(orders)}
+)
+
+# 正确：使用 Pydantic 模型
+response_data = OrderListResponseData(orders=order_list, count=len(order_list))
+return self._response(data=response_data)
+```
+
 ### 5. 日志规范
 
 - 所有服务使用结构化JSON日志
@@ -209,6 +220,57 @@ cd frontend/trading-panel && pnpm dev
 - **禁止**在其他位置放置SQL文件（migrations目录仅用于版本追溯）
 - 不要在多个服务目录下分散放置SQL脚本
 
+### 9. 设计优先原则（通用编码规范）
+
+**核心思想**: 模型驱动开发，设计先于实现
+
+**正确流程**: 需求分析 → 数据模型定义 → 文档描述 → 代码实现
+
+#### 设计文档审查流程
+
+在实现任何新功能或修改现有功能前，必须先检查对应的设计文档：
+
+- **WS协议设计**: `docs/backend/design/07-websocket-protocol.md`
+- **API模型设计**: `docs/backend/design/08-api-models.md`
+- **服务设计**: `docs/backend/design/` 下对应服务的设计文档
+
+审查要点：
+- 确认数据模型定义是否完整
+- 验证是否使用类型模型而非字典传递
+- 检查外部API数据到内部模型的转换流程
+
+**币安服务特殊要求**:
+- HTTP/WS客户端返回数据必须先转换为**币安数据模型**
+- 再转换为**内部使用的数据模型**
+- 全程禁止原始字典传递
+
+**问题警示**:
+- ❌ 代码实现 → 文档描述 → 模型依赖实现（本末倒置）
+- ✅ 数据模型定义 → 文档描述 → 代码实现（正本清源）
+
+#### 9.1 类型安全（强制约束）
+
+- **禁止原始字典**: 所有数据传递必须使用类型模型
+  - Python: Pydantic BaseModel
+  - TypeScript: Interface / Type
+- **响应拼装反模式**: 禁止 `return {"key": value}`，必须用模型类
+- **类型拦截**: 依赖编译期/静态类型检查发现问题，而非运行时测试
+
+#### 9.2 设计文档优先
+
+- 数据模型必须在代码实现前明确定义
+- 所有模型变更必须先更新文档，再更新代码
+- 如实施中发现设计文档需要改进：
+  - 输出改进报告（问题描述、改进方案、影响范围、兼容性评估）
+  - 等待审核通过后方可修改代码
+  - **禁止自行发挥修改代码**
+
+#### 9.3 实践准则
+
+- **字典是温床**: 字典(dict/map)是"临时解决方案"的温床，最终会导致格式不一致
+- **类型即约束**: 类型系统最大的价值不是报错，而是**强制思考和统一**
+- **设计即约束**: 强制使用数据模型是一种"设计约束"，可以防止技术债务累积
+
 ## 代码结构
 
 详见 `docs/codemaps/` 目录：
@@ -216,24 +278,6 @@ cd frontend/trading-panel && pnpm dev
 - `frontend.md` - 前端代码结构
 - `architecture.md` - 架构代码结构
 - `data.md` - 数据层代码结构
-
-### 重要提醒
-
-**数据库协调架构的核心原则**：
-
-1. **数据库即调度中心** (`docs/backend/design/DATABASE_COORDINATED_ARCHITECTURE.md`) 是项目的**设计哲学指南**，所有任务调度通过数据库实现：
-   - 数据库即调度中心，服务间不直接通信
-   - 四大设计原则：职责单一、数据库中心化、松耦合、事件驱动
-   - 状态集中化：所有系统状态持久化在数据库
-   - 事件驱动：数据库变化自动触发通知，消费者被动响应
-
-2. **详细实施文档** (`docs/backend/design/QUANT_TRADING_SYSTEM_ARCHITECTURE.md`) 是项目的**实施权威**，包含：
-   - 完整的系统架构图和数据流设计
-   - 数据库表结构、触发器和存储过程
-   - 微服务交互模式和任务调度机制
-   - 订阅管理和实时数据推送实现
-
-**任何架构决策必须参考核心理念文档，任何实现方案必须参考实施文档**，确保设计思想与实施细节保持一致。
 
 ## 配置管理
 
@@ -253,48 +297,27 @@ cd frontend/trading-panel && pnpm dev
 
 ## 项目管理规范
 
-### 微服务脚本运行
+### Docker操作
 
-> 每个服务独立管理依赖，运行脚本时必须进入对应目录
-- **信号服务**: `cd services/signal-service && uv run python main.py`
-- **交易系统**: `cd services/trading && uv run python main.py`
-
-每个服务的脚本都必须在各自的服务目录下运行，这样才能正确加载该服务的依赖和环境配置。
-
-### Docker容器操作
-
-- **启动所有服务**: `cd docker && docker-compose up -d`
-- **查看日志**: `cd docker && docker-compose logs -f [service-name]`
-- **停止所有服务**: `cd docker && docker-compose down`
-- **重启服务**: `cd docker && docker-compose restart [service-name]`
-- **进入容器**: `docker exec -it [container-name] /bin/bash`
-
-所有Docker相关文件位于`docker/`目录下，包括docker-compose.yml和Docker配置文件。
+| Command | Description |
+|---------|-------------|
+| `docker-compose up -d` | 启动所有服务 |
+| `docker-compose down` | 停止所有服务 |
+| `docker-compose logs -f [service]` | 查看日志 |
+| `docker-compose restart [service]` | 重启服务 |
+| `docker exec -it [container] /bin/bash` | 进入容器 |
 
 ### 数据库调试
 
-**数据库运行在Docker容器中**，调试必须进入容器执行命令：
-
 ```bash
-# 进入TimescaleDB容器
+# 进入容器
 docker exec -it timescale-db /bin/bash
 
-# 在容器内连接数据库
+# 连接数据库
 psql -U dbuser -d trading_db
-
-# 执行SQL文件
-psql -U dbuser -d trading_db -f /tmp/migrate.sql
-
-# 复制文件到容器
-docker cp local-file.sql timescale-db:/tmp/file.sql
 ```
 
-**常用连接信息**:
-- 主机: `timescale-db` (容器名)
-- 数据库: `trading_db`
-- 用户: `dbuser`
-- 密码: `pass`
-- 端口: `5432`
+**连接信息**: Host: `timescale-db`, DB: `trading_db`, User: `dbuser`, Pass: `pass`, Port: `5432`
 
 ## 开发流程
 
@@ -344,50 +367,20 @@ docker cp local-file.sql timescale-db:/tmp/file.sql
 ## 注意事项
 
 ### 架构原则
-
 - **事件驱动**: 遵循写入→触发→通知→订阅模式
 - **数据中心**: TimescaleDB作为唯一数据源
 - **服务独立**: 微服务间通过事件通信，避免直接API调用
 - **松耦合**: 服务间无直接依赖
 
 ### 开发规范
-
-- **代码风格**: 使用ruff进行代码格式化和错误检测
-- **类型注解**: Python代码必须包含类型注解
-- **文档字符串**: 重要函数和类必须编写docstring
-- **日志规范**: 使用结构化日志，记录关键业务事件
-
-### 性能考虑
-
-- 数据库查询优化，避免N+1查询
-- 合理配置连接池大小
-- 异步处理非阻塞操作
-- 监控关键性能指标
-
-### 安全要求
-
-- 严禁硬编码敏感信息
-- 所有输入必须验证
-- 使用参数化查询防止SQL注入
-- 交易API实现速率限制
-- 定期更新安全依赖包
+- **代码风格**: ruff + 类型注解
+- **日志**: 结构化JSON日志
+- **安全**: 敏感信息使用环境变量，参数化查询
 
 ## 文档阅读指南
 
-### 新团队成员
+1. 阅读 `docs/backend/README.md` 了解文档体系
+2. 阅读 `docs/backend/design/DATABASE_COORDINATED_ARCHITECTURE.md` 理解设计理念
+3. 阅读 `docs/backend/design/QUANT_TRADING_SYSTEM_ARCHITECTURE.md` 掌握实施细节
 
-1. **第一步**：阅读 `docs/backend/README.md` 了解文档体系
-2. **第二步**：阅读 `docs/backend/design/DATABASE_COORDINATED_ARCHITECTURE.md` 理解设计理念
-3. **第三步**：阅读 `docs/backend/design/QUANT_TRADING_SYSTEM_ARCHITECTURE.md` 掌握实施细节
-
-### 开发人员
-
-- **日常开发**：主要查阅 `QUANT_TRADING_SYSTEM_ARCHITECTURE.md` 获取实施细节
-- **遇到问题**：参考 `DATABASE_COORDINATED_ARCHITECTURE.md` 理解设计意图
-- **代码变更**：更新相应文档章节
-
-### 架构师
-
-- **定期回顾**：每季度回顾核心理念文档
-- **新功能设计**：优先在理念文档中阐述设计思想
-- **文档维护**：确保两个文档的一致性
+> 任何架构决策必须参考核心理念文档，任何实现方案必须参考实施文档

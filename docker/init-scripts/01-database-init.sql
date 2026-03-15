@@ -330,23 +330,23 @@ CREATE TABLE IF NOT EXISTS alert_configs (
 );
 
 -- 复合索引：按用户 + 策略类型查询
-CREATE INDEX IF NOT EXISTS idx_alerts_user_strategy
+CREATE INDEX IF NOT EXISTS idx_alert_configs_user_strategy
     ON alert_configs (created_by, strategy_type);
 
 -- 复合索引：按用户 + 交易对查询
-CREATE INDEX IF NOT EXISTS idx_alerts_user_symbol
+CREATE INDEX IF NOT EXISTS idx_alert_configs_user_symbol
     ON alert_configs (created_by, symbol);
 
 -- 复合索引：按策略类型 + 交易对查询
-CREATE INDEX IF NOT EXISTS idx_alerts_strategy_symbol
+CREATE INDEX IF NOT EXISTS idx_alert_configs_strategy_symbol
     ON alert_configs (strategy_type, symbol);
 
 -- GIN 索引：按参数查询（支持参数维度筛选）
-CREATE INDEX IF NOT EXISTS idx_alerts_params_gin
+CREATE INDEX IF NOT EXISTS idx_alert_configs_params_gin
     ON alert_configs USING GIN (params jsonb_path_ops);
 
 -- 索引：按启用状态查询（批量处理时使用）
-CREATE INDEX IF NOT EXISTS idx_alerts_enabled
+CREATE INDEX IF NOT EXISTS idx_alert_configs_enabled
     ON alert_configs (is_enabled) WHERE is_enabled = TRUE;
 
 -- -----------------------------------------------------------------------------
@@ -360,6 +360,9 @@ CREATE TABLE IF NOT EXISTS strategy_signals (
 
     -- 关联告警（用于追溯配置来源）
     alert_id VARCHAR(36) NOT NULL,   -- 关联 alert_configs.id（前端生成）
+
+    -- 告警名称（冗余存储，保留信号产生时的告警名称）
+    name VARCHAR(100) NOT NULL,      -- 告警配置名称
 
     -- 用户标识
     created_by VARCHAR(100),                   -- 创建者标识
@@ -623,6 +626,7 @@ BEGIN
         'data', jsonb_build_object(
             'id', NEW.id,
             'alert_id', NEW.alert_id,
+            'name', NEW.name,
             'created_by', NEW.created_by,
             'strategy_type', NEW.strategy_type,
             'symbol', NEW.symbol,
@@ -630,7 +634,8 @@ BEGIN
             'trigger_type', NEW.trigger_type,
             'signal_value', NEW.signal_value,
             'signal_reason', NEW.signal_reason,
-            'computed_at', NEW.computed_at::TEXT
+            'computed_at', NEW.computed_at::TEXT,
+            'source_subscription_key', NEW.source_subscription_key
         )
     )::TEXT);
     RETURN NEW;

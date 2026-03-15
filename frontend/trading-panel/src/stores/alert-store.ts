@@ -1,7 +1,8 @@
 /**
  * 告警管理状态管理 Store
  *
- * 管理告警配置列表、告警信号历史、CRUD 操作和 WebSocket 订阅
+ * 管理告警配置列表、告警信号历史、CRUD 操作
+ * 使用 DataService 获取数据，保持单一 WebSocket 连接
  *
  * 使用 WebSocket 协议 (protocolVersion 2.0) 与后端通信
  * 使用 camelCase 与协议保持一致
@@ -9,52 +10,17 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type {
-  AlertSignal as AlertSignalType,
-  SignalRecord,
-  SignalRecordListResponse as AlertSignalListResponse,
-  SignalRecordQueryParams,
-  AlertTriggerType,
-  AlertStrategyType,
-} from '../types/alert-types'
+import { dataService } from '../services/data-service/DataService'
+import type { SignalRecord } from '../types/api'
+import type { SignalRecordQueryParams } from '../types/api/signal'
+import type { AlertConfig } from '../types/api'
 
-// Re-export types for other components (only those from alert-types)
+// Re-export types for other components
 export type { SignalRecord }
+export type { AlertConfig }
 
-// WebSocket URL
-const WS_BASE_URL = 'ws://127.0.0.1:8000'
-
-// ==================== 类型定义 ====================
-
-/**
- * 告警配置（与后端 alert_signals 表保持一致）
- * 使用 camelCase 与 WebSocket 协议保持一致
- */
-export interface AlertConfig {
-  id: string
-  name: string
-  description: string | null
-  /** 策略类型 */
-  strategyType: string
-  /** 交易品种 */
-  symbol: string
-  /** K线周期 */
-  interval: string
-  /** 触发类型 */
-  triggerType: string
-  /** 策略参数（JSONB 格式） */
-  params: Record<string, number | boolean> | null
-  /** 是否启用 */
-  isEnabled: boolean
-  createdAt: string
-  updatedAt: string
-  createdBy: string | null
-}
-
-/**
- * 创建告警配置请求
- */
-export interface AlertConfigCreate {
+// 创建和更新告警配置的类型别名（保持向后兼容）
+export type AlertConfigCreate = {
   name: string
   description?: string
   strategyType: string
@@ -65,10 +31,7 @@ export interface AlertConfigCreate {
   isEnabled?: boolean
 }
 
-/**
- * 更新告警配置请求
- */
-export interface AlertConfigUpdate {
+export type AlertConfigUpdate = {
   name?: string
   description?: string
   strategyType?: string
@@ -77,17 +40,6 @@ export interface AlertConfigUpdate {
   triggerType?: string
   params?: Record<string, number | boolean>
   isEnabled?: boolean
-}
-
-/**
- * WebSocket 消息基础格式 (v2.0 协议)
- */
-export interface WSMessage {
-  protocolVersion: string
-  type: string
-  requestId: string
-  timestamp: number
-  data: Record<string, unknown>
 }
 
 // ==================== 常量定义 ====================
@@ -115,35 +67,32 @@ export const ALERT_STRATEGY_TYPE_OPTIONS = [
 
 /**
  * MACD 默认参数（前端表单使用的简写名称）
- * 注意：发送 到后端时会自动转换为完整参数名
+ * 注意：发送到后端时会自动转换为完整参数名
  * 后端要求的参数名: macd1_fastperiod, macd1_slowperiod, macd1_signalperiod 等
  */
+
+/**
+ * 将 snake_case 参数名转换为人类友好的显示格式
+ * 例如: macd1_fastperiod -> "Macd1 Fastperiod"
+ *       fast_period -> "Fast Period"
+ *       macd2_signalperiod -> "Macd2 Signalperiod"
+ */
+export function formatParamName(name: string): string {
+  return name
+    .replace(/_/g, ' ')  // 下划线替换为空格
+    .replace(/(\d+)/g, '$1')  // 数字前后不加空格，保持连续
+    .replace(/\s+/g, ' ')  // 多个空格合并为一个
+    .trim()
+    .replace(/^\w/, c => c.toUpperCase())  // 首字母大写
+}
+
 export const DEFAULT_PARAMS = {
-  fast1: 12,
-  slow1: 26,
-  signal1: 9,
-  fast2: 5,
-  slow2: 10,
-  signal2: 4,
-}
-
-/**
- * requestId 生成器 (UUID v4 hex 格式，32字符，符合 WS 协议规范)
- * 格式: 550e8400e29b41d4a716446655440000
- */
-function generateRequestId(): string {
-  return crypto.randomUUID().replace(/-/g, '')
-}
-
-/**
- * 生成 UUIDv4
- */
-function generateUUIDv4(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0
-    const v = c === 'x' ? r : (r & 0x3 | 0x8)
-    return v.toString(16)
-  })
+  macd1_fastperiod: 12,
+  macd1_slowperiod: 26,
+  macd1_signalperiod: 9,
+  macd2_fastperiod: 5,
+  macd2_slowperiod: 10,
+  macd2_signalperiod: 4,
 }
 
 // ==================== Store 定义 ====================
@@ -172,25 +121,18 @@ export const useAlertStore = defineStore('alert', () => {
     orderDir: 'desc',
   })
 
-  // WebSocket 连接
-  const ws = ref<WebSocket | null>(null)
+  // DataService 连接状态
   const wsConnected = ref(false)
-  const wsConnecting = ref(false)  // 防止并发创建连接
+
+  // 实时告警信号列表
   const realtimeAlertSignals = ref<SignalRecord[]>([])
   const maxRealtimeAlertSignals = 50 // 最多保留50条实时信号
 
-  // 待处理的请求回调 (requestId -> resolve/reject)
-  const pendingRequests = new Map<string, {
-    resolve: (value: unknown) => void
-    reject: (reason?: unknown) => void
-    timeoutId: number
-  }>()
+  // 实时信号订阅取消函数
+  let signalUnsubscribe: (() => void) | null = null
 
   // 告警信号到达回调 - 用于触发弹窗和声音
   const onSignalCallback = ref<((signal: SignalRecord) => void) | null>(null)
-
-  // 请求超时时间 (毫秒)
-  const REQUEST_TIMEOUT = 30000
 
   // ==================== 计算属性 ====================
 
@@ -200,108 +142,25 @@ export const useAlertStore = defineStore('alert', () => {
 
   const realtimeAlertSignalsCount = computed(() => realtimeAlertSignals.value.length)
 
-  // ==================== WebSocket 基础方法 ====================
-
-  /**
-   * 发送 WebSocket 消息并等待响应
-   */
-  function sendWSRequest<T>(message: WSMessage): Promise<T> {
-    return new Promise((resolve, reject) => {
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket 未连接'))
-        return
-      }
-
-      const { requestId } = message
-
-      // 设置超时
-      const timeoutId = window.setTimeout(() => {
-        pendingRequests.delete(requestId)
-        reject(new Error(`请求超时: ${requestId}`))
-      }, REQUEST_TIMEOUT)
-
-      // 存储回调
-      pendingRequests.set(requestId, { resolve: resolve as (value: unknown) => void, reject, timeoutId })
-
-      // 发送消息
-      ws.value.send(JSON.stringify(message))
-    })
-  }
-
-  /**
-   * 构建基础请求消息
-   * 使用 v2.0 协议: type 字段替代 action 字段
-   */
-  function buildRequestMessage(data: Record<string, unknown>): WSMessage {
-    // 从 data.type 获取请求类型，映射到协议请求类型
-    const dataType = data.type as string
-    const typeMap: Record<string, string> = {
-      'list_alert_configs': 'LIST_ALERT_CONFIGS',
-      'get_alert_config': 'GET_ALERT_CONFIG',
-      'create_alert_config': 'CREATE_ALERT_CONFIG',
-      'update_alert_config': 'UPDATE_ALERT_CONFIG',
-      'delete_alert_config': 'DELETE_ALERT_CONFIG',
-      'enable_alert_config': 'ENABLE_ALERT_CONFIG',
-      'disable_alert_config': 'DISABLE_ALERT_CONFIG',
-      'list_signals': 'LIST_SIGNALS',
-    }
-    return {
-      protocolVersion: '2.0',
-      type: typeMap[dataType] || dataType,
-      requestId: generateRequestId(),
-      timestamp: Date.now(),
-      data,
-    }
-  }
-
   // ==================== 告警配置 Actions ====================
 
   /**
-   * 获取告警配置列表（使用 WebSocket）
+   * 获取告警配置列表（使用 DataService）
    */
   async function fetchAlerts() {
-    // 确保 WebSocket 已连接
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      connectWebSocket()
-      // 等待连接建立（最多等待3秒）
-      for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        if (ws.value?.readyState === WebSocket.OPEN) break
-      }
-      // 如果仍未连接，返回错误
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        alertsError.value = 'WebSocket 连接失败，请稍后重试'
-        alertsLoading.value = false
-        return
-      }
-    }
-
     alertsLoading.value = true
     alertsError.value = null
     try {
-      const message = buildRequestMessage({
-        type: 'list_alert_configs',
-        page: 1,
-        pageSize: 100,
-      })
+      const configs = await dataService.listAlertConfigs(1, 100)
 
-      const response = await sendWSRequest<{
-        items: AlertConfig[]
-        total: number
-        page: number
-        pageSize: number
-      }>(message)
-
-      const items = response.items || []
-      alerts.value = items.map((item) => ({
+      alerts.value = configs.map((item) => ({
         ...item,
-        // 确保所有必需字段都有默认值
-        strategyType: item.strategyType || 'macd_resonance_v5',
+        // 确保所有必需字段都有默认值（使用 ?? 运算符，只有 null/undefined 时才使用默认值）
+        strategyType: item.strategyType ?? 'macd_resonance_v5',
         symbol: item.symbol || '',
         interval: item.interval || '60',
         triggerType: item.triggerType || 'each_kline_close',
-        // 转换参数名：从完整名称 (macd1_fastperiod) 转换为简写 (fast1)
-        params: convertParamsFromBackend(item.params) || { ...DEFAULT_PARAMS },
+        params: item.params || { ...DEFAULT_PARAMS },
         isEnabled: item.isEnabled ?? true,
       }))
 
@@ -316,34 +175,18 @@ export const useAlertStore = defineStore('alert', () => {
   }
 
   /**
-   * 获取单个告警配置
+   * 获取单个告警配置（使用 DataService）
    */
   async function fetchAlert(id: string): Promise<AlertConfig | null> {
-    // 确保 WebSocket 已连接
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      connectWebSocket()
-      for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        if (ws.value?.readyState === WebSocket.OPEN) break
-      }
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        alertsError.value = 'WebSocket 连接失败'
-        return null
-      }
-    }
-
     alertsLoading.value = true
     alertsError.value = null
     try {
-      const message = buildRequestMessage({
-        type: 'get_alert_config',
-        id,
-      })
-
-      const data = await sendWSRequest<AlertConfig>(message)
-      currentAlert.value = {
-        ...data,
-        strategyType: data.strategyType || 'macd',
+      const alert = await dataService.getAlert(id)
+      if (alert) {
+        currentAlert.value = {
+          ...alert,
+          strategyType: alert.strategyType || 'macd',
+        }
       }
       return currentAlert.value
     } catch (error) {
@@ -356,150 +199,32 @@ export const useAlertStore = defineStore('alert', () => {
   }
 
   /**
-   * 将前端参数转换为后端API格式
-   * 映射前端简化的参数名到后端要求的完整参数名
-   * 后端要求的参数名: macd1_fastperiod, macd1_slowperiod, macd1_signalperiod 等
+   * 创建告警配置（使用 DataService）
    */
-  function convertParamsToBackend(params: Record<string, number | boolean> | undefined): Record<string, number | boolean> {
-    // 后端要求的完整参数名映射
-    const paramMapping: Record<string, string> = {
-      // MACD1 参数映射
-      fast1: 'macd1_fastperiod',
-      slow1: 'macd1_slowperiod',
-      signal1: 'macd1_signalperiod',
-      // MACD2 参数映射
-      fast2: 'macd2_fastperiod',
-      slow2: 'macd2_slowperiod',
-      signal2: 'macd2_signalperiod',
-    }
-
-    // 默认参数值（使用简写名称）
-    const defaultParams = DEFAULT_PARAMS
-
-    // 如果没有传入参数，使用默认值并转换
-    if (!params) {
-      const converted: Record<string, number | boolean> = {}
-      for (const [key, value] of Object.entries(defaultParams)) {
-        converted[paramMapping[key] || key] = value
-      }
-      return converted
-    }
-
-    // 从默认参数开始，然后应用用户传入的参数
-    const converted: Record<string, number | boolean> = {}
-
-    // 首先设置默认值
-    for (const [key, value] of Object.entries(defaultParams)) {
-      converted[paramMapping[key] || key] = value
-    }
-
-    // 然后用用户传入的值覆盖
-    for (const [key, value] of Object.entries(params)) {
-      // 如果是简写名称，转换为完整名称
-      if (key in paramMapping) {
-        converted[paramMapping[key]] = value
-      } else {
-        // 如果已经是完整名称或未知参数，直接使用
-        converted[key] = value
-      }
-    }
-
-    return converted
-  }
-
-  /**
-   * 将后端返回的参数转换为前端显示格式
-   * 从完整参数名 (macd1_fastperiod) 转换为简写 (fast1)
-   */
-  function convertParamsFromBackend(params: Record<string, number | boolean> | undefined | null): Record<string, number | boolean> {
-    // 后端参数名到简写的映射
-    const paramReverseMapping: Record<string, string> = {
-      // MACD1 参数
-      macd1_fastperiod: 'fast1',
-      macd1_slowperiod: 'slow1',
-      macd1_signalperiod: 'signal1',
-      // MACD2 参数
-      macd2_fastperiod: 'fast2',
-      macd2_slowperiod: 'slow2',
-      macd2_signalperiod: 'signal2',
-    }
-
-    // 如果没有参数，返回默认值
-    if (!params) {
-      return { ...DEFAULT_PARAMS }
-    }
-
-    const converted: Record<string, number | boolean> = {}
-
-    for (const [key, value] of Object.entries(params)) {
-      // 如果是完整名称，转换为简写
-      if (key in paramReverseMapping) {
-        converted[paramReverseMapping[key]] = value
-      } else {
-        // 否则直接使用
-        converted[key] = value
-      }
-    }
-
-    // 如果转换后为空，返回默认值
-    if (Object.keys(converted).length === 0) {
-      return { ...DEFAULT_PARAMS }
-    }
-
-    return converted
-  }
-
-  /**
-   * 创建告警配置
-   */
-  async function createAlert(config: AlertConfigCreate): Promise<AlertConfig | null> {
-    // 确保 WebSocket 已连接
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      connectWebSocket()
-      for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        if (ws.value?.readyState === WebSocket.OPEN) break
-      }
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        alertsError.value = 'WebSocket 连接失败，请稍后重试'
-        return null
-      }
-    }
-
+  async function createAlert(config: {
+    name: string
+    description?: string
+    strategyType: string
+    symbol: string
+    interval: string
+    triggerType?: string
+    params?: Record<string, number | boolean>
+    isEnabled?: boolean
+  }): Promise<AlertConfig | null> {
     alertsLoading.value = true
     alertsError.value = null
     try {
-      // 转换告警格式到 API 格式
-      const alertData = {
-        type: 'create_alert_config',
-        id: generateUUIDv4(),
+      const newAlert = await dataService.createAlert({
         name: config.name,
-        description: config.description || '',
-        triggerType: config.triggerType || 'each_kline_close',
+        description: config.description,
+        strategyType: config.strategyType,
         symbol: config.symbol,
         interval: config.interval,
+        triggerType: config.triggerType || 'each_kline_close',
+        params: config.params,
         isEnabled: config.isEnabled ?? true,
-        // 转换参数名称：前端可能使用简写或完整名称
-        params: convertParamsToBackend(config.params),
-        // 使用用户传入的 strategyType，或使用默认值
-        strategyType: config.strategyType || 'macd_resonance_v5',
-        // 添加 created_by 字段
-        created_by: 'user_001',
-      }
+      })
 
-      console.log('[AlertStore] 创建告警配置，发送数据:', JSON.stringify(alertData, null, 2))
-
-      const message = buildRequestMessage(alertData)
-      const data = await sendWSRequest<AlertConfig>(message)
-
-      const newAlert: AlertConfig = {
-        ...data,
-        strategyType: data.strategyType || alertData.strategyType,
-        symbol: data.symbol || config.symbol,
-        interval: data.interval || config.interval,
-        // 转换参数格式：从后端完整名称 (macd1_fastperiod) 转换为前端简写 (fast1)
-        params: convertParamsFromBackend(data.params) || convertParamsToBackend(config.params),
-      }
       alerts.value.push(newAlert)
       return newAlert
     } catch (error) {
@@ -512,47 +237,26 @@ export const useAlertStore = defineStore('alert', () => {
   }
 
   /**
-   * 更新告警配置
+   * 更新告警配置（使用 DataService）
    */
-  async function updateAlert(id: string, config: AlertConfigUpdate): Promise<AlertConfig | null> {
-    // 确保 WebSocket 已连接
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      connectWebSocket()
-      for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        if (ws.value?.readyState === WebSocket.OPEN) break
-      }
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        alertsError.value = 'WebSocket 连接失败'
-        return null
-      }
+  async function updateAlert(
+    id: string,
+    config: {
+      name?: string
+      description?: string
+      strategyType?: string
+      symbol?: string
+      interval?: string
+      triggerType?: string
+      params?: Record<string, number | boolean>
+      isEnabled?: boolean
     }
-
+  ): Promise<AlertConfig | null> {
     alertsLoading.value = true
     alertsError.value = null
     try {
-      // 构建更新数据
-      const alertData: Record<string, unknown> = {
-        type: 'update_alert_config',
-        id,
-      }
-      if (config.name !== undefined) alertData.name = config.name
-      if (config.description !== undefined) alertData.description = config.description
-      if (config.triggerType !== undefined) alertData.triggerType = config.triggerType
-      if (config.symbol !== undefined) alertData.symbol = config.symbol
-      if (config.interval !== undefined) alertData.interval = config.interval
-      if (config.isEnabled !== undefined) alertData.isEnabled = config.isEnabled
-      if (config.params !== undefined) alertData.params = config.params
-      if (config.strategyType !== undefined) alertData.strategyType = config.strategyType
+      const updatedAlert = await dataService.updateAlert(id, config)
 
-      const message = buildRequestMessage(alertData)
-      const data = await sendWSRequest<AlertConfig>(message)
-
-      const updatedAlert: AlertConfig = {
-        ...data,
-        // 转换参数格式：从后端完整名称 (macd1_fastperiod) 转换为前端简写 (fast1)
-        params: convertParamsFromBackend(data.params),
-      }
       // 更新列表中的数据
       const index = alerts.value.findIndex(a => a.id === id)
       if (index !== -1) {
@@ -573,31 +277,13 @@ export const useAlertStore = defineStore('alert', () => {
   }
 
   /**
-   * 删除告警配置
+   * 删除告警配置（使用 DataService）
    */
   async function deleteAlert(id: string): Promise<boolean> {
-    // 确保 WebSocket 已连接
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      connectWebSocket()
-      for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        if (ws.value?.readyState === WebSocket.OPEN) break
-      }
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        alertsError.value = 'WebSocket 连接失败'
-        return false
-      }
-    }
-
     alertsLoading.value = true
     alertsError.value = null
     try {
-      const message = buildRequestMessage({
-        type: 'delete_alert_config',
-        id,
-      })
-
-      await sendWSRequest<void>(message)
+      await dataService.deleteAlert(id)
 
       // 从列表中移除
       alerts.value = alerts.value.filter(a => a.id !== id)
@@ -616,35 +302,27 @@ export const useAlertStore = defineStore('alert', () => {
   }
 
   /**
-   * 启用告警
+   * 启用告警（使用 DataService）
    */
   async function enableAlert(id: string): Promise<boolean> {
     alertsLoading.value = true
     alertsError.value = null
     try {
-      const message = buildRequestMessage({
-        type: 'enable_alert_config',
-        id,
-        isEnabled: true,  // Backend requires this field
-      })
-
-      const data = await sendWSRequest<{ isEnabled: boolean }>(message)
+      const result = await dataService.enableAlert(id)
 
       // 更新本地状态
       const index = alerts.value.findIndex(a => a.id === id)
       if (index !== -1) {
-        alerts.value[index] = { ...alerts.value[index], isEnabled: data.isEnabled }
+        alerts.value[index] = { ...alerts.value[index], isEnabled: result.isEnabled }
       }
       return true
     } catch (error) {
-      // 如果请求失败，仍然刷新列表以确保 UI 与数据库同步
-      // (数据库可能已更新，但响应未能送达)
+      // 如果请求失败，刷新列表以确保 UI 与数据库同步
       console.warn('enableAlert failed, refreshing list:', error)
       await fetchAlerts()
       // 检查数据库中的实际状态
       const alert = alerts.value.find(a => a.id === id)
       if (alert?.isEnabled === true) {
-        // 数据库已更新，但响应超时，视为成功
         console.log('Alert enabled in database, marking as success')
         return true
       }
@@ -657,35 +335,27 @@ export const useAlertStore = defineStore('alert', () => {
   }
 
   /**
-   * 禁用告警
+   * 禁用告警（使用 DataService）
    */
   async function disableAlert(id: string): Promise<boolean> {
     alertsLoading.value = true
     alertsError.value = null
     try {
-      const message = buildRequestMessage({
-        type: 'disable_alert_config',
-        id,
-        isEnabled: false,  // Backend requires this field
-      })
-
-      const data = await sendWSRequest<{ isEnabled: boolean }>(message)
+      const result = await dataService.disableAlert(id)
 
       // 更新本地状态
       const index = alerts.value.findIndex(a => a.id === id)
       if (index !== -1) {
-        alerts.value[index] = { ...alerts.value[index], isEnabled: data.isEnabled }
+        alerts.value[index] = { ...alerts.value[index], isEnabled: result.isEnabled }
       }
       return true
     } catch (error) {
-      // 如果请求失败，仍然刷新列表以确保 UI 与数据库同步
-      // (数据库可能已更新，但响应未能送达)
+      // 如果请求失败，刷新列表以确保 UI 与数据库同步
       console.warn('disableAlert failed, refreshing list:', error)
       await fetchAlerts()
       // 检查数据库中的实际状态
       const alert = alerts.value.find(a => a.id === id)
       if (alert?.isEnabled === false) {
-        // 数据库已更新，但响应超时，视为成功
         console.log('Alert disabled in database, marking as success')
         return true
       }
@@ -721,23 +391,9 @@ export const useAlertStore = defineStore('alert', () => {
   // ==================== 告警信号查询 Actions ====================
 
   /**
-   * 查询告警信号列表
+   * 查询告警信号列表（使用 DataService）
    */
-  async function fetchAlertSignals(params?: SignalRecordQueryParams): Promise<AlertSignalListResponse | null> {
-    // 确保 WebSocket 已连接
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      connectWebSocket()
-      for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        if (ws.value?.readyState === WebSocket.OPEN) break
-      }
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        alertSignalsError.value = 'WebSocket 连接失败'
-        alertSignalsLoading.value = false
-        return null
-      }
-    }
-
+  async function fetchAlertSignals(params?: SignalRecordQueryParams): Promise<{ items: SignalRecord[]; total: number } | null> {
     alertSignalsLoading.value = true
     alertSignalsError.value = null
 
@@ -749,23 +405,18 @@ export const useAlertStore = defineStore('alert', () => {
     try {
       const qp = alertSignalQueryParams.value
 
-      const message = buildRequestMessage({
-        type: 'list_signals',
-        page: qp.page || 1,
-        pageSize: qp.pageSize || 20,
+      const signals = await dataService.listSignals({
+        page: qp.page,
+        pageSize: qp.pageSize,
         symbol: qp.symbol,
         strategyType: qp.strategyType,
-        interval: qp.interval,
+        interval: qp.interval ? String(qp.interval) : undefined,
         fromTime: qp.fromTime,
         toTime: qp.toTime,
-        orderBy: qp.orderBy,
-        orderDir: qp.orderDir,
       })
 
-      const data = await sendWSRequest<AlertSignalListResponse>(message)
-
-      alertSignals.value = data.items
-      return data
+      alertSignals.value = signals
+      return { items: signals, total: signals.length }
     } catch (error) {
       alertSignalsError.value = error instanceof Error ? error.message : '获取告警信号列表失败'
       console.error('fetchAlertSignals error:', error)
@@ -794,189 +445,30 @@ export const useAlertStore = defineStore('alert', () => {
     }
   }
 
-  // ==================== WebSocket 实时告警信号 ====================
+  // ==================== 实时告警信号 ====================
 
   /**
-   * 连接 WebSocket 并订阅告警信号事件
-   */
-  function connectWebSocket() {
-    // 如果已连接或正在连接，直接返回
-    if (ws.value?.readyState === WebSocket.OPEN) {
-      return
-    }
-    if (wsConnecting.value) {
-      return
-    }
-
-    wsConnecting.value = true
-
-    try {
-      ws.value = new WebSocket(`${WS_BASE_URL}/ws`)
-
-      ws.value.onopen = () => {
-        const isReconnect = wsConnected.value === false && ws.value !== null
-        wsConnected.value = true
-        wsConnecting.value = false
-        console.log('[AlertStore] WebSocket connected', isReconnect ? '(reconnect)' : '(new)')
-
-        // 如果是重连且已有告警配置，需要重新订阅信号
-        if (isReconnect && alerts.value.length > 0) {
-          console.log('[AlertStore] 重连后重新订阅信号')
-          subscribeToAlertSignalEvents()
-        }
-        // 注意：新连接时不在这里立即订阅，等 fetchAlerts() 完成后统一订阅
-      }
-
-      ws.value.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          // 调试日志：打印所有收到的消息 (v2.0 协议: type === 'UPDATE')
-          if (message.type === 'UPDATE') {
-            console.log('[AlertStore] 收到实时更新:', JSON.stringify(message, null, 2))
-          }
-          handleWebSocketMessage(message)
-        } catch (error) {
-          console.error('[AlertStore] Failed to parse WebSocket message:', error)
-        }
-      }
-
-      ws.value.onerror = (error) => {
-        console.error('[AlertStore] WebSocket error:', error)
-        wsConnecting.value = false
-      }
-
-      ws.value.onclose = () => {
-        wsConnected.value = false
-        wsConnecting.value = false
-        console.log('[AlertStore] WebSocket disconnected')
-        // 自动重连
-        setTimeout(connectWebSocket, 3000)
-      }
-    } catch (error) {
-      console.error('[AlertStore] Failed to create WebSocket:', error)
-      wsConnecting.value = false
-    }
-  }
-
-  /**
-   * 订阅告警信号事件
-   * 使用精确订阅键 SIGNAL:{alert_id} 而非通配符
+   * 订阅告警信号事件（使用 DataService）
    */
   function subscribeToAlertSignalEvents() {
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
+    // 取消之前的订阅
+    if (signalUnsubscribe) {
+      signalUnsubscribe()
+      signalUnsubscribe = null
+    }
+
+    // 获取所有告警ID
+    const alertIds = alerts.value.map(alert => alert.id)
+
+    if (alertIds.length === 0) {
       return
     }
 
-    // 订阅告警信号事件 - 使用精确订阅键
-    // 订阅所有已创建告警的信号
-    const subscriptions = alerts.value.map(alert => `SIGNAL:${alert.id}`)
-
-    // 注意：必须包含 protocolVersion 和 timestamp 字段（后端 parse_message 需要）
-    // subscriptions 必须在 data 内部（遵循协议规范）
-    // 使用 v2.0 协议: type 字段替代 action 字段
-    const subscribeMessage = {
-      protocolVersion: '2.0',
-      type: 'SUBSCRIBE',
-      timestamp: Date.now(),
-      data: {
-        subscriptions,
-      },
-    }
-
-    console.log('[AlertStore] 订阅告警信号事件:', JSON.stringify(subscribeMessage, null, 2))
-    ws.value.send(JSON.stringify(subscribeMessage))
-  }
-
-  /**
-   * 处理 WebSocket 消息
-   * 遵循三阶段响应模式 (v2.0 协议):
-   * 1. 客户端发送请求
-   * 2. 服务器返回 ACK 确认（立即响应）
-   * 3. 服务器返回具体数据类型或 ERROR 响应（最终结果）
-   */
-  function handleWebSocketMessage(message: Record<string, unknown>) {
-    const msgType = message.type as string
-    const requestId = message.requestId as string
-
-    // 处理 ACK 确认响应（第一阶段）
-    // 服务器收到请求后立即返回 ACK，确认请求已被接收
-    // 需要继续等待具体数据类型响应
-    if (msgType === 'ACK') {
-      console.log('[AlertStore] 收到 ACK 确认, requestId:', requestId)
-      // ACK 不解决 Promise，只是确认请求已被接收
-      // 继续等待数据类型响应
-      return
-    }
-
-    // 处理请求响应（最终阶段）- v2.0 使用具体数据类型
-    // 成功响应使用 ALERT_CONFIG_DATA, SIGNAL_DATA 等
-    if (msgType === 'ALERT_CONFIG_DATA' || msgType === 'SIGNAL_DATA' || msgType === 'ERROR') {
-      const pending = pendingRequests.get(requestId)
-      if (pending) {
-        // 清除超时
-        clearTimeout(pending.timeoutId)
-        pendingRequests.delete(requestId)
-
-        if (msgType === 'ALERT_CONFIG_DATA' || msgType === 'SIGNAL_DATA') {
-          pending.resolve(message.data)
-        } else {
-          // Backend sends: { errorCode, errorMessage }
-          // Frontend was looking for: message
-          const errorData = message.data as Record<string, unknown>
-          const errorMsg = (errorData?.errorMessage || errorData?.message || 'Unknown error') as string
-          pending.reject(errorMsg)
-        }
-        return
-      }
-    }
-
-    // 处理实时更新消息 (v2.0 协议: type === 'UPDATE')
-    if (msgType === 'UPDATE') {
-      const data = message.data as Record<string, unknown>
-      // subscriptionKey 在 message.data.subscriptionKey 中
-      const subscriptionKey = data.subscriptionKey as string
-
-      console.log('[AlertStore] 收到更新消息:', {
-        type: msgType,
-        subscriptionKey,
-        dataKeys: Object.keys(data),
-      })
-
-      // 检查是否是告警信号更新 (通过 subscriptionKey 识别)
-      // 设计原则：subscriptionKey: SIGNAL:xxx 已表明数据类型，无需 content.type 冗余字段
-      if (subscriptionKey?.startsWith('SIGNAL:')) {
-        // 信号数据在 message.data.content 中
-        const content = data.content as Record<string, unknown>
-        console.log('[AlertStore] 处理告警信号:', JSON.stringify(content, null, 2))
-
-        // 转换后端数据格式到前端格式
-        const signalData = transformBackendSignalToFrontend(content)
-        addRealtimeAlertSignal(signalData)
-      }
-    }
-  }
-
-  /**
-   * 转换后端信号数据到前端格式
-   * 后端使用 CamelCaseModel 序列化，响应使用 camelCase
-   */
-  function transformBackendSignalToFrontend(content: Record<string, unknown>): SignalRecord {
-    return {
-      id: (content.id as number) || 0,
-      alertId: (content.alertId as string) || '',
-      configId: (content.configId as string) || null,
-      // 后端返回 strategyType，前端使用 strategyName
-      strategyName: (content.strategyType as string) || (content.strategyName as string) || 'unknown',
-      symbol: (content.symbol as string) || '',
-      interval: (content.interval as string) || '',
-      triggerType: (content.triggerType as string) || null,
-      // signalValue 可能是 boolean 或字符串 't'/'f'
-      signalValue: content.signalValue === 't' ? true : content.signalValue === 'f' ? false : content.signalValue as boolean | null,
-      signalReason: (content.signalReason as string) || null,
-      computedAt: (content.computedAt as string) || new Date().toISOString(),
-      sourceSubscriptionKey: (content.sourceSubscriptionKey as string) || null,
-      metadata: (content.metadata as Record<string, unknown>) || {},
-    }
+    // 使用 DataService 批量订阅信号
+    signalUnsubscribe = dataService.subscribeAllSignals(alertIds, (signal) => {
+      console.log('[AlertStore] 收到实时信号:', JSON.stringify(signal, null, 2))
+      addRealtimeAlertSignal(signal)
+    })
   }
 
   /**
@@ -1011,39 +503,17 @@ export const useAlertStore = defineStore('alert', () => {
     const testSignal: SignalRecord = {
       id: Date.now(),
       alertId: 'test-alert',
-      configId: null,
-      strategyName: '测试策略',
+      strategyType: '测试策略',
       symbol: 'BTCUSDT',
       interval: '60',
       triggerType: 'price_above',
       signalValue: true,
       signalReason: '测试触发',
       computedAt: new Date().toISOString(),
-      sourceSubscriptionKey: null,
+      sourceSubscriptionKey: undefined,
       metadata: {},
     }
     addRealtimeAlertSignal(testSignal)
-  }
-
-  /**
-   * 断开 WebSocket
-   */
-  function disconnectWebSocket() {
-    // 清除所有待处理的请求
-    for (const [_, pending] of pendingRequests) {
-      clearTimeout(pending.timeoutId)
-      pending.reject(new Error('WebSocket 连接关闭'))
-    }
-    pendingRequests.clear()
-
-    if (ws.value) {
-      ws.value.close()
-      ws.value = null
-      wsConnected.value = false
-    }
-
-    // 重置初始化标志，允许重新初始化
-    initialized = false
   }
 
   /**
@@ -1053,14 +523,13 @@ export const useAlertStore = defineStore('alert', () => {
     realtimeAlertSignals.value = []
   }
 
-  // ==================== 初始化 ====================
+  // ==================== 生命周期 ====================
 
   /**
    * 初始化 Store
-   * 防止重复初始化导致多个 WebSocket 连接
    */
   let initialized = false
-  function initialize() {
+  async function initialize() {
     // 防止重复初始化
     if (initialized) {
       console.debug('[AlertStore] 已初始化，跳过重复初始化')
@@ -1069,17 +538,18 @@ export const useAlertStore = defineStore('alert', () => {
     initialized = true
     console.debug('[AlertStore] 初始化 Store')
 
-    connectWebSocket()
-    // 等待 WebSocket 连接成功后获取数据
-    const checkAndFetch = () => {
-      if (wsConnected.value) {
-        fetchAlerts()
-        fetchAlertSignals()
-      } else {
-        setTimeout(checkAndFetch, 500)
-      }
+    try {
+      // 连接 DataService
+      await dataService.connect()
+      wsConnected.value = dataService.isConnected
+
+      // 获取数据
+      await fetchAlerts()
+      await fetchAlertSignals()
+    } catch (error) {
+      console.error('[AlertStore] 初始化失败:', error)
+      alertsError.value = error instanceof Error ? error.message : '初始化失败'
     }
-    checkAndFetch()
   }
 
   /**
@@ -1094,7 +564,12 @@ export const useAlertStore = defineStore('alert', () => {
     alertSignalsLoading.value = false
     alertSignalsError.value = null
     realtimeAlertSignals.value = []
-    disconnectWebSocket()
+
+    // 取消信号订阅
+    if (signalUnsubscribe) {
+      signalUnsubscribe()
+      signalUnsubscribe = null
+    }
   }
 
   return {
@@ -1107,7 +582,6 @@ export const useAlertStore = defineStore('alert', () => {
     alertSignalsLoading,
     alertSignalsError,
     alertSignalQueryParams,
-    ws,
     wsConnected,
     realtimeAlertSignals,
     realtimeAlertSignalsCount,
@@ -1131,9 +605,7 @@ export const useAlertStore = defineStore('alert', () => {
     setAlertSignalFilter,
     clearAlertSignalFilter,
 
-    // ==================== WebSocket Actions ====================
-    connectWebSocket,
-    disconnectWebSocket,
+    // ==================== 实时信号 Actions ====================
     clearRealtimeAlertSignals,
     setSignalCallback,
     triggerTestSignal,

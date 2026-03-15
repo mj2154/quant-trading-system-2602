@@ -2,12 +2,13 @@
  * 策略元数据 Store
  *
  * 管理策略列表和策略参数配置
- * 使用 WebSocket 协议与后端通信
+ * 使用 DataService 与后端通信
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { useAlertStore } from './alert-store'
+import { ref } from 'vue'
+import { dataService } from '../services/data-service/DataService'
+import type { StrategyMetadataResponse } from '../libs/ws-client/types'
 
 // ==================== 类型定义 ====================
 
@@ -24,33 +25,13 @@ export interface StrategyParam {
 }
 
 /**
- * 策略元数据
+ * 策略元数据 - 使用后端返回的驼峰命名格式
  */
 export interface StrategyMetadata {
   type: string
   name: string
   description: string
   params: StrategyParam[]
-}
-
-/**
- * API 响应格式
- */
-export interface ApiResponse<T> {
-  success: boolean
-  data?: T
-  error?: string
-}
-
-/**
- * WebSocket 消息格式 (v2.0 协议)
- */
-interface WSMessage {
-  protocolVersion: string
-  type: string
-  requestId: string
-  timestamp: number
-  data: Record<string, unknown>
 }
 
 // ==================== Store 定义 ====================
@@ -62,132 +43,40 @@ export const useStrategyStore = defineStore('strategy', () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  // ==================== 私有方法 ====================
-
-  /**
-   * requestId 生成器 (UUID v4 hex 格式，32字符，符合 WS 协议规范)
-   * 格式: 550e8400e29b41d4a716446655440000
-   */
-  function generateRequestId(): string {
-    return crypto.randomUUID().replace(/-/g, '')
-  }
-
-  /**
-   * 构建 WebSocket 请求消息
-   * 使用 v2.0 协议: type 字段替代 action 字段
-   */
-  function buildRequestMessage(data: Record<string, unknown>): WSMessage {
-    // 从 data.type 获取请求类型，映射到协议请求类型
-    const dataType = data.type as string
-    const typeMap: Record<string, string> = {
-      'get_strategy_metadata': 'GET_STRATEGY_METADATA',
-      'get_strategy_metadata_by_type': 'GET_STRATEGY_METADATA_BY_TYPE',
-    }
-    return {
-      protocolVersion: '2.0',
-      type: typeMap[dataType] || dataType,
-      requestId: generateRequestId(),
-      timestamp: Date.now(),
-      data,
-    }
-  }
-
-  /**
-   * 通过 WebSocket 发送请求
-   * 复用 alertStore 的 WebSocket 连接
-   */
-  async function sendWSRequest<T>(message: WSMessage): Promise<T> {
-    const alertStore = useAlertStore()
-
-    // 确保 WebSocket 已连接
-    if (!alertStore.ws || alertStore.ws.readyState !== WebSocket.OPEN) {
-      alertStore.connectWebSocket()
-      // 等待连接建立（最多等待3秒）
-      for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        if (alertStore.ws?.readyState === WebSocket.OPEN) break
-      }
-      // 如果仍未连接，返回错误
-      if (!alertStore.ws || alertStore.ws.readyState !== WebSocket.OPEN) {
-        throw new Error('WebSocket 连接失败')
-      }
-    }
-
-    return new Promise((resolve, reject) => {
-      const { requestId } = message
-      let resolved = false
-
-      // 设置超时
-      const timeoutId = window.setTimeout(() => {
-        if (!resolved) {
-          resolved = true
-          removeMessageListener()
-          reject(new Error(`请求超时: ${requestId}`))
-        }
-      }, 10000)
-
-      // 定义消息处理函数 - 使用 addEventListener 避免覆盖 onmessage
-      const messageHandler = (event: MessageEvent) => {
-        try {
-          const response = JSON.parse(event.data)
-          // 检查是否是目标请求的响应
-          if (response.requestId === requestId) {
-            // v2.0 协议: 三阶段模式 - ACK 只是确认，需要继续等待最终响应
-            if (response.type === 'ACK') {
-              // 不设置 resolved，不移除监听器，继续等待最终响应
-              return
-            }
-            // ACK 之外的响应是最终响应
-            resolved = true
-            window.clearTimeout(timeoutId)
-            removeMessageListener()
-            // v2.0 协议: 使用 type 字段判断响应类型
-            // 成功响应使用具体数据类型 (如 STRATEGY_METADATA_DATA)
-            if (response.type === 'STRATEGY_METADATA_DATA') {
-              resolve(response.data as T)
-            } else if (response.type === 'ERROR') {
-              const errorData = response.data as Record<string, unknown>
-              reject(new Error((errorData?.errorMessage as string) || 'Request failed'))
-            } else {
-              reject(new Error('Unknown response type'))
-            }
-          }
-          // 其他消息不处理，让 alertStore 处理
-        } catch {
-          // 忽略解析错误
-        }
-      }
-
-      // 使用 addEventListener 添加一次性监听器
-      const removeMessageListener = () => {
-        alertStore.ws?.removeEventListener('message', messageHandler)
-      }
-
-      alertStore.ws!.addEventListener('message', messageHandler)
-
-      // 发送消息
-      alertStore.ws!.send(JSON.stringify(message))
-    })
-  }
-
   // ==================== Actions ====================
 
   /**
    * 获取策略列表
+   * 使用 DataService 获取数据
    */
   async function fetchStrategies() {
     loading.value = true
     error.value = null
     try {
-      const message = buildRequestMessage({
-        type: 'get_strategy_metadata',
-      })
+      console.log('[StrategyStore] Fetching strategies...')
+      // 通过 DataService 获取策略元数据
+      const rawStrategies = await dataService.getStrategyMetadata()
+      console.log('[StrategyStore] Raw strategies received:', rawStrategies.length)
 
-      const response = await sendWSRequest<{ strategies: StrategyMetadata[] }>(message)
-      const data = response.strategies
-      strategies.value = data
+      // 转换后端返回的数据为前端格式
+      strategies.value = rawStrategies.map((s: StrategyMetadataResponse) => ({
+        type: s.type,
+        name: s.name,
+        description: s.description,
+        params: s.params.map(p => ({
+          name: p.name,
+          type: p.type as 'int' | 'float' | 'bool',
+          default: p.default,
+          min: p.min,
+          max: p.max,
+          description: p.description,
+        })),
+      }))
+      console.log('[StrategyStore] Strategies loaded:', strategies.value.length)
     } catch (e) {
+      console.error('[StrategyStore] Error fetching strategies:', e)
       error.value = e instanceof Error ? e.message : 'Unknown error'
+      strategies.value = []
     } finally {
       loading.value = false
     }

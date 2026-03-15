@@ -112,6 +112,10 @@ class WebSocketTestClient:
         """
         发送WebSocket消息
 
+        遵循设计文档 v2.0 格式：
+        - type 在顶层（如 GET_CONFIG, SUBSCRIBE）
+        - 具体请求参数在 data 内部
+
         Args:
             message: 要发送的消息字典
             expect_response: 是否期待响应消息
@@ -139,16 +143,17 @@ class WebSocketTestClient:
         # 等待响应（如果需要）
         if expect_response:
             try:
-                # 第一阶段：接收 ack 确认
+                # 第一阶段：接收 ACK 确认
                 response = await asyncio.wait_for(self.websocket.recv(), timeout=10)
                 response_dict = json.loads(response)
                 self._log_response(response_dict)
 
-                # 如果收到 ack，继续等待 success 响应
-                if response_dict.get("action") == "ack":
-                    logger.info(f"📋 收到 ack 确认，继续等待 success...")
+                # 如果收到 ACK，继续等待 SUCCESS 响应
+                # 遵循设计文档：type 为 ACK
+                if response_dict.get("type") == "ACK":
+                    logger.info(f"📋 收到 ACK 确认，继续等待 SUCCESS...")
 
-                    # 第二阶段：接收 success 响应
+                    # 第二阶段：接收 SUCCESS 响应
                     response = await asyncio.wait_for(self.websocket.recv(), timeout=10)
                     response_dict = json.loads(response)
                     self._log_response(response_dict)
@@ -199,11 +204,15 @@ class WebSocketTestClient:
         """
         发送订阅消息 - v2.0订阅键数组格式
 
-        三阶段模式（遵循设计文档）：
-        1. 发送 subscribe 请求
-        2. 接收 ack 确认（确认收到请求）
-        3. 接收 success 响应（确认处理完成）
-        4. 实时数据通过 update 推送（独立机制）
+        遵循设计文档 v2.0 格式：
+        - type 在顶层（如 SUBSCRIBE）
+        - 具体参数在 data 内部
+
+        三阶段模式：
+        1. 发送 SUBSCRIBE 请求
+        2. 接收 ACK 确认
+        3. 接收 SUCCESS 响应
+        4. 实时数据通过 UPDATE 推送（独立机制）
 
         v2.0订阅键格式: {EXCHANGE}:{SYMBOL}[.{产品后缀}]@{DATA_TYPE}[_{INTERVAL}]
 
@@ -212,26 +221,26 @@ class WebSocketTestClient:
                 ["BINANCE:BTCUSDT@KLINE_1", "BINANCE:BTCUSDT@QUOTES"]
 
         Returns:
-            订阅成功响应（success）
+            订阅成功响应（SUCCESS）
         """
         message = {
             "protocolVersion": "2.0",
-            "action": "subscribe",
+            "type": "SUBSCRIBE",
             "data": {"subscriptions": subscriptions},
         }
 
         # 发送消息
         await self._send_raw_message(message)
 
-        # 接收 ack 确认
+        # 接收 ACK 确认
         ack_response = await self._recv_message(timeout=5)
         if ack_response:
-            logger.info(f"📋 收到 ack 确认")
+            logger.info(f"📋 收到 ACK 确认")
         else:
-            logger.error("❌ 未收到 ack 确认")
+            logger.error("❌ 未收到 ACK 确认")
             return None
 
-        # 接收 success 响应
+        # 接收 SUCCESS 响应
         success_response = await self._recv_message(timeout=5)
         return success_response
 
@@ -241,10 +250,14 @@ class WebSocketTestClient:
         """
         发送取消订阅消息 - v2.0订阅键数组格式
 
-        三阶段模式（遵循设计文档）：
-        1. 发送 unsubscribe 请求
-        2. 接收 ack 确认（确认收到请求）
-        3. 接收 success 响应（确认处理完成）
+        遵循设计文档 v2.0 格式：
+        - type 在顶层（如 UNSUBSCRIBE）
+        - 具体参数在 data 内部
+
+        三阶段模式：
+        1. 发送 UNSUBSCRIBE 请求
+        2. 接收 ACK 确认
+        3. 接收 SUCCESS 响应
 
         Args:
             subscriptions: v2.0格式订阅键列表，如：
@@ -252,9 +265,9 @@ class WebSocketTestClient:
             all_subscriptions: 是否取消所有订阅
 
         Returns:
-            取消订阅成功响应（success）
+            取消订阅成功响应（SUCCESS）
         """
-        message = {"protocolVersion": "2.0", "action": "unsubscribe", "data": {}}
+        message = {"protocolVersion": "2.0", "type": "UNSUBSCRIBE", "data": {}}
 
         if all_subscriptions:
             message["data"]["all"] = True
@@ -264,21 +277,26 @@ class WebSocketTestClient:
         # 发送消息
         await self._send_raw_message(message)
 
-        # 接收 ack 确认
+        # 接收 ACK 确认
         ack_response = await self._recv_message(timeout=5)
         if ack_response:
-            logger.info(f"📋 收到 ack 确认")
+            logger.info(f"📋 收到 ACK 确认")
         else:
-            logger.error("❌ 未收到 ack 确认")
+            logger.error("❌ 未收到 ACK 确认")
             return None
 
-        # 接收 success 响应
+        # 接收 SUCCESS 响应
         success_response = await self._recv_message(timeout=5)
         return success_response
 
     async def get_config(self) -> dict[str, Any] | None:
-        """获取配置"""
-        message = {"protocolVersion": "2.0", "action": "get", "data": {"type": "config"}}
+        """获取配置
+
+        遵循设计文档 v2.0 格式：
+        - type 在顶层（GET_CONFIG）
+        - 具体参数在 data 内部
+        """
+        message = {"protocolVersion": "2.0", "type": "GET_CONFIG", "data": {}}
         return await self.send_message(message)
 
     async def search_symbols(
@@ -286,6 +304,10 @@ class WebSocketTestClient:
     ) -> dict[str, Any] | None:
         """
         搜索交易对
+
+        遵循设计文档 v2.0 格式：
+        - type 在顶层（GET_SEARCH_SYMBOLS）
+        - 具体参数在 data 内部
 
         Args:
             query: 搜索关键词
@@ -297,9 +319,8 @@ class WebSocketTestClient:
         """
         message = {
             "protocolVersion": "2.0",
-            "action": "get",
+            "type": "GET_SEARCH_SYMBOLS",
             "data": {
-                "type": "search_symbols",
                 "query": query,
                 "exchange": exchange,
                 "limit": limit,
@@ -313,6 +334,10 @@ class WebSocketTestClient:
         """
         获取K线数据
 
+        遵循设计文档 v2.0 格式：
+        - type 在顶层（GET_KLINES）
+        - 具体参数在 data 内部
+
         Args:
             symbol: 交易对符号，如 "BINANCE:BTCUSDT"
             resolution: 分辨率，如 "60"
@@ -322,12 +347,11 @@ class WebSocketTestClient:
         Returns:
             K线数据
         """
-        # v2.1规范：GET请求只使用 interval 字段（与数据库字段一致）
+        # v2.1规范：使用 interval 字段（与数据库字段一致）
         message = {
             "protocolVersion": "2.0",
-            "action": "get",
+            "type": "GET_KLINES",
             "data": {
-                "type": "klines",
                 "symbol": symbol,
                 "interval": resolution,
                 "from_time": from_time,
@@ -340,6 +364,10 @@ class WebSocketTestClient:
         """
         获取报价数据
 
+        遵循设计文档 v2.0 格式：
+        - type 在顶层（GET_QUOTES）
+        - 具体参数在 data 内部
+
         Args:
             symbols: 交易对符号列表
 
@@ -348,14 +376,18 @@ class WebSocketTestClient:
         """
         message = {
             "protocolVersion": "2.0",
-            "action": "get",
-            "data": {"type": "quotes", "symbols": symbols},
+            "type": "GET_QUOTES",
+            "data": {"symbols": symbols},
         }
         return await self.send_message(message)
 
     async def listen_for_updates(self, timeout: float = 10.0) -> list[dict[str, Any]]:
         """
         监听实时数据推送
+
+        遵循设计文档 v2.0：
+        - UPDATE 消息的 type 为 "UPDATE"
+        - subscriptionKey 和 content 在顶层
 
         Args:
             timeout: 监听超时时间（秒）
@@ -371,10 +403,11 @@ class WebSocketTestClient:
                 message = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
                 message_dict = json.loads(message)
 
-                # 只收集update消息
-                if message_dict.get("action") == "update":
+                # 只收集 UPDATE 消息
+                # 遵循设计文档：type 为 "UPDATE"
+                if message_dict.get("type") == "UPDATE":
                     updates.append(message_dict)
-                    logger.info(f"📊 接收更新: {json.dumps(message_dict, indent=2)}")
+                    logger.info(f"📊 接收 UPDATE: {json.dumps(message_dict, indent=2)}")
 
             except asyncio.TimeoutError:
                 continue
@@ -390,14 +423,10 @@ class WebSocketTestClient:
         """
         等待异步任务完成并返回结果
 
-        三阶段模式（遵循API设计文档）：
+        遵循设计文档 v2.0 三阶段模式：
         1. 客户端发送请求（携带 requestId）
-        2. 服务端返回 ack 确认（返回 requestId, data: {}）
-        3. 服务端异步处理完成后返回 success（返回 requestId 和数据）
-
-        设计文档定义：
-        - ack: {"action": "ack", "requestId": "req_xxx", "data": {}}
-        - success: {"action": "success", "requestId": "req_xxx", "data": {...}}
+        2. 服务端返回 ACK 确认（type: "ACK", requestId, data: {}）
+        3. 服务端异步处理完成后返回 SUCCESS（type: "CONFIG_DATA" 等, requestId 和数据）
 
         注意：taskId 不返回给客户端，仅在服务端内部使用。
 
@@ -410,37 +439,32 @@ class WebSocketTestClient:
         """
         start_time = time.time()
         has_received_ack = False
-        # 已收到success响应（在之前的get_quotes/get_klines调用中）
-        # 注意：有些实现可能在第一次调用时就返回了success
 
         while time.time() - start_time < timeout:
             try:
                 message = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
                 message_dict = json.loads(message)
-                action = message_dict.get("action")
+                msg_type = message_dict.get("type")
 
-                # 阶段2: ack 确认
-                if action == "ack":
-                    logger.info(f"📋 收到 ack 确认")
+                # 阶段2: ACK 确认
+                # 遵循设计文档：type 为 "ACK"
+                if msg_type == "ACK":
+                    logger.info(f"📋 收到 ACK 确认")
                     has_received_ack = True
-                    # 继续等待 success 响应
+                    # 继续等待 SUCCESS 响应
                     continue
 
-                # 阶段3: success 响应（无论是否已收到ack）
-                if action == "success":
-                    # success 响应直接返回数据，不需要匹配 taskId
-                    # 统一格式（v2.1）：type 在 data 内部
-                    data = message_dict.get("data", {})
-                    msg_type = data.get("type") if data else None
-
-                    # 对于异步任务，完成时返回对应的 type（在 data 内）
-                    if msg_type in ["klines", "quotes", "config", "search_symbols", "subscriptions"]:
-                        logger.info(f"✅ 任务完成（{msg_type}数据）")
-                        return message_dict
+                # 阶段3: SUCCESS 响应（无论是否已收到ACK）
+                # SUCCESS 响应的 type 是具体数据类型（如 CONFIG_DATA, KLINES_DATA）
+                if msg_type in ["CONFIG_DATA", "KLINES_DATA", "QUOTES_DATA", "SEARCH_SYMBOLS_DATA", "SUBSCRIPTIONS_DATA"]:
+                    # SUCCESS 响应直接返回数据
+                    logger.info(f"✅ 任务完成（{msg_type}）")
+                    return message_dict
 
                 # 实时数据推送（独立机制，不属于请求-响应流程）
-                if action == "update":
-                    logger.debug(f"📊 收到 update 消息")
+                # 遵循设计文档：type 为 "UPDATE"
+                if msg_type == "UPDATE":
+                    logger.debug(f"📊 收到 UPDATE 消息")
 
             except asyncio.TimeoutError:
                 # 超时后检查是否应该继续等待
@@ -453,7 +477,7 @@ class WebSocketTestClient:
                 break
 
         if not has_received_ack:
-            logger.warning(f"⏰ 等待任务完成超时（未收到 ack 确认）")
+            logger.warning(f"⏰ 等待任务完成超时（未收到 ACK 确认）")
         else:
             logger.warning(f"⏰ 等待任务完成超时")
         return None
@@ -514,14 +538,14 @@ class E2ETestBase:
     def assert_response_success(self, response: dict[str, Any] | None, test_name: str) -> bool:
         """验证响应是否成功（遵循API设计文档的三阶段模式）
 
-        三阶段模式（遵循设计文档）：
+        遵循设计文档 v2.0 三阶段模式：
         - 阶段1: 客户端发送请求（携带 requestId）
-        - 阶段2: ack 确认 - action="ack", requestId, data: {}
-        - 阶段3: success 结果 - action="success", requestId, data
+        - 阶段2: ACK 确认 - type="ACK", requestId, data: {}
+        - 阶段3: SUCCESS 结果 - type="CONFIG_DATA" 等, requestId, data
 
         设计文档定义：
-        - ack: {"action": "ack", "requestId": "req_xxx", "data": {}}
-        - success: {"action": "success", "requestId": "req_xxx", "data": {...}}
+        - ACK: {"type": "ACK", "requestId": "req_xxx", "data": {}}
+        - SUCCESS: {"type": "CONFIG_DATA", "requestId": "req_xxx", "data": {...}}
 
         注意：taskId 不返回给客户端，仅在服务端内部使用。
 
@@ -537,11 +561,12 @@ class E2ETestBase:
             self.test_results["errors"].append(f"{test_name}: 响应为空")
             return False
 
-        action = response.get("action")
+        msg_type = response.get("type")
         data = response.get("data", {})
 
         # 处理错误响应
-        if action == "error":
+        # 遵循设计文档：type 为 "ERROR"
+        if msg_type == "ERROR":
             self.test_results["failed"] += 1
             error_data = data if isinstance(data, dict) else {}
             error_msg = (
@@ -550,32 +575,33 @@ class E2ETestBase:
             self.test_results["errors"].append(error_msg)
             return False
 
-        # 处理 ack 确认（阶段2）- 遵循设计文档
-        # 所有请求类型都遵循"先返回 ack，确认收到请求"的原则
-        if action == "ack":
-            # ack 响应确认请求已收到，客户端应继续等待 success 响应
-            logger.info(f"  📋 收到 ack 确认")
+        # 处理 ACK 确认（阶段2）- 遵循设计文档
+        # 所有请求类型都遵循"先返回 ACK，确认收到请求"的原则
+        if msg_type == "ACK":
+            # ACK 响应确认请求已收到，客户端应继续等待 SUCCESS 响应
+            logger.info(f"  📋 收到 ACK 确认")
             return True
 
-        # 处理 success 响应（阶段3）
-        if action == "success":
-            # success 响应包含实际数据
+        # 处理 SUCCESS 响应（阶段3）
+        # SUCCESS 响应的 type 是具体数据类型（如 CONFIG_DATA, KLINES_DATA）
+        if msg_type in ["CONFIG_DATA", "KLINES_DATA", "QUOTES_DATA", "SEARCH_SYMBOLS_DATA",
+                         "SUBSCRIPTIONS_DATA", "SUBSCRIBE_DATA", "UNSUBSCRIBE_DATA"]:
+            # SUCCESS 响应包含实际数据
             self.test_results["passed"] += 1
             return True
 
         # 未知响应类型
         self.test_results["failed"] += 1
-        self.test_results["errors"].append(f"{test_name}: 未知响应类型: {action}")
+        self.test_results["errors"].append(f"{test_name}: 未知响应类型: {msg_type}")
         return False
 
     def assert_message_format(self, message: dict[str, Any] | None, test_name: str) -> bool:
         """验证消息格式 - 使用Pydantic模型进行验证
 
-        遵循TradingView API规范设计文档：
-        - type 字段必须位于 data 内部
-        - success 和 error 响应必须有 data 字段且包含 type
-        - update 消息的 type 也在 data 中
-        - get/subscribe/unsubscribe 是请求，不强制验证 type
+        遵循设计文档 v2.0：
+        - type 字段在顶层（如 GET_CONFIG, CONFIG_DATA, UPDATE, ERROR）
+        - 具体请求/响应参数在 data 内部
+        - UPDATE 消息：type="UPDATE", subscription_key, content 在顶层
 
         Args:
             message: WebSocket消息字典
@@ -593,10 +619,11 @@ class E2ETestBase:
             self.test_results = {"passed": 0, "failed": 0, "errors": []}
 
         try:
-            action = message.get("action")
+            msg_type = message.get("type")
 
-            # update 消息没有 requestId，使用特殊的 MessageUpdate 模型验证
-            if action == "update":
+            # UPDATE 消息没有 requestId，subscription_key 和 content 在顶层
+            # 遵循设计文档：type="UPDATE"
+            if msg_type == "UPDATE":
                 from models.protocol.ws_message import MessageUpdate
                 validated_message = MessageUpdate(**message)
             else:
@@ -608,37 +635,27 @@ class E2ETestBase:
                 self._record_failure(test_name, f"无效的协议版本: {validated_message.protocol_version}")
                 return False
 
-            # 验证action
-            valid_actions = ["get", "subscribe", "unsubscribe", "success", "update", "error"]
-            if validated_message.action not in valid_actions:
-                self._record_failure(test_name, f"无效的action: {validated_message.action}")
+            # 验证 type 字段存在（顶层）
+            if not msg_type:
+                self._record_failure(test_name, "消息缺少 type 字段")
                 return False
 
-            # 验证 type 字段位置（根据TradingView API规范设计文档）
+            # 验证 type 值是否符合规范
+            # 请求类型
+            request_types = ["GET_CONFIG", "GET_KLINES", "GET_QUOTES", "GET_SEARCH_SYMBOLS",
+                             "GET_RESOLVE_SYMBOL", "GET_SERVER_TIME", "SUBSCRIBE", "UNSUBSCRIBE",
+                             "GET_SUBSCRIPTIONS", "GET_METRINS"]
+            # 响应类型
+            response_types = ["CONFIG_DATA", "KLINES_DATA", "QUOTES_DATA", "SEARCH_SYMBOLS_DATA",
+                             "RESOLVE_SYMBOL_DATA", "SERVER_TIME_DATA", "SUBSCRIPTIONS_DATA",
+                             "METRICS_DATA", "SUBSCRIBE_DATA", "UNSUBSCRIBE_DATA", "ACK",
+                             "ERROR", "UPDATE"]
+
+            # 验证 data 字段存在
             data = validated_message.data
-
-            # success 和 error 响应必须有 data 字段且包含 type
-            if action in ("success", "error"):
-                if data is None:
-                    self._record_failure(test_name, f"{action} 响应缺少 data 字段")
-                    return False
-
-                if "type" not in data:
-                    self._record_failure(test_name, f"{action} 响应的 data 中缺少 type 字段")
-                    return False
-
-            # update 消息的 type 必须在 data 内部
-            if action == "update":
-                if data is None:
-                    self._record_failure(test_name, "update 消息缺少 data 字段")
-                    return False
-
-                if "type" not in data:
-                    self._record_failure(test_name, "update 消息的 data 中缺少 type 字段")
-                    return False
-
-            # get/subscribe/unsubscribe 是请求，不强制验证 type
-            # （请求类型由 action 决定，data 中的 type 是可选的）
+            if data is None:
+                self._record_failure(test_name, "消息缺少 data 字段")
+                return False
 
             return True
         except ValidationError as e:

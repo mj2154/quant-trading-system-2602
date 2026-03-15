@@ -192,7 +192,7 @@ class Ticker24hrSpot(SnakeCaseModel):
         return datetime.fromtimestamp(self.close_time / 1000)
 
 
-class Ticker24hrFutures(BaseModel):
+class Ticker24hrFutures(SnakeCaseModel):
     """
     期货24小时价格变动统计模型
 
@@ -342,7 +342,7 @@ class Ticker24hrFutures(BaseModel):
         populate_by_name = True
 
 
-class WebSocketTickerSpot(BaseModel):
+class WebSocketTickerSpot(SnakeCaseModel):
     """
     现货WebSocket 24hr Ticker模型
 
@@ -513,7 +513,7 @@ class WebSocketTickerSpot(BaseModel):
         populate_by_name = True
 
 
-class WebSocketTickerFutures(BaseModel):
+class WebSocketTickerFutures(SnakeCaseModel):
     """
     期货WebSocket 24hr Ticker模型
 
@@ -663,7 +663,7 @@ class WebSocketTickerFutures(BaseModel):
         populate_by_name = True
 
 
-class Ticker24hrMini(BaseModel):
+class Ticker24hrMini(SnakeCaseModel):
     """
     24小时价格变动统计精简模型
 

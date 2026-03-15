@@ -11,10 +11,12 @@
 import time
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from ..base import CamelCaseModel
 
 
-class ExchangeInfo(BaseModel):
+class ExchangeInfo(CamelCaseModel):
     """
     交易所信息
 
@@ -29,7 +31,7 @@ class ExchangeInfo(BaseModel):
         return f"ExchangeInfo({self.exchange}, {len(self.symbols)} symbols)"
 
 
-class RichExchangeInfo(BaseModel):
+class RichExchangeInfo(CamelCaseModel):
     """
     完整的交易所信息模型
 
@@ -104,7 +106,7 @@ class RichExchangeInfo(BaseModel):
         return f"RichExchangeInfo({self.market_type}, {self.exchange}, {len(self.symbols)} symbols)"
 
 
-class SymbolMetadata(BaseModel):
+class SymbolMetadata(CamelCaseModel):
     """
     交易对元数据
 

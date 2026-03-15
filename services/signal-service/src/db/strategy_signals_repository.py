@@ -26,6 +26,7 @@ class StrategySignalRecord:
     computed_at: datetime
     source_subscription_key: str | None
     metadata: dict[str, Any]
+    created_by: str | None
 
 
 class StrategySignalsRepository:
@@ -42,6 +43,7 @@ class StrategySignalsRepository:
     async def insert_signal(
         self,
         alert_id: str,
+        name: str,
         strategy_type: str,
         symbol: str,
         interval: str,
@@ -50,11 +52,13 @@ class StrategySignalsRepository:
         trigger_type: str | None = None,
         source_subscription_key: str | None = None,
         metadata: dict[str, Any] | None = None,
+        created_by: str | None = None,
     ) -> int:
         """Insert a new strategy signal.
 
         Args:
             alert_id: Associated alert ID (required).
+            name: Alert config name (冗余存储).
             strategy_type: Strategy type.
             symbol: Trading pair.
             interval: K-line interval.
@@ -63,6 +67,7 @@ class StrategySignalsRepository:
             trigger_type: Trigger type (inherited from config).
             source_subscription_key: Source subscription key.
             metadata: Additional metadata.
+            created_by: Creator identifier (from alert config).
 
         Returns:
             Inserted record ID.
@@ -70,14 +75,15 @@ class StrategySignalsRepository:
         result = await self._db.execute(
             """
             INSERT INTO strategy_signals (
-                alert_id, strategy_type, symbol, interval,
+                alert_id, name, strategy_type, symbol, interval,
                 trigger_type, signal_value, signal_reason,
-                source_subscription_key, metadata
+                source_subscription_key, metadata, created_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
             RETURNING id
             """,
             alert_id,
+            name,
             strategy_type,
             symbol,
             interval,
@@ -86,6 +92,7 @@ class StrategySignalsRepository:
             signal_reason,
             source_subscription_key,
             json.dumps(metadata) if metadata else "{}",
+            created_by,
         )
         logger.info(
             "Signal inserted: alert_id=%s strategy=%s symbol=%s interval=%s signal_value=%s",
@@ -120,7 +127,7 @@ class StrategySignalsRepository:
             """
             SELECT id, alert_id, strategy_type, symbol, interval,
                    trigger_type, signal_value, signal_reason,
-                   computed_at, source_subscription_key, metadata
+                   computed_at, source_subscription_key, metadata, created_by
             FROM strategy_signals
             WHERE symbol = $1
             ORDER BY computed_at DESC
@@ -147,7 +154,7 @@ class StrategySignalsRepository:
             """
             SELECT id, alert_id, strategy_type, symbol, interval,
                    trigger_type, signal_value, signal_reason,
-                   computed_at, source_subscription_key, metadata
+                   computed_at, source_subscription_key, metadata, created_by
             FROM strategy_signals
             WHERE strategy_type = $1
             ORDER BY computed_at DESC
@@ -174,7 +181,7 @@ class StrategySignalsRepository:
             """
             SELECT id, alert_id, strategy_type, symbol, interval,
                    trigger_type, signal_value, signal_reason,
-                   computed_at, source_subscription_key, metadata
+                   computed_at, source_subscription_key, metadata, created_by
             FROM strategy_signals
             WHERE alert_id = $1
             ORDER BY computed_at DESC
@@ -202,7 +209,7 @@ class StrategySignalsRepository:
             """
             SELECT id, alert_id, strategy_type, symbol, interval,
                    trigger_type, signal_value, signal_reason,
-                   computed_at, source_subscription_key, metadata
+                   computed_at, source_subscription_key, metadata, created_by
             FROM strategy_signals
             WHERE symbol = $1 AND interval = $2
             ORDER BY computed_at DESC
@@ -237,7 +244,7 @@ class StrategySignalsRepository:
         query = """
             SELECT id, alert_id, strategy_type, symbol, interval,
                    trigger_type, signal_value, signal_reason,
-                   computed_at, source_subscription_key, metadata
+                   computed_at, source_subscription_key, metadata, created_by
             FROM strategy_signals
             WHERE computed_at >= $1 AND computed_at <= $2
         """

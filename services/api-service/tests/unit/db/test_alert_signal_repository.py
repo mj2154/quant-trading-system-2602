@@ -1,4 +1,4 @@
-"""Tests for AlertSignalRepository in API service."""
+"""Tests for AlertConfigRepository in API service."""
 
 import pytest
 import json
@@ -20,8 +20,8 @@ def create_mock_pool(mock_conn):
     return mock_pool
 
 
-class TestAlertSignalRepository:
-    """Tests for AlertSignalRepository."""
+class TestAlertConfigRepository:
+    """Tests for AlertConfigRepository."""
 
     @pytest.fixture
     def mock_pool(self):
@@ -32,9 +32,9 @@ class TestAlertSignalRepository:
     @pytest.fixture
     def repository(self, mock_pool):
         """Create repository with mock pool."""
-        from src.db.alert_signal_repository import AlertSignalRepository
+        from src.db.alert_signal_repository import AlertConfigRepository
 
-        return AlertSignalRepository(mock_pool)
+        return AlertConfigRepository(mock_pool)
 
     # ==================== CREATE TESTS ====================
 

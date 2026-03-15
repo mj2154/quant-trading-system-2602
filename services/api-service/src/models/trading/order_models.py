@@ -20,9 +20,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
-from ..base import SnakeCaseModel
+from ..base import CamelCaseModel, SnakeCaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -248,7 +248,7 @@ class GetOpenOrdersRequest(SnakeCaseModel):
     symbol: str | None = Field(None, description="交易对符号，不传则返回所有")
 
 
-class OrderData(BaseModel):
+class OrderData(CamelCaseModel):
     """订单数据
 
     包含订单的完整信息。
@@ -269,11 +269,10 @@ class OrderData(BaseModel):
     created_at: datetime | None = Field(None, description="创建时间")
     updated_at: datetime | None = Field(None, description="更新时间")
 
-    class Config:
-        extra = "allow"  # 允许额外字段
+    model_config = {"extra": "allow"}  # 允许额外字段
 
 
-class OrderListData(BaseModel):
+class OrderListData(CamelCaseModel):
     """订单列表数据
 
     设计参考：08-api-models.md OrderListData
@@ -303,8 +302,52 @@ class OrderUpdateData(OrderData):
     # 实时更新字段
     update_time: int | None = Field(None, description="更新时间戳（毫秒）")
 
-    class Config:
-        extra = "allow"
+    model_config = {"extra": "allow"}
+
+
+# ==================== 响应数据模型 ====================
+
+
+class OrderListResponseData(CamelCaseModel):
+    """订单列表响应数据模型
+
+    用于构建 WebSocket 响应，确保类型安全。
+    替代手动字典拼接。
+
+    设计原则：
+    - 使用 Pydantic 模型确保类型安全
+    - 禁止在响应处理中手动拼装字典
+
+    版本: v1.0.0
+    """
+
+    orders: list[OrderData]  # 订单列表
+    count: int = 0  # 订单数量
+
+
+class OrderCancelResponseData(CamelCaseModel):
+    """取消订单响应数据模型
+
+    用于构建取消订单的 WebSocket 响应。
+
+    版本: v1.0.0
+    """
+
+    task_id: int | None = Field(None, description="任务ID")
+    status: str = Field("PENDING", description="订单状态")
+    orig_client_order_id: str | None = Field(None, description="客户端订单ID")
+
+
+class OpenOrdersResponseData(CamelCaseModel):
+    """当前挂单响应数据模型
+
+    用于构建查询挂单的 WebSocket 响应。
+
+    版本: v1.0.0
+    """
+
+    orders: list[OrderData]  # 挂单列表
+    count: int = 0  # 挂单数量
 
 
 # 便捷验证函数

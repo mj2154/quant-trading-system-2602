@@ -64,22 +64,20 @@
             <span class="value strategy">{{ formatStrategyType(alert.strategyType) }}</span>
           </div>
 
-          <!-- MACD参数 -->
-          <div class="macd-section">
-            <div class="macd-group">
-              <span class="macd-label">MACD 1</span>
+          <!-- 策略参数 - 完全动态显示 -->
+          <div v-if="alert.params && Object.keys(alert.params).length > 0" class="macd-section">
+            <!-- 动态分组显示 -->
+            <div
+              v-for="(params, groupKey) in getParamGroups(alert.params)"
+              :key="groupKey"
+              class="macd-group"
+            >
+              <span class="macd-label">{{ getGroupLabel(groupKey as string) }}</span>
               <div class="macd-values">
-                <span><small>Fast</small>{{ alert.params?.fast1 ?? '-' }}</span>
-                <span><small>Slow</small>{{ alert.params?.slow1 ?? '-' }}</span>
-                <span><small>Signal</small>{{ alert.params?.signal1 ?? '-' }}</span>
-              </div>
-            </div>
-            <div class="macd-group">
-              <span class="macd-label">MACD 2</span>
-              <div class="macd-values">
-                <span><small>Fast</small>{{ alert.params?.fast2 ?? '-' }}</span>
-                <span><small>Slow</small>{{ alert.params?.slow2 ?? '-' }}</span>
-                <span><small>Signal</small>{{ alert.params?.signal2 ?? '-' }}</span>
+                <span v-for="(value, paramName) in params" :key="paramName">
+                  <small>{{ formatParamName(paramName as string) }}</small>
+                  {{ value }}
+                </span>
               </div>
             </div>
           </div>
@@ -128,7 +126,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import {
   NButton,
   NCard,
@@ -141,7 +139,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { AddOutline, ReloadOutline } from '@vicons/ionicons5'
-import { useAlertStore, type AlertConfig } from '../../stores/alert-store'
+import { useAlertStore, type AlertConfig, formatParamName } from '../../stores/alert-store'
 
 // 组件事件
 const emit = defineEmits<{
@@ -196,20 +194,71 @@ function formatTriggerType(triggerType: string | undefined): string {
   return triggerMap[triggerType] || triggerType
 }
 
-// 格式化策略类型
+// 格式化策略类型 - 动态转换
 function formatStrategyType(strategyType: string | undefined): string {
   if (!strategyType) return '-'
-  // 直接显示类名作为策略名
-  const strategyMap: Record<string, string> = {
-    'MACDResonanceStrategyV5': 'MACD共振策略V5',
-    'MACDResonanceStrategyV6': 'MACD共振策略V6',
-    'MACDResonanceShortStrategy': 'MACD做空策略',
-    'Alpha01Strategy': 'Alpha01策略',
-    'macd': 'MACD',
-    'macd_resonance': 'MACD共振',
-    'random': '随机',
+
+  // 动态转换：将驼峰命名转换为友好显示
+  // 例如：MACDResonanceShortStrategyV1 -> MACD Resonance Short Strategy V1
+  const formatted = strategyType
+    // 在大写字母前插入空格（但保留连续大写字母）
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    // V1 保持在一起
+    .replace(/([A-Z])(\d+)(?=[A-Z]|$)/g, '$1$2')
+    // 1H -> 1 H
+    .replace(/(\d+)(?=[A-Z])/g, '$1 ')
+    // 替换下划线为空格
+    .replace(/_/g, ' ')
+    // 合并多个空格
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return formatted
+}
+
+// 动态获取参数分组（根据前缀分组）
+// 例如：{ macd1_fastperiod: 12, macd1_slowperiod: 26, macd2_fastperiod: 5 }
+// 转换为：{ 'macd1': { fastperiod: 12, slowperiod: 26 }, 'macd2': { fastperiod: 5 } }
+function getParamGroups(params: Record<string, number | boolean> | undefined): Record<string, Record<string, number | boolean>> {
+  if (!params) return {}
+
+  const groups: Record<string, Record<string, number | boolean>> = {}
+
+  for (const [key, value] of Object.entries(params)) {
+    // 按下划线分割，取第一部分作为组名
+    const parts = key.split('_')
+    if (parts.length >= 2) {
+      const groupKey = parts[0]
+      const paramKey = parts.slice(1).join('_')
+
+      if (!groups[groupKey]) {
+        groups[groupKey] = {}
+      }
+      groups[groupKey][paramKey] = value
+    } else {
+      // 没有前缀的参数单独一组
+      if (!groups['other']) {
+        groups['other'] = {}
+      }
+      groups['other'][key] = value
+    }
   }
-  return strategyMap[strategyType] || strategyType
+
+  return groups
+}
+
+// 获取分组的显示标签
+function getGroupLabel(groupKey: string): string {
+  // 将组名转换为友好显示，如 'macd1' -> 'MACD 1'
+  const labelMap: Record<string, string> = {
+    'macd1': 'MACD 1',
+    'macd2': 'MACD 2',
+    'macd3': 'MACD 3',
+    'macd4': 'MACD 4',
+    'other': '其他',
+  }
+  return labelMap[groupKey] || formatParamName(groupKey)
 }
 
 // 处理选择

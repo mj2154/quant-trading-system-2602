@@ -231,10 +231,8 @@ class KlineResponse(BaseModel):
 | **告警配置** | |
 | `CREATE_ALERT_CONFIG` | 创建告警配置 |
 | `LIST_ALERT_CONFIGS` | 列出告警配置 |
-| `UPDATE_ALERT_CONFIG` | 更新告警配置 |
+| `UPDATE_ALERT_CONFIG` | 更新告警配置（包含启用/禁用） |
 | `DELETE_ALERT_CONFIG` | 删除告警配置 |
-| `ENABLE_ALERT_CONFIG` | 启用告警配置 |
-| `DISABLE_ALERT_CONFIG` | 禁用告警配置 |
 | **信号与策略** | |
 | `LIST_SIGNALS` | 查询历史信号 |
 | `GET_STRATEGY_METADATA` | 获取策略元数据列表 |
@@ -246,24 +244,16 @@ class KlineResponse(BaseModel):
 
 ### 订单数据模型设计
 
-> **设计原则**：完全采用币安官方格式，避免参数命名混乱
-> - data 字段完全采用币安蛇形命名（与币安API完全一致）
-> - 前端发送 camelCase，后端 SnakeCaseModel 基类自动转换
-> - 期货与现货完全分开建模，结构清晰不混淆
-> - 区分 requestId（请求追踪）和 newClientOrderId（订单标识）
+> **重要**: 订单相关的数据模型设计详情请参见 [API模型设计文档](./08-api-models.md)。
 
-#### 1. 期货 vs 现货区分
+#### 快速参考
 
-通过交易对符号前缀区分：
+| 市场 | 数据模型文档位置 |
+|------|-----------------|
+| 期货/永续合约 | [08-api-models.md#order_modelspy---交易订单模型](./08-api-models.md#order_modelspy---交易订单模型) |
+| 现货 | [08-api-models.md#order_modelspy---交易订单模型](./08-api-models.md#order_modelspy---交易订单模型) |
 
-| 前缀 | 市场 | 示例 |
-|------|------|------|
-| `BINANCE:` | 现货 | `BINANCE:BTCUSDT` |
-| `BINANCE:` + `.PERP` 后缀 | U本位永续合约 | `BINANCE:BTCUSDT.PERP` |
-
-> **注意**：不再使用 `marketType` 字段区分，通过 symbol 前缀自动识别
-
-#### 2. 请求ID说明
+#### 请求ID说明
 
 | 字段 | 说明 | 格式 |
 |------|------|------|
@@ -275,7 +265,7 @@ requestId: 用于前端追踪WS请求是否成功送达
 newClientOrderId: 用于在前端和交易所层面追踪订单状态
 ```
 
-#### 3. CREATE_ORDER 请求格式（期货）
+#### 1. CREATE_ORDER 请求格式（期货）
 
 采用币安 U本位合约 API 格式，蛇形命名：
 
@@ -325,58 +315,7 @@ newClientOrderId: 用于在前端和交易所层面追踪订单状态
 
 **必填字段**：`symbol`, `side`, `type`, `quantity`, `newClientOrderId`
 
-#### 5. Order Type 强制参数（U本位合约/期货）
-
-> 注意：期货使用不同的订单类型命名，与现货不同！
-
-| Order Type | 强制必填参数 |
-|------------|-------------|
-| `LIMIT` | `quantity`, `price`, `timeInForce` |
-| `MARKET` | `quantity` |
-| `STOP` | `quantity`, `stopPrice` |
-| `STOP_MARKET` | `stopPrice` |
-| `TAKE_PROFIT` | `quantity`, `stopPrice` |
-| `TAKE_PROFIT_MARKET` | `stopPrice` |
-| `TRAILING_STOP_MARKET` | `callbackRate` |
-
-#### 6. Order Type 强制参数（现货）
-
-> 注意：现货使用不同的订单类型命名，与期货不同！
-
-| Order Type | 强制必填参数 |
-|------------|-------------|
-| `LIMIT` | `quantity`, `price`, `timeInForce` |
-| `LIMIT_MAKER` | `quantity`, `price` |
-| `MARKET` | `quantity` 或 `quoteOrderQty` |
-| `STOP_LOSS` | `quantity`, `stopPrice` 或 `trailingDelta` |
-| `STOP_LOSS_LIMIT` | `quantity`, `price`, `timeInForce`, `stopPrice` 或 `trailingDelta` |
-| `TAKE_PROFIT` | `quantity`, `stopPrice` 或 `trailingDelta` |
-| `TAKE_PROFIT_LIMIT` | `quantity`, `price`, `timeInForce`, `stopPrice` 或 `trailingDelta` |
-
-#### 7. 期货特有参数
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `positionSide` | string | 持仓方向：`BOTH`(默认), `LONG`, `SHORT` |
-| `reduceOnly` | bool | 是否只减仓，默认 `false` |
-| `priceMatch` | string | 价格匹配：`OPPONENT`, `QUEUE` 等 |
-| `closePosition` | bool | 是否全平仓 |
-| `activationPrice` | float | 触发价格（追踪止损） |
-| `callbackRate` | float | 回调比例（0.1-10） |
-| `workingType` | string | 触发价格类型：`MARK_PRICE`, `CONTRACT_PRICE` |
-| `priceProtect` | bool | 价格保护 |
-
-#### 8. 现货特有参数
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `quoteOrderQty` | float | 报价数量（以USDT计价） |
-| `icebergQty` | float | 冰山数量 |
-| `trailingDelta` | int | 追踪Delta |
-| `strategyId` | int | 策略ID |
-| `strategyType` | int | 策略类型 |
-| `selfTradePreventionMode` | string | 自成交预防模式 |
-| `newOrderRespType` | string | 响应格式：ACK/RESULT/FULL（默认FULL） |
+> **详细参数说明**: 订单类型强制参数、期货/现货特有参数等设计详情请参见 [API模型设计文档](./08-api-models.md)。
 
 #### 10. 订单ID说明
 
@@ -432,14 +371,7 @@ newClientOrderId: 用于在前端和交易所层面追踪订单状态
 
 **必填字段**：`symbol`，以及 `orderId` 或 `origClientOrderId`（二选一）
 
-##### 现货特有可选参数（前端 camelCase，后端自动转换）
-
-| 前端字段 (camelCase) | 后端字段 (snake_case) | 类型 | 说明 |
-|---------------------|----------------------|------|------|
-| `newClientOrderId` | `new_client_order_id` | string | 用于唯一标识此次取消操作，自动生成 |
-| `cancelRestrictions` | `cancel_restrictions` | string | 取消限制条件：`ONLY_NEW`、`ONLY_PARTIALLY_FILLED` |
-
-> **注意**：期货 (fapi) 不支持 `newClientOrderId` 和 `cancelRestrictions` 参数，仅现货 (api) 支持。
+> **详细参数说明**: 现货特有可选参数等设计详情请参见 [API模型设计文档](./08-api-models.md)。
 
 #### 13. LIST_ORDERS 请求格式（查询订单列表）
 
@@ -475,6 +407,64 @@ newClientOrderId: 用于在前端和交易所层面追踪订单状态
 ```
 
 **可选字段**：`symbol`（不传则返回所有）
+
+#### 15. ORDER_DATA 响应格式
+
+订单操作成功后返回的响应数据，采用币安蛇形命名。
+
+**成功响应（订单创建/查询/取消）**:
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "ORDER_DATA",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "type": "order",
+        "status": "COMPLETED",
+        "taskId": 123,
+        "result": {
+            "orderId": 22542179,
+            "clientOrderId": "660e8400e29b41d4a716446655440001",
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "type": "LIMIT",
+            "price": "50000.00000000",
+            "origQty": "0.00200000",
+            "executedQty": "0.00200000",
+            "status": "FILLED",
+            "timeInForce": "GTC",
+            "createTime": 1704067200000,
+            "updateTime": 1704067200000
+        },
+        "payload": {
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "type": "LIMIT",
+            "quantity": 0.002,
+            "newClientOrderId": "660e8400e29b41d4a716446655440001",
+            "price": 50000.0,
+            "timeInForce": "GTC"
+        }
+    }
+}
+```
+
+**失败响应**:
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "ERROR",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "errorCode": "ORDER_FAILED",
+        "errorMessage": "Order failed: -1013: Invalid quantity."
+    }
+}
+```
+
+> **ORDER_DATA 字段说明**: 订单响应数据模型设计详情请参见 [API模型设计文档](./08-api-models.md)。
 
 ### 心跳机制（Ping-Pong）
 
@@ -836,9 +826,8 @@ const subscribeRequest = {
 | | `UNSUBSCRIBE` | 取消订阅 |
 | | `CREATE_ALERT_CONFIG` | 创建告警配置 |
 | | `LIST_ALERT_CONFIGS` | 列出告警配置 |
-| | `UPDATE_ALERT_CONFIG` | 更新告警配置 |
+| | `UPDATE_ALERT_CONFIG` | 更新告警配置（包含启用/禁用） |
 | | `DELETE_ALERT_CONFIG` | 删除告警配置 |
-| | `ENABLE_ALERT_CONFIG` | 启用告警配置 |
 | | `LIST_SIGNALS` | 查询历史信号 |
 | | `GET_STRATEGY_METADATA` | 获取策略元数据列表 |
 | | `GET_STRATEGY_METADATA_BY_TYPE` | 获取指定策略元数据 |
@@ -857,6 +846,7 @@ const subscribeRequest = {
 | | `QUOTES_DATA` | 报价数据 |
 | | `CONFIG_DATA` | 配置数据 |
 | | `SERVER_TIME_DATA` | 服务器时间数据 |
+| | `METRICS_DATA` | 服务指标数据 |
 | | `SYMBOL_DATA` | 交易对详情数据 |
 | | `SEARCH_SYMBOLS_DATA` | 搜索结果数据 |
 | | `SUBSCRIPTION_DATA` | 订阅确认数据 |
@@ -941,13 +931,10 @@ const subscribeRequest = {
 **更新消息（服务端 → 客户端，实时数据推送）**:
 ```json
 {
-    "protocolVersion": "2.0",
     "type": "UPDATE",
     "timestamp": 1234567890,
-    "data": {
-        "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
-        "bar": {...}
-    }
+    "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
+    "content": { /* 具体数据载荷，使用对应模型验证 */ }
 }
 ```
 
@@ -1017,6 +1004,7 @@ const subscribeRequest = {
 | `GET_QUOTES` | `QUOTES_DATA` | 报价数据 |
 | `GET_CONFIG` | `CONFIG_DATA` | 数据源配置 |
 | `GET_SERVER_TIME` | `SERVER_TIME_DATA` | 服务器时间 |
+| `GET_METRICS` | `METRICS_DATA` | 服务指标 |
 | `GET_SEARCH_SYMBOLS` | `SEARCH_SYMBOLS_DATA` | 搜索结果数据 |
 | `GET_RESOLVE_SYMBOL` | `SYMBOL_DATA` | 交易对详情数据 |
 | `GET_SUBSCRIPTIONS` | `SUBSCRIPTION_DATA` | 当前订阅列表 |
@@ -1026,10 +1014,8 @@ const subscribeRequest = {
 | `UNSUBSCRIBE` | `SUBSCRIPTION_DATA` | 取消订阅确认 |
 | `CREATE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置 |
 | `LIST_ALERT_CONFIGS` | `ALERT_CONFIG_DATA` | 告警配置列表 |
-| `UPDATE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置更新结果 |
+| `UPDATE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置更新结果（包含启用/禁用） |
 | `DELETE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置删除结果 |
-| `ENABLE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置启用结果 |
-| `DISABLE_ALERT_CONFIG` | `ALERT_CONFIG_DATA` | 告警配置禁用结果 |
 | `LIST_SIGNALS` | `SIGNAL_DATA` | 信号数据列表 |
 | `GET_STRATEGY_METADATA` | `STRATEGY_METADATA_DATA` | 策略元数据列表 |
 | `GET_STRATEGY_METADATA_BY_TYPE` | `STRATEGY_METADATA_DATA` | 指定策略元数据 |
@@ -1058,10 +1044,8 @@ const subscribeRequest = {
 |------|------|------|
 | `CREATE_ALERT_CONFIG` | 创建告警配置 | 设置信号策略和参数 |
 | `LIST_ALERT_CONFIGS` | 列出告警配置 | 查询/筛选用户的告警 |
-| `UPDATE_ALERT_CONFIG` | 更新告警配置 | 修改告警配置 |
+| `UPDATE_ALERT_CONFIG` | 更新告警配置 | 修改告警配置（包含启用/禁用） |
 | `DELETE_ALERT_CONFIG` | 删除告警配置 | 移除告警 |
-| `ENABLE_ALERT_CONFIG` | 启用告警配置 | 激活告警 |
-| `DISABLE_ALERT_CONFIG` | 禁用告警配置 | 停用告警 |
 | `LIST_SIGNALS` | 查询历史信号 | 获取信号计算结果 |
 
 **策略元数据类型**（api-service）:
@@ -1686,6 +1670,34 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 ---
 
+##### 1.1.1 CONFIG_DATA 数据模型定义
+
+**SymbolType 模型** - TradingView 标的类型：
+
+```python
+class SymbolType(BaseModel):
+    """TradingView 标的类型"""
+    name: str       # 显示名称
+    value: str      # 值
+```
+
+**ConfigData 模型** - 数据源配置响应载荷：
+
+```python
+class ConfigData(BaseModel):
+    """数据源配置响应载荷"""
+    supports_search: bool = True                    # 支持搜索
+    supports_group_request: bool = False            # 支持分组请求
+    supports_marks: bool = False                     # 支持标记
+    supports_timescale_marks: bool = False           # 支持时间轴标记
+    supports_time: bool = True                      # 支持时间
+    supported_resolutions: list[str]                # 支持的分辨率
+    currency_codes: list[str]                        # 支持的货币代码
+    symbols_types: list[SymbolType] = []             # 标的类型列表
+```
+
+---
+
 ##### 1.2 交易对搜索响应
 
 **成功响应**:
@@ -1729,6 +1741,33 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 | `exchange` | string | 交易所 |
 | `ticker` | string | 交易代码 |
 | `type` | string | 标的类型 |
+
+---
+
+##### 1.2.1 搜索结果数据模型定义
+
+**SymbolSearchItem 模型** - 搜索结果中的单个交易对项：
+
+```python
+class SymbolSearchItem(BaseModel):
+    """搜索结果中的单个交易对项"""
+    symbol: str           # 标的全名（格式：EXCHANGE:SYMBOL）
+    full_name: str        # 标的全名（与 symbol 相同）
+    description: str      # 标的描述
+    exchange: str         # 交易所
+    ticker: str           # 交易代码
+    type: str             # 标的类型 (crypto)
+```
+
+**SearchSymbolsData 模型** - 搜索响应数据载荷：
+
+```python
+class SearchSymbolsData(BaseModel):
+    """搜索响应数据载荷"""
+    symbols: list[SymbolSearchItem]  # 交易对列表
+    total: int                        # 总数量
+    count: int                        # 当前返回数量
+```
 
 ---
 
@@ -1836,6 +1875,30 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 ---
 
+##### 1.5.1 METRICS_DATA 数据模型定义
+
+**SystemMetrics 模型** - 系统指标数据：
+
+```python
+class SystemMetrics(BaseModel):
+    """系统指标数据"""
+    pending_tasks: int = 0           # 待处理任务数
+    connected_clients: int = 0       # 活跃连接数
+```
+
+**MetricsData 模型** - 指标响应数据载荷：
+
+```python
+class MetricsData(BaseModel):
+    """指标响应数据载荷"""
+    type: str = "metrics"                    # 数据类型
+    metrics: SystemMetrics                   # 指标数据
+    active_connections: int = 0              # 活跃连接数（冗余，为兼容性）
+    subscription_count: int = 0              # 订阅数量（冗余，为兼容性）
+```
+
+---
+
 ##### 1.6 查询当前客户端订阅响应
 
 **成功响应**:
@@ -1908,6 +1971,46 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 | `total` | number | 总订阅数 |
 | `activeCount` | number | 活跃订阅数 |
 | `inactiveCount` | number | 非活跃订阅数 |
+
+##### 1.6.1 SUBSCRIPTION_DATA 数据模型定义
+
+**SubscriptionItem 模型** - 单个订阅信息：
+
+```python
+class SubscriptionItem(BaseModel):
+    """单个订阅信息"""
+    subscription_key: str           # 订阅键（v2.0格式）
+    data_type: str                  # 数据类型（kline/quotes/trade）
+    exchange: str                   # 交易所代码
+    symbol: str                     # 交易对代码
+    interval: str | None = None     # 分辨率（如适用）
+    product_type: str               # 产品类型（spot/perpetual/quarterly）
+    status: str                     # 订阅状态（active/inactive/error）
+    subscribed_at: int              # 订阅时间戳
+    message_count: int = 0          # 接收到的消息数量
+    last_message_at: int | None = None  # 最后一条消息时间戳
+```
+
+**SubscriptionsData 模型** - 订阅列表响应载荷：
+
+```python
+class SubscriptionsData(BaseModel):
+    """订阅列表响应载荷"""
+    type: str = "subscriptions"
+    subscriptions: list[SubscriptionItem]  # 订阅列表
+    total: int = 0                         # 总订阅数
+    active_count: int = 0                  # 活跃订阅数
+    inactive_count: int = 0                # 非活跃订阅数
+```
+
+**FailedSubscription 模型** - 失败的订阅项（用于 SubscribeData.failed 字段）：
+
+```python
+class FailedSubscription(BaseModel):
+    """失败的订阅项"""
+    subscription_key: str  # 订阅键
+    reason: str           # 失败原因
+```
 
 **说明**:
 - 返回当前客户端的所有订阅信息
@@ -2017,6 +2120,18 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 告警配置系统用于创建和管理交易策略告警，支持 MACD 共振等信号策略的实时监控。
 
+#### 告警ID说明
+
+| 字段 | 说明 | 格式 |
+|------|------|------|
+| `requestId` | WS请求追踪ID | UUID v4 hex (32字符)，前端生成，用于关联请求/响应 |
+| `id` | 告警配置ID | UUID v4 hex (32字符)，前端生成，用于关联告警与信号 |
+
+```
+requestId: 用于前端追踪WS请求是否成功送达
+id: 用于在前端层面追踪告警配置和信号
+```
+
 ###### 1.8.1 创建告警配置
 
 **示例请求**:
@@ -2027,6 +2142,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
+        "id": "550e8400e29b41d4a716446655440001",
         "name": "macd_resonance_btcusdt",
         "description": "BTCUSDT MACD共振告警",
         "strategyType": "MACDResonanceStrategyV5",
@@ -2050,6 +2166,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 **字段说明**:
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
+| `id` | string | ✅ | 告警配置ID（UUID格式），前端生成，用于订阅信号 |
 | `name` | string | ✅ | 告警名称 |
 | `description` | string | ❌ | 告警描述 |
 | `strategyType` | string | ✅ | 策略类型（如 `MACDResonanceStrategyV5`、`MACDResonanceStrategyV6`、`MACDResonanceShortStrategy`、`Alpha01Strategy`） |
@@ -2068,25 +2185,24 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
-        "type": "create_alert_config",
-        "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
+        "id": "550e8400e29b41d4a716446655440001",
         "name": "macd_resonance_btcusdt",
         "description": "BTCUSDT MACD共振告警",
-        "strategy_type": "MACDResonanceStrategyV5",
+        "strategyType": "MACDResonanceStrategyV5",
         "symbol": "BINANCE:BTCUSDT",
         "interval": "60",
-        "trigger_type": "each_kline_close",
+        "triggerType": "each_kline_close",
         "params": {
-            "macd1_fastperiod": 12,
-            "macd1_slowperiod": 26,
-            "macd1_signalperiod": 9,
-            "macd2_fastperiod": 4,
-            "macd2_slowperiod": 20,
-            "macd2_signalperiod": 4
+            "macd1Fastperiod": 12,
+            "macd1Slowperiod": 26,
+            "macd1Signalperiod": 9,
+            "macd2Fastperiod": 4,
+            "macd2Slowperiod": 20,
+            "macd2Signalperiod": 4
         },
-        "is_enabled": true,
-        "created_at": "2026-02-13T10:00:00Z",
-        "created_by": "user_001"
+        "isEnabled": true,
+        "createdAt": "2026-02-13T10:00:00Z",
+        "createdBy": "user_001"
     }
 }
 ```
@@ -2121,7 +2237,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "data": {
         "items": [
             {
-                "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
+                "id": "550e8400e29b41d4a716446655440001",
                 "name": "macd_resonance_btcusdt",
                 "description": "BTCUSDT MACD共振告警",
                 "strategyType": "MACDResonanceStrategyV5",
@@ -2181,14 +2297,17 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
         "items": [
             {
                 "id": 1,
-                "signalId": "0189a1b3-c4d5-6e7f-8901-bcde23456789",
-                "alertId": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
-                "createdBy": "user_001",
+                "alertId": "550e8400e29b41d4a716446655440001",
                 "strategyType": "MACDResonanceStrategyV5",
                 "symbol": "BINANCE:BTCUSDT",
                 "interval": "60",
+                "triggerType": "each_kline_close",
                 "signalValue": true,
-                "computedAt": "2026-02-13T10:00:00Z"
+                "signalReason": "建仓信号",
+                "computedAt": "2026-02-13T10:00:00Z",
+                "sourceSubscriptionKey": "BINANCE:BTCUSDT@KLINE_60",
+                "metadata": {},
+                "createdBy": "user_001"
             }
         ],
         "total": 1,
@@ -2204,8 +2323,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 |------|------|------|
 | id | number | 信号数据库自增ID |
 | alertId | string | 关联的告警配置ID (UUID) |
-| configId | string | 关联的配置ID（可选） |
-| strategyName | string | 策略名称（如 MACDResonanceStrategyV5） |
+| strategyType | string | 策略类型 |
 | symbol | string | 交易对（如 BINANCE:BTCUSDT） |
 | interval | string | K线周期（如 60, 240） |
 | triggerType | string | 触发类型 |
@@ -2251,7 +2369,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
-        "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
+        "id": "550e8400e29b41d4a716446655440001",
         "name": "macd_resonance_btcusdt_updated",
         "strategyType": "MACDResonanceStrategyV5",
         "params": {
@@ -2274,7 +2392,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067201000,
     "data": {
-        "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
+        "id": "550e8400e29b41d4a716446655440001",
         "name": "macd_resonance_btcusdt_updated",
         "description": "更新后的描述",
         "strategyType": "MACDResonanceStrategyV5",
@@ -2313,7 +2431,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
-        "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678"
+        "id": "550e8400e29b41d4a716446655440001"
     }
 }
 ```
@@ -2322,15 +2440,18 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 ###### 1.8.6 启用/禁用告警配置
 
+启用和禁用告警配置通过 `UPDATE_ALERT_CONFIG` 消息类型实现，只需在 `data` 中包含 `id` 和 `isEnabled` 字段。
+
 **启用请求**:
 ```json
 {
     "protocolVersion": "2.0",
-    "type": "ENABLE_ALERT_CONFIG",
+    "type": "UPDATE_ALERT_CONFIG",
     "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1704067200000,
     "data": {
-        "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678"
+        "id": "550e8400e29b41d4a716446655440001",
+        "isEnabled": true
     }
 }
 ```
@@ -2339,14 +2460,17 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 ```json
 {
     "protocolVersion": "2.0",
-    "type": "DISABLE_ALERT_CONFIG",
+    "type": "UPDATE_ALERT_CONFIG",
     "requestId": "550e8400e29b41d4a716446655440001",
     "timestamp": 1704067200000,
     "data": {
-        "id": "0189a1b2-c3d4-5e6f-7890-abcd12345678"
+        "id": "550e8400e29b41d4a716446655440001",
+        "isEnabled": false
     }
 }
 ```
+
+> **设计说明**：启用/禁用操作合并到 UPDATE_ALERT_CONFIG 接口中，减少消息类型复杂度，与其他更新操作保持一致。
 
 ---
 
@@ -2743,24 +2867,51 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 - `content`: 实时推送的实际数据内容（避免与数据库 `payload` 混淆）
 - `payload`: 数据库任务表（tasks）的载荷字段
 
-#### 逐个推送格式
+#### 设计原则
 
-**K线数据推送**:
+**所有推送给前端的数据都必须使用 Pydantic 模型进行验证**：
+
+API 服务使用 Pydantic 模型确保数据符合协议规范：
+- 请求数据：使用 `SnakeCaseModel` 基类，自动将前端 camelCase 转换为 snake_case
+- 响应/推送数据：使用 `CamelCaseModel` 基类，自动将字段序列化为 camelCase
+- 每个数据类型都有对应的数据载荷模型（如 `KlineData`, `QuotesData`, `SignalData` 等）
+
+**MessageUpdate 推送结构**：
 ```json
 {
     "protocolVersion": "2.0",
     "type": "UPDATE",
     "timestamp": 1703123456790,
     "data": {
-        "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
-        "bar": {
-            "time": 1703123400000,
-            "open": 97000.00,
-            "high": 97600.00,
-            "low": 96800.00,
-            "close": 97500.00,
-            "volume": 125.43
-        }
+        "subscriptionKey": "xxx",
+        "content": { /* 具体数据载荷，使用对应模型验证 */ }
+    }
+}
+```
+
+**各数据类型对应的 content 模型**：
+| subscriptionKey 前缀 | content 类型 | 对应模型 |
+|---------------------|-------------|----------|
+| `BINANCE:*@KLINE_*` | K线数据 | KlineBar |
+| `BINANCE:*@QUOTES` | 报价数据 | QuoteData |
+| `BINANCE:*@TRADE` | 成交数据 | TradeData |
+| `SIGNAL:*` | 信号数据 | SignalData |
+
+#### 逐个推送格式
+
+**K线数据推送**:
+```json
+{
+    "type": "UPDATE",
+    "timestamp": 1703123456790,
+    "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
+    "content": {
+        "time": 1703123400000,
+        "open": 97000.00,
+        "high": 97600.00,
+        "low": 96800.00,
+        "close": 97500.00,
+        "volume": 125.43
     }
 }
 ```
@@ -2768,12 +2919,40 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 **QUOTES数据推送**:
 ```json
 {
-    "protocolVersion": "2.0",
     "type": "UPDATE",
     "timestamp": 1703123456790,
-    "data": {
-        "subscriptionKey": "BINANCE:BTCUSDT@QUOTES",
-        "quote": {
+    "subscriptionKey": "BINANCE:BTCUSDT@QUOTES",
+    "content": {
+        "n": "BINANCE:BTCUSDT",
+        "s": "ok",
+        "v": {
+            "ch": 123.45,
+            "chp": 2.35,
+            "short_name": "BTCUSDT",
+            "exchange": "BINANCE",
+            "description": "比特币/泰达币",
+            "lp": 97500.00,
+            "ask": 97501.00,
+            "bid": 97499.00,
+            "spread": 2.00,
+            "open_price": 96249.50,
+            "high_price": 98000.00,
+            "low_price": 95800.00,
+            "prev_close_price": 97376.55,
+            "volume": 45678.90
+        }
+    }
+}
+```
+
+**QUOTES数据批量推送**:
+```json
+{
+    "type": "UPDATE",
+    "timestamp": 1703123456790,
+    "subscriptionKey": "BINANCE:BTCUSDT@QUOTES,BINANCE:ETHUSDT@QUOTES",
+    "content": [
+        {
             "n": "BINANCE:BTCUSDT",
             "s": "ok",
             "v": {
@@ -2792,79 +2971,42 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
                 "prev_close_price": 97376.55,
                 "volume": 45678.90
             }
-        }
-    }
-}
-```
-
-**QUOTES数据批量推送**:
-```json
-{
-    "protocolVersion": "2.0",
-    "type": "UPDATE",
-    "timestamp": 1703123456790,
-    "data": {
-        "subscriptionKey": "BINANCE:BTCUSDT@QUOTES,BINANCE:ETHUSDT@QUOTES",
-        "quotes": [
-            {
-                "n": "BINANCE:BTCUSDT",
-                "s": "ok",
-                "v": {
-                    "ch": 123.45,
-                    "chp": 2.35,
-                    "short_name": "BTCUSDT",
-                    "exchange": "BINANCE",
-                    "description": "比特币/泰达币",
-                    "lp": 97500.00,
-                    "ask": 97501.00,
-                    "bid": 97499.00,
-                    "spread": 2.00,
-                    "open_price": 96249.50,
-                    "high_price": 98000.00,
-                    "low_price": 95800.00,
-                    "prev_close_price": 97376.55,
-                    "volume": 45678.90
-                }
-            },
-            {
-                "n": "BINANCE:ETHUSDT",
-                "s": "ok",
-                "v": {
-                    "ch": 5.67,
-                    "chp": 1.23,
-                    "short_name": "ETHUSDT",
-                    "exchange": "BINANCE",
-                    "description": "以太坊/泰达币",
-                    "lp": 2300.00,
-                    "ask": 2301.00,
-                    "bid": 2299.00,
-                    "spread": 2.00,
-                    "open_price": 2275.50,
-                    "high_price": 2310.00,
-                    "low_price": 2265.00,
-                    "prev_close_price": 2294.33,
-                    "volume": 98765.43
-                }
+        },
+        {
+            "n": "BINANCE:ETHUSDT",
+            "s": "ok",
+            "v": {
+                "ch": 5.67,
+                "chp": 1.23,
+                "short_name": "ETHUSDT",
+                "exchange": "BINANCE",
+                "description": "以太坊/泰达币",
+                "lp": 2300.00,
+                "ask": 2301.00,
+                "bid": 2299.00,
+                "spread": 2.00,
+                "open_price": 2275.50,
+                "high_price": 2310.00,
+                "low_price": 2265.00,
+                "prev_close_price": 2294.33,
+                "volume": 98765.43
             }
-        ]
-    }
+        }
+    ]
 }
 ```
 
 **TRADE数据推送**:
 ```json
 {
-    "protocolVersion": "2.0",
     "type": "UPDATE",
     "timestamp": 1703123456790,
-    "data": {
-        "subscriptionKey": "BINANCE:BTCUSDT@TRADE",
-        "trade": {
-            "price": 97500.00,
-            "size": 0.123,
-            "time": 1703123456790,
-            "side": "buy"
-        }
+    "subscriptionKey": "BINANCE:BTCUSDT@TRADE",
+    "content": {
+        "price": 97500.00,
+        "size": 0.123,
+        "time": 1703123456790,
+        "side": "buy"
     }
 }
 ```
@@ -2872,10 +3014,8 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 #### 字段说明
 
 **通用字段**:
-- `subscriptionKey`: 订阅键，用于标识数据类型和交易对
-- `bar`: K线数据内容
-- `quote`: 报价数据内容
-- `trade`: 交易数据内容
+- `subscriptionKey`: 订阅键，用于标识数据类型和交易对（提升到顶层）
+- `content`: 实时推送的实际数据内容（避免与数据库 `payload` 混淆）
 
 **K线数据字段** (TradingView Bar格式):
 - `time`: 时间戳（毫秒）
@@ -2922,10 +3062,10 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 |---------|---------|------|
 | `kline` | 批量推送 | 周期性聚合（每秒） |
 | `quotes` | 批量推送 | 24hr ticker 轮询更新（每秒） |
-| `SIGNAL:{alert_id}` | 实时推送 | 指定告警配置实时推送（前端订阅） |
+| `SIGNAL:{alert_id}` | 实时推送 | 指定告警配置实时推送（前端订阅），使用 SignalData 模型 |
 
 **信号数据推送**:
-当策略计算产生信号时，推送 `signal_new` 消息。**设计原则**：订阅键 `SIGNAL:{alert_id}` 已表明数据类型，`content` 直接展开业务数据，无需冗余的 `type` 字段：
+当策略计算产生信号时，推送 `signal_new` 消息。数据来自 `strategy_signals` 表 INSERT 时触发的通知。
 
 ```json
 {
@@ -2933,24 +3073,71 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "type": "UPDATE",
     "timestamp": 1704067205000,
     "data": {
-        "subscriptionKey": "SIGNAL:0189a1b2-c3d4-5e6f-7890-abcd12345678",
-        "signal": {
-            "alertId": "0189a1b2-c3d4-5e6f-7890-abcd12345678",
-            "name": "macd_resonance_btcusdt",
+        "eventType": "signal_new",
+        "subscriptionKey": "SIGNAL:550e8400e29b41d4a716446655440001",
+        "content": {
+            "id": 123,
+            "alertId": "550e8400e29b41d4a716446655440001",
+            "name": "BTC MACD共振",
             "strategyType": "MACDResonanceStrategyV5",
             "symbol": "BINANCE:BTCUSDT",
             "interval": "60",
+            "triggerType": "each_kline_close",
             "signalValue": true,
-            "computedAt": "2026-02-13T10:00:05Z"
+            "signalReason": "建仓信号",
+            "computedAt": "2026-02-13T10:00:05Z",
+            "sourceSubscriptionKey": "BINANCE:BTCUSDT@KLINE_60",
+            "createdBy": "user_001"
         }
     }
 }
 ```
 
+**content 字段说明**（来自 strategy_signals 表）：
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | int | 信号数据库自增ID |
+| `alertId` | string | 关联的告警配置ID (UUID) |
+| `name` | string | 告警配置名称（冗余存储，保留信号产生时的告警名称） |
+| `strategyType` | string | 策略类型 |
+| `symbol` | string | 交易对 |
+| `interval` | string | K线周期 |
+| `triggerType` | string | 触发类型 |
+| `signalValue` | bool/null | 信号值: true=做多, false=做空, null=无信号 |
+| `signalReason` | string/null | 信号原因 |
+| `computedAt` | datetime | 信号计算时间 |
+| `sourceSubscriptionKey` | string/null | 触发该信号的订阅键 |
+| `createdBy` | string/null | 创建者标识 |
+
+**SignalData 模型定义**（Python/Pydantic）:
+```python
+class SignalData(CamelCaseModel):
+    """信号数据推送载荷模型
+
+    用于 WebSocket 实时信号推送（subscriptionKey 以 SIGNAL: 开头）。
+    与 list_signals API 返回的 SignalRecordResponse 保持一致。
+    """
+
+    id: int = Field(..., description="信号数据库自增ID")
+    alert_id: str = Field(..., description="关联的告警配置ID (UUID)")
+    name: str = Field(..., description="告警配置名称（冗余存储，保留信号产生时的告警名称）")
+    strategy_type: str = Field(..., description="策略类型")
+    symbol: str = Field(..., description="交易对")
+    interval: str = Field(..., description="K线周期")
+    trigger_type: str | None = Field(None, description="触发类型")
+    signal_value: bool | None = Field(
+        None, description="信号值: true=做多, false=做空, null=无信号"
+    )
+    signal_reason: str | None = Field(None, description="信号原因")
+    computed_at: str = Field(..., description="信号计算时间")
+    source_subscription_key: str | None = Field(None, description="触发该信号的订阅键")
+    created_by: str | None = Field(None, description="创建者标识")
+```
+
 **设计说明**:
 - `subscriptionKey: SIGNAL:xxx` 表明这是信号数据
-- `signal` 直接展开业务字段，与 KLINE 数据推送格式一致
 - 前端通过 `subscriptionKey.startsWith('SIGNAL:')` 识别信号推送
+- SignalData 模型用于实时推送，与 list_signals API 返回的 SignalRecordResponse 字段保持一致
 
 **订阅信号通道**:
 ```json
@@ -2961,7 +3148,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "timestamp": 1704067200000,
     "data": {
         "subscriptions": [
-            "SIGNAL:0189a1b2-c3d4-5e6f-7890-abcd12345678"
+            "SIGNAL:550e8400e29b41d4a716446655440001"
         ]
     }
 }
@@ -3052,50 +3239,13 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 ## 🔗 前后端数据模型对齐说明
 
-### 架构原则
+> **重要**: 前后端数据模型对齐的详细架构原则和验证信息请参见 [API模型设计文档](./08-api-models.md)。
 
-本设计严格遵循"**契约驱动开发**"理念，后端数据模型严格按照前端 TypeScript 接口构建，实现零转换成本和完全类型对齐。
-
-### 数据流架构
-
-```
-前端 TypeScript 接口 ← → 后端 Python 模型 ← → TradingView 库
-     ↓                         ↓              ↓
-  类型定义              Pydantic 模型      官方标准
-  (单一事实来源)        (运行时验证)      (最终目标)
-```
-
-### 对齐策略
-
-1. **类型严格对齐**
-   - 前端 TypeScript 接口定义严格符合 TradingView 官方标准
-   - 后端 Pydantic 模型 100% 对齐前端接口字段
-   - 实现编译时和运行时双重类型验证
-
-2. **零转换设计**
-   - 后端直接输出 TradingView 兼容格式
-   - 避免 datafeed 层进行数据转换
-   - 减少错误源和性能开销
-
-3. **契约驱动开发**
-   - 前端接口变更自动影响后端实现
-   - 通过类型系统保证一致性
-   - API 文档与代码同步更新
-
-### 对齐验证
-
-**SymbolInfo 模型对齐度**: 100% ✅
-- 所有必需字段严格匹配
-- 可选字段完全覆盖
-- 严格类型定义完全一致
-
-**Bar 模型对齐度**: 100% ✅
-- 字段名、类型、含义完全一致
-- TradingView 标准完全兼容
-
-**QuotesValue 模型对齐度**: 100% ✅
-- 报价数据字段 100% 匹配
-- 扩展字段支持完整实现
+该文档包含：
+- 架构原则：契约驱动开发理念
+- 数据流架构：TypeScript 接口 ↔ Pydantic 模型 ↔ TradingView 库
+- 对齐策略：类型严格对齐、零转换设计
+- 对齐验证：SymbolInfo、Bar、QuotesValue 模型对齐度 100%
 
 ---
 
@@ -3109,17 +3259,25 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 ---
 
-**文档版本**: v16.1.0
-**最后更新**: 2026年2月14日
+**文档版本**: v16.2.2
+**最后更新**: 2026年3月14日
 **更新内容**:
+- **v16.2.2**: 信号响应字段简化
+  - 移除多余的 signalId 和 configId 字段
+  - 信号响应只保留 id（自增）和 alertId（关联告警ID）
+- **v16.2.1**: 告警ID设计修复
+  - 告警ID设计参考订单ID设计，与订单保持一致
+  - 告警 `id` 字段放在 `data` 内，与 `newClientOrderId` 位置一致
+  - 统一使用32位UUID格式（如 `550e8400e29b41d4a716446655440001`）
+  - 添加告警ID说明，与订单ID说明保持一致
+- **v16.2.0**: 账户订阅功能
+  - 新增 ACCOUNT 订阅类型（BINANCE:ACCOUNT@SPOT, BINANCE:ACCOUNT@FUTURES）
+  - 账户订阅采用增量数据推送，前端需先 GET 完整数据再订阅增量
 - **v16.1.0**: 告警配置订阅优化
   - 移除 `SIGNAL:ALERT` 全局订阅，改为 `SIGNAL:{alert_id}` 精准订阅
   - 前端使用 UUIDv4 生成告警 ID
   - 创建告警请求添加 `id` 字段，由前端生成
   - 前端重连后需重新订阅
-- **v16.2.0**: 账户订阅功能
-  - 新增 ACCOUNT 订阅类型（BINANCE:ACCOUNT@SPOT, BINANCE:ACCOUNT@FUTURES）
-  - 账户订阅采用增量数据推送，前端需先 GET 完整数据再订阅增量
 - **v16.0.0**: 告警配置系统集成
   - 新增告警配置管理消息类型（create_alert_config, list_alert_configs, update_alert_config, delete_alert_config, enable_alert_config, list_signals）
   - 新增实时信号推送（signal_new）和订阅通道（SIGNAL:ALERT, SIGNAL:{alert_id}）

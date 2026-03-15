@@ -39,7 +39,7 @@
           </div>
           <div class="signal-content">
             <div class="signal-header">
-              <span class="strategy-name">{{ signal.strategyName }}</span>
+              <span class="strategy-name">{{ signal.name }}</span>
               <span class="signal-type">
                 {{ signal.signalValue === true ? '做多' : signal.signalValue === false ? '做空' : '无' }}
               </span>
