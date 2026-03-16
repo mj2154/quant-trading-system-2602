@@ -103,7 +103,7 @@ class ExchangeInfoSymbolFilter(SnakeCaseModel):
         populate_by_name = True
 
 
-class ExchangeInfoSymbol(SnakeCaseModel):
+class ExchangeInfoSymbolSpot(SnakeCaseModel):
     """单个交易对信息
 
     来自币安exchangeInfo API的symbol对象。
@@ -236,11 +236,11 @@ class ExchangeInfoSymbol(SnakeCaseModel):
             return LotSizeFilter(**filter_dict)
         return None
 
-    def to_exchange_info(self, exchange: str, market_type: str) -> "ExchangeInfo":
+    def to_exchange_info(self, exchange: str) -> "ExchangeInfo":
         """转换为ExchangeInfo模型用于数据库存储"""
         return ExchangeInfo(
             exchange=exchange,
-            market_type=market_type,
+            market_type="SPOT",
             symbol=self.symbol,
             base_asset=self.base_asset,
             quote_asset=self.quote_asset,
@@ -270,15 +270,126 @@ class ExchangeInfoSymbol(SnakeCaseModel):
         )
 
 
-class ExchangeInfoResponse(SnakeCaseModel):
-    """交易所信息响应
+class ExchangeInfoSymbolFutures(SnakeCaseModel):
+    """期货交易对信息
 
-    来自币安exchangeInfo API的根响应对象。
+    来自币安期货 exchangeInfo API 的 symbol 对象。
+    继承 SnakeCaseModel，自动将 camelCase 转换为 snake_case。
+
+    期货 API 特点：
+    - permissionSets 为扁平数组格式：["GRID", "COPY"]
+    - 包含期货特有字段：contractType, deliveryDate, marginAsset 等
+    """
+
+    # 基本信息
+    symbol: str = Field(default="", description="symbol")
+    pair: str = Field(default="", description="pair")
+    status: str = Field(default="UNKNOWN", description="status")
+    base_asset: str = Field(default="", description="baseAsset")
+    quote_asset: str = Field(default="", description="quoteAsset")
+    margin_asset: Optional[str] = Field(None, description="marginAsset")
+
+    # 精度信息
+    base_asset_precision: int = Field(default=8, ge=0, description="baseAssetPrecision")
+    quote_precision: int = Field(default=8, ge=0, description="quotePrecision")
+    price_precision: Optional[int] = Field(None, description="pricePrecision")
+    quantity_precision: Optional[int] = Field(None, description="quantityPrecision")
+
+    # 交易选项
+    order_types: list[str] = Field(default_factory=list, description="OrderType")
+    time_in_force: list[str] = Field(
+        default_factory=list, description="timeInForce"
+    )
+
+    # 过滤器
+    filters: list[dict] = Field(default_factory=list, description="filters")
+
+    # 权限管理 - 期货为扁平数组格式
+    permission_sets: list[str] = Field(
+        default_factory=list, description="permissionSets (扁平数组)"
+    )
+
+    # 合约信息（期货特有）
+    contract_type: Optional[str] = Field(None, description="contractType")
+    delivery_date: Optional[int] = Field(None, description="deliveryDate")
+    onboard_date: Optional[int] = Field(None, description="onboardDate")
+    maint_margin_percent: Optional[str] = Field(None, description="maintMarginPercent")
+    required_margin_percent: Optional[str] = Field(
+        None, description="requiredMarginPercent"
+    )
+    underlying_type: Optional[str] = Field(None, description="underlyingType")
+    underlying_sub_type: Optional[list[str]] = Field(
+        None, description="underlyingSubType"
+    )
+    liquidation_fee: Optional[str] = Field(None, description="liquidationFee")
+    market_take_bound: Optional[str] = Field(None, description="marketTakeBound")
+    max_move_order_limit: Optional[int] = Field(None, description="maxMoveOrderLimit")
+    trigger_protect: Optional[str] = Field(None, description="triggerProtect")
+
+    @field_validator(
+        "base_asset_precision",
+        "quote_precision",
+        "price_precision",
+        "quantity_precision",
+        mode="before",
+    )
+    @classmethod
+    def validate_precision(cls, v):
+        """验证并转换精度字段"""
+        if isinstance(v, str):
+            return int(v)
+        return v
+
+    @field_validator("filters", mode="before")
+    @classmethod
+    def validate_filters(cls, v):
+        """验证并转换过滤器为字典列表"""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [dict(item) for item in v]
+        return v
+
+    def to_exchange_info(self, exchange: str) -> "ExchangeInfo":
+        """转换为ExchangeInfo模型用于数据库存储
+
+        将扁平数组格式的 permission_sets 转换为嵌套数组格式：
+        ["GRID", "COPY"] -> [["GRID", "COPY"]]
+        """
+        return ExchangeInfo(
+            exchange=exchange,
+            market_type="FUTURES",
+            symbol=self.symbol,
+            base_asset=self.base_asset,
+            quote_asset=self.quote_asset,
+            status=self.status,
+            base_asset_precision=self.base_asset_precision or 8,
+            quote_precision=self.quote_precision or 8,
+            quote_asset_precision=self.quote_precision or 8,
+            base_commission_precision=8,
+            quote_commission_precision=8,
+            filters={f["filterType"]: f for f in self.filters},
+            order_types=self.order_types,
+            permissions=[],  # 期货 API 无此字段
+            iceberg_allowed=False,  # 期货无此字段
+            oco_allowed=False,  # 期货无此字段
+            # 将扁平数组转换为嵌套数组格式
+            permission_sets=[self.permission_sets]
+            if self.permission_sets
+            else [],
+        )
+
+
+class ExchangeInfoResponseSpot(SnakeCaseModel):
+    """现货交易所信息响应
+
+    来自币安现货 exchangeInfo API 的根响应对象。
+    使用 ExchangeInfoSymbolSpot 进行解析。
     """
 
     timezone: str = Field(default="UTC", description="服务器时区")
     server_time: int = Field(default=0, description="服务器时间戳（毫秒）")
-    symbols: list[ExchangeInfoSymbol] = Field(
+    symbols: list[ExchangeInfoSymbolSpot] = Field(
         default_factory=list, description="交易对信息列表"
     )
 
@@ -289,6 +400,33 @@ class ExchangeInfoResponse(SnakeCaseModel):
         if isinstance(v, datetime):
             return int(v.timestamp() * 1000)
         return v
+
+
+class ExchangeInfoResponseFutures(SnakeCaseModel):
+    """期货交易所信息响应
+
+    来自币安期货 exchangeInfo API 的根响应对象。
+    使用 ExchangeInfoSymbolFutures 进行解析。
+    """
+
+    timezone: str = Field(default="UTC", description="服务器时区")
+    server_time: int = Field(default=0, description="服务器时间戳（毫秒）")
+    assets: list[dict] = Field(default_factory=list, description="资产信息列表")
+    symbols: list[ExchangeInfoSymbolFutures] = Field(
+        default_factory=list, description="交易对信息列表"
+    )
+
+    @field_validator("server_time", mode="before")
+    @classmethod
+    def validate_server_time(cls, v):
+        """验证时间戳"""
+        if isinstance(v, datetime):
+            return int(v.timestamp() * 1000)
+        return v
+
+
+# 保留旧名称作为别名（已废弃，请使用 ExchangeInfoResponseSpot）
+ExchangeInfoResponse = ExchangeInfoResponseSpot
 
 
 class ExchangeInfo(SnakeCaseModel):

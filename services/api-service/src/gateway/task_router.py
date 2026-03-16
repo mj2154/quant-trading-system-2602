@@ -45,9 +45,11 @@ from ..models.protocol.ws_message import (
     QuotesRequest,
 )
 from ..models.protocol.ws_payload import (
+    AckData,
     ConfigData,
     MetricsData,
     SearchSymbolsData,
+    StrategyMetadataByTypeData,
     SubscribeData,
     SymbolType,
     SystemMetrics,
@@ -686,8 +688,9 @@ class TaskRouter:
                     request_id=request_id,
                 )
                 # 异步任务已返回 ACK，这里只需要发送最终结果
-                # 注意：异步任务返回的 ACK 会被忽略，因为第一阶段已发送
-                if result.get("type") == "ACK":
+                # 注意：异步任务返回的 MessageSuccess 实例会被忽略，因为第一阶段已发送
+                # 检查 type 属性判断是否为 ACK
+                if result.type == "ACK":
                     # 异步任务完成后的结果推送由任务系统负责，这里不需要额外发送
                     return None
         else:
@@ -923,7 +926,7 @@ class TaskRouter:
         )
 
         return self._response(
-            msg_type="SUBSCRIBE_DATA",  # 遵循07-websocket-protocol.md规范
+            msg_type="SUBSCRIPTION_DATA",  # 遵循07-websocket-protocol.md规范
             request_id=request_id,
             data=SubscribeData(
                 subscriptions=subscriptions,
@@ -951,7 +954,7 @@ class TaskRouter:
             deleted_keys = await self._subscription_manager.unsubscribe_all(client_id)
             logger.info(f"客户端 {client_id} 取消全部 {len(deleted_keys)} 个订阅")
             return self._response(
-                msg_type="UNSUBSCRIBE_DATA",  # 遵循07-websocket-protocol.md规范
+                msg_type="SUBSCRIPTION_DATA",  # 遵循07-websocket-protocol.md规范
                 request_id=request_id,
                 data=UnsubscribeData(
                     status="success",
@@ -1471,15 +1474,16 @@ class TaskRouter:
             # 返回 ack 确认消息（三阶段模式第一阶段）
             # 严格遵循07-websocket-protocol.md规范：type 值为 "ACK"
             # 注意：taskId 不返回给客户端，仅在服务端内部使用
-            # data 为空对象，无需额外信息
+            # data 使用 AckData 模型（必须传 BaseModel 实例，禁止传字典）
             ack = MessageSuccess(
                 type="ACK",
                 request_id=request_id or "",
                 protocol_version=PROTOCOL_VERSION,
                 timestamp=self._timestamp_ms(),
-                data={},
+                data=AckData(),
             )
-            return ack.model_dump(by_alias=True)
+            # 返回 MessageSuccess 实例，禁止返回字典（确保类型安全）
+            return ack
 
         except Exception as e:
             logger.error(f"创建任务失败: {task_type}, {e}")
@@ -1649,10 +1653,13 @@ class TaskRouter:
                 updated_at=strategy.get("updated_at"),
             )
 
+            # 包装为设计文档规定的格式: data.strategy
+            strategy_data = StrategyMetadataByTypeData(strategy=strategy_resp)
+
             return self._response(
                 msg_type="STRATEGY_METADATA_DATA",
                 request_id=request_id,
-                data=strategy_resp,
+                data=strategy_data,
             )
         except Exception as e:
             logger.exception("Failed to get strategy metadata by type: %s", e)

@@ -25,7 +25,12 @@ from typing import Optional
 
 from clients import BinanceSpotHTTPClient, BinanceFuturesHTTPClient
 from storage import ExchangeInfoRepository
-from models import ExchangeInfoResponse, ExchangeInfo, MarketType
+from models import (
+    ExchangeInfoResponseSpot,
+    ExchangeInfoResponseFutures,
+    ExchangeInfo,
+    MarketType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,30 +110,13 @@ class ExchangeInfoHandler:
         try:
             raw_info = await self._spot_http.get_exchange_info()
 
-            # 使用 Pydantic 模型验证数据
-            info_response = ExchangeInfoResponse.model_validate(raw_info)
+            # 使用现货专用 Pydantic 模型验证数据
+            info_response = ExchangeInfoResponseSpot.model_validate(raw_info)
 
             # 转换为 ExchangeInfo 模型并存储
             exchange_infos = []
             for symbol_data in info_response.symbols:
-                exchange_info = ExchangeInfo(
-                    exchange="BINANCE",
-                    market_type=MarketType.SPOT,
-                    symbol=symbol_data.symbol,
-                    base_asset=symbol_data.base_asset,
-                    quote_asset=symbol_data.quote_asset,
-                    base_asset_precision=symbol_data.base_asset_precision,
-                    quote_precision=symbol_data.quote_precision,
-                    quote_asset_precision=symbol_data.quote_asset_precision,
-                    base_commission_precision=symbol_data.base_commission_precision,
-                    quote_commission_precision=symbol_data.quote_commission_precision,
-                    status=symbol_data.status,
-                    filters={f["filterType"]: f for f in symbol_data.filters},
-                    order_types=symbol_data.order_types,
-                    permissions=symbol_data.permissions,
-                    iceberg_allowed=symbol_data.iceberg_allowed,
-                    oco_allowed=symbol_data.oco_allowed,
-                )
+                exchange_info = symbol_data.to_exchange_info(exchange="BINANCE")
                 exchange_infos.append(exchange_info)
 
             if self._exchange_repo:
@@ -153,30 +141,13 @@ class ExchangeInfoHandler:
         try:
             raw_info = await self._futures_http.get_exchange_info()
 
-            # 使用 Pydantic 模型验证数据
-            info_response = ExchangeInfoResponse.model_validate(raw_info)
+            # 使用期货专用 Pydantic 模型验证数据
+            info_response = ExchangeInfoResponseFutures.model_validate(raw_info)
 
             # 转换为 ExchangeInfo 模型并存储
             exchange_infos = []
             for symbol_data in info_response.symbols:
-                exchange_info = ExchangeInfo(
-                    exchange="BINANCE",
-                    market_type=MarketType.FUTURES,
-                    symbol=symbol_data.symbol,
-                    base_asset=symbol_data.base_asset,
-                    quote_asset=symbol_data.quote_asset,
-                    base_asset_precision=symbol_data.base_asset_precision,
-                    quote_precision=symbol_data.quote_precision,
-                    quote_asset_precision=symbol_data.quote_asset_precision,
-                    base_commission_precision=symbol_data.base_commission_precision,
-                    quote_commission_precision=symbol_data.quote_commission_precision,
-                    status=symbol_data.status,
-                    filters={f["filterType"]: f for f in symbol_data.filters},
-                    order_types=symbol_data.order_types,
-                    permissions=symbol_data.permissions,
-                    iceberg_allowed=symbol_data.iceberg_allowed,
-                    oco_allowed=symbol_data.oco_allowed,
-                )
+                exchange_info = symbol_data.to_exchange_info(exchange="BINANCE")
                 exchange_infos.append(exchange_info)
 
             if self._exchange_repo:

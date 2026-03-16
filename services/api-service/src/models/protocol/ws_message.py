@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field
 
 # 使用本地基类进行命名转换
 from ..base import CamelCaseModel, SnakeCaseModel
@@ -203,13 +203,6 @@ class MessageResponseBase(CamelCaseModel):
     timestamp: int
     data: CamelCaseModel  # 必须是 CamelCaseModel 实例，用于响应输出
 
-    @model_serializer(mode="wrap")
-    def serialize_model(self, handler):
-        """自动将 CamelCaseModel 序列化为字典"""
-        result = handler(self)
-        result["data"] = self.data.model_dump(by_alias=True) if isinstance(self.data, CamelCaseModel) else self.data
-        return result
-
     def __str__(self) -> str:
         return f"MessageResponseBase(type={self.type}, request_id={self.request_id})"
 
@@ -262,7 +255,7 @@ class MessageUpdate(CamelCaseModel):
     type: str = "UPDATE"
     timestamp: int
     subscription_key: str
-    content: dict[str, Any]
+    content: CamelCaseModel  # 使用 CamelCaseModel 以确保类型安全
 
     def __str__(self) -> str:
         return f"MessageUpdate(key={self.subscription_key})"

@@ -2,9 +2,15 @@
 币安数据转换器
 
 将币安格式数据转换为 TradingView 格式。
+返回 Pydantic 模型以确保类型安全和数据验证。
 """
 
 from typing import Any
+
+from ..models.base import CamelCaseModel
+
+from ..models.trading.kline_models import KlineBar
+from ..models.trading.quote_models import QuotesData, QuotesValue
 
 
 def to_float(value: Any) -> float | None:
@@ -19,30 +25,35 @@ def to_float(value: Any) -> float | None:
         return None
 
 
-def convert_binance_to_tv(data_type: str, data: dict) -> dict:
+def convert_binance_to_tv(data_type: str, data: dict) -> CamelCaseModel:
     """将币安格式数据转换为TradingView格式
+
+    返回 CamelCaseModel 以确保类型安全和数据验证。
 
     Args:
         data_type: 数据类型 (KLINE, QUOTES, TRADE, ACCOUNT)
         data: 币安原始数据
 
     Returns:
-        TradingView格式的数据
+        TradingView格式的数据模型
     """
     if data_type == "KLINE":
         return convert_kline(data)
     elif data_type == "QUOTES":
         return convert_quotes(data)
     elif data_type == "TRADE":
+        # Trade 数据直接转发，返回字典包装
         return convert_trade(data)
     elif data_type == "ACCOUNT":
-        # 账户数据直接返回，不需要转换
-        return data
-    return data
+        # 账户数据直接返回，不转换
+        return convert_account(data)
+    return convert_unknown(data_type, data)
 
 
-def convert_kline(data: dict) -> dict:
+def convert_kline(data: dict) -> KlineBar:
     """将币安K线数据转换为TV格式
+
+    返回 KlineBar 模型以确保类型安全。
 
     币安格式:
     {
@@ -61,30 +72,34 @@ def convert_kline(data: dict) -> dict:
         }
     }
 
-    TV格式:
-    {
-        "time": 1770640680000,  // 时间戳（毫秒）
-        "open": 69073.39,
-        "high": 69109.88,
-        "low": 69073.39,
-        "close": 69104.31,
-        "volume": 2.0217
-    }
+    KlineBar 字段 (TV格式):
+    - time: 时间戳（毫秒）
+    - open: 开盘价
+    - high: 最高价
+    - low: 最低价
+    - close: 收盘价
+    - volume: 成交量
     """
     k = data.get("k", {})
 
-    return {
-        "time": k.get("t"),
-        "open": to_float(k.get("o")),
-        "high": to_float(k.get("h")),
-        "low": to_float(k.get("l")),
-        "close": to_float(k.get("c")),
-        "volume": to_float(k.get("v")),
-    }
+    return KlineBar(
+        time=k.get("t", 0),
+        open=to_float(k.get("o")) or 0.0,
+        high=to_float(k.get("h")) or 0.0,
+        low=to_float(k.get("l")) or 0.0,
+        close=to_float(k.get("c")) or 0.0,
+        volume=to_float(k.get("v")) or 0.0,
+    )
 
 
-def convert_quotes(data: dict) -> dict:
+def convert_quotes(data: dict) -> QuotesData:
     """将币安24hr ticker数据转换为TV quotes格式
+
+    返回 QuotesData 模型以确保类型安全。
+
+    严格遵循设计文档 07-websocket-protocol.md 和 08-api-models.md 格式：
+    - v 字段使用 CamelCaseModel
+    - 序列化时自动转换为 camelCase
 
     币安格式:
     {
@@ -94,60 +109,87 @@ def convert_quotes(data: dict) -> dict:
         "o": "69073.39000000",  // 24小时开盘价
         "h": "69109.88000000",  // 24小时最高价
         "l": "69073.39000000",  // 24小时最低价
-        "v": "2.02170000",  // 24小时成交量
-        "q": "139701.82894280",  // 24小时成交额
+        "v": "2.02170000",      // 24小时成交量
+        "q": "139701.82894280", // 24小时成交额
+        "p": "30.92000000",     // 价格变化
+        "P": "0.45000000",      // 价格变化百分比
         ...
     }
 
-    TV quotes格式:
-    {
-        "n": "BINANCE:BTCUSDT",
-        "s": "ok",
-        "v": {
-            "ch": 0.45,
-            "chp": 0.65,
-            "lp": 69104.31,
-            "ask": 69105.00,
-            "bid": 69104.00,
-            "spread": 1.00,
-            "volume": 2.0217
-        }
-    }
+    QuotesData 字段 (TV格式):
+    - n: 标的全名（EXCHANGE:SYMBOL格式）
+    - s: 状态（ok/error）
+    - v: 报价值对象
     """
     symbol = data.get("s", "")
-    last_price = to_float(data.get("c"))
-    high_price = to_float(data.get("h"))
-    low_price = to_float(data.get("l"))
-    volume = to_float(data.get("v"))
+    last_price = to_float(data.get("c")) or 0.0
+    open_price = to_float(data.get("o")) or 0.0
+    high_price = to_float(data.get("h")) or 0.0
+    low_price = to_float(data.get("l")) or 0.0
+    volume = to_float(data.get("v")) or 0.0
 
     # 币安直接提供价格变化数据
     # "p": 价格变化, "P": 价格变化百分比
-    price_change = to_float(data.get("p"))
-    price_change_percent = to_float(data.get("P"))
+    price_change = to_float(data.get("p")) or 0.0
+    price_change_percent = to_float(data.get("P")) or 0.0
 
-    ask_price = to_float(data.get("a"))
-    bid_price = to_float(data.get("b"))
-    spread = (ask_price - bid_price) if ask_price and bid_price else 0
+    ask_price = to_float(data.get("a")) or 0.0
+    bid_price = to_float(data.get("b")) or 0.0
+    spread = (ask_price - bid_price) if ask_price and bid_price else 0.0
 
-    return {
-        "n": f"BINANCE:{symbol}",
-        "s": "ok",
-        "v": {
-            "ch": price_change,
-            "chp": price_change_percent,
-            "lp": last_price,
-            "ask": ask_price,
-            "bid": bid_price,
-            "spread": spread,
-            "volume": volume,
-            "high": high_price,
-            "low": low_price,
-        },
-    }
+    # 从 symbol 推断 description 格式（如 BTCUSDT -> BTC/USDT, BTCUSDT.PERP -> BTC/USDT.PERP）
+    # 保留 .PERP 后缀以区分期现货
+    clean_symbol = symbol
+
+    # 分离后缀
+    suffix = ""
+    for s in [".PERP", ".perp", ".P", ".p"]:
+        if clean_symbol.endswith(s):
+            suffix = s
+            clean_symbol = clean_symbol[:-len(s)]
+            break
+
+    if len(clean_symbol) >= 4:
+        base = clean_symbol[:-4]
+        quote = clean_symbol[-4:]
+        if base:
+            description = f"{base}/{quote}{suffix}"
+        else:
+            description = symbol  # 回退到原始 symbol
+    else:
+        description = symbol
+
+    # 构建 QuotesValue 模型
+    quotes_value = QuotesValue(
+        ch=price_change,
+        chp=price_change_percent,
+        short_name=symbol,
+        exchange="BINANCE",
+        description=description,
+        lp=last_price,
+        ask=ask_price,
+        bid=bid_price,
+        spread=spread,
+        open_price=open_price,
+        high_price=high_price,
+        low_price=low_price,
+        prev_close_price=open_price,  # 24小时开盘价等同于前收盘价
+        volume=volume,
+    )
+
+    # 构建 QuotesData 模型
+    return QuotesData(
+        n=f"BINANCE:{symbol}",
+        s="ok",
+        v=quotes_value,
+    )
 
 
-def convert_trade(data: dict) -> dict:
+def convert_trade(data: dict) -> CamelCaseModel:
     """将币安trade数据转换为TV格式
+
+    返回 CamelCaseModel 以确保类型安全。
+    Trade 数据直接转发原始数据，使用字典包装。
 
     币安格式:
     {
@@ -160,6 +202,42 @@ def convert_trade(data: dict) -> dict:
         "m": true,  // 买方类型
     }
 
-    TV trade格式: 直接转发原始数据
+    返回: 使用通用模型包装的字典数据
     """
-    return data
+    # Trade 数据直接转发，使用动态字典模型
+    return _DictWrapper(data=data)
+
+
+def convert_account(data: dict) -> CamelCaseModel:
+    """将账户数据转换为TV格式
+
+    返回 CamelCaseModel 以确保类型安全。
+    账户数据直接转发原始数据。
+
+    返回: 使用通用模型包装的字典数据
+    """
+    return _DictWrapper(data=data)
+
+
+def convert_unknown(data_type: str, data: dict) -> CamelCaseModel:
+    """处理未知数据类型
+
+    返回 CamelCaseModel 以确保类型安全。
+
+    Args:
+        data_type: 数据类型
+        data: 原始数据
+
+    Returns: 使用通用模型包装的字典数据
+    """
+    return _DictWrapper(data={"data_type": data_type, "data": data})
+
+
+class _DictWrapper(CamelCaseModel):
+    """通用字典包装器
+
+    用于包装无法用具体模型表示的原始数据。
+    确保返回类型始终为 CamelCaseModel。
+    """
+
+    data: dict[str, Any] = {}

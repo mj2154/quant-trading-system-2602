@@ -17,8 +17,10 @@ from .ticker import (
 )
 from .exchange_info import (
     ExchangeInfo,
-    ExchangeInfoSymbol,
-    ExchangeInfoResponse,
+    ExchangeInfoSymbolSpot,
+    ExchangeInfoSymbolFutures,
+    ExchangeInfoResponseSpot,
+    ExchangeInfoResponseFutures,
     PriceFilter,
     LotSizeFilter,
     MinNotionalFilter,
@@ -79,8 +81,10 @@ __all__ = [
     "WebSocketTickerFutures",
     # 交易所信息模型
     "ExchangeInfo",
-    "ExchangeInfoSymbol",
-    "ExchangeInfoResponse",
+    "ExchangeInfoSymbolSpot",
+    "ExchangeInfoSymbolFutures",
+    "ExchangeInfoResponseSpot",
+    "ExchangeInfoResponseFutures",
     "PriceFilter",
     "LotSizeFilter",
     "MinNotionalFilter",

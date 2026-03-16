@@ -21,6 +21,9 @@ from ..trading.kline_models import KlineBars
 from ..trading.quote_models import QuotesData
 from ..trading.symbol_models import SymbolInfo
 
+# 从 db 模块导入数据模型
+from ..db.signal_models import StrategyMetadataResponse
+
 # ==================== 数据载荷模型 ====================
 
 
@@ -109,10 +112,11 @@ class ServerTimeData(CamelCaseModel):
     服务器时间数据载荷模型
 
     用于WebSocket响应的data字段载荷。
+
+    设计文档: 07-websocket-protocol.md - 1.5 获取服务器时间
     """
 
-    server_time: int  # 服务器时间
-    timezone: str = "UTC"  # 时区
+    server_time: int  # 服务器时间（毫秒时间戳，来源于 Binance API）
 
 
 class FailedSubscription(CamelCaseModel):
@@ -238,15 +242,20 @@ class AccountResponseData(CamelCaseModel):
     用于 WebSocket 账户信息响应（GET_FUTURES_ACCOUNT, GET_SPOT_ACCOUNT）。
     严格遵循设计文档: docs/backend/design/07-websocket-protocol.md
 
+    设计文档规定格式:
+    {
+        "data": {
+            "account": {
+                // 账户详细信息
+            }
+        }
+    }
+
     字段说明:
-    - type: 账户类型 (futures_account / spot_account)
-    - content: 账户详细信息
-    - update_time: 更新时间戳
+    - account: 账户详细信息（包含 Binance API 返回的完整字段）
     """
 
-    type: str
-    content: dict[str, Any] | None = None
-    update_time: int | None = None
+    account: dict[str, Any] | None = None
 
 
 # ==================== 实时推送载荷 ====================
@@ -314,3 +323,22 @@ class SubscriptionInfo(CamelCaseModel):
     subscribed_at: int
     message_count: int = 0
     last_message_at: int | None = None
+
+
+class StrategyMetadataByTypeData(CamelCaseModel):
+    """单个策略元数据包装模型
+
+    用于 GET_STRATEGY_METADATA_BY_TYPE 响应。
+    设计文档: 07-websocket-protocol.md
+
+    格式:
+    {
+        "strategy": {
+            "type": "...",
+            "name": "...",
+            ...
+        }
+    }
+    """
+
+    strategy: StrategyMetadataResponse

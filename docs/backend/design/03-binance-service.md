@@ -189,7 +189,103 @@ async def fetch_and_store_klines(
 - 自动清理：已移除的交易对会被自动删除
 - 状态准确：交易对状态变化会准确反映
 
-### 5.2 同步流程
+### 5.2 现货与期货API差异
+
+> **重要设计决策**：现货与期货使用**独立的解析模型**，而非统一的混合模型。
+
+#### 5.2.1 API响应字段差异
+
+| 字段 | 现货 API | 期货 API | 说明 |
+|------|---------|---------|------|
+| `permissionSets` | `[["SPOT", "MARGIN"]]` 嵌套数组 | `["GRID", "COPY"]` 扁平数组 | **格式不同** |
+| `permissions` | `["SPOT", "MARGIN"]` 扁平数组 | `null` | 期货无此字段 |
+| `baseAsset` | ✅ 有 | ✅ 有 | 两者相同 |
+| `quoteAsset` | ✅ 有 | ✅ 有 | 两者相同 |
+| `contractType` | ❌ 无 | ✅ 有 | 期货特有 |
+| `deliveryDate` | ❌ 无 | ✅ 有 | 期货特有 |
+| `maintMarginPercent` | ❌ 无 | ✅ 有 | 期货特有 |
+| `marginAsset` | ❌ 无 | ✅ 有 | 期货特有 |
+| `underlyingType` | ❌ 无 | ✅ 有 | 期货特有 |
+
+#### 5.2.2 permissionSets 格式差异详解
+
+**现货格式**（嵌套数组）：
+```json
+"permissionSets": [["SPOT", "MARGIN"]]
+```
+含义：账户需要同时满足 **SPOT AND MARGIN** 权限才能交易
+
+**期货格式**（扁平数组）：
+```json
+"permissionSets": ["GRID", "COPY", "DCA", "PSB"]
+```
+含义：账户满足任一权限即可交易
+
+#### 5.2.3 模型设计
+
+采用**独立解析模型**策略：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   币安 API 响应                         │
+├─────────────────────┬───────────────────────────────────┤
+│   现货 API         │           期货 API                 │
+│  /api/v3/exchangeInfo │      /fapi/v1/exchangeInfo     │
+└─────────┬───────────┴───────────────┬───────────────────┘
+          │                           │
+          ▼                           ▼
+┌─────────────────────┐     ┌─────────────────────────────┐
+│ ExchangeInfoSymbol  │     │ ExchangeInfoSymbolFutures  │
+│ (现货解析模型)      │     │ (期货解析模型)              │
+│ - permission_sets   │     │ - permission_sets: list[str]│
+│   : list[list[str]]│     │ (扁平数组)                  │
+│ - 无期货特有字段    │     │ - contract_type            │
+│                    │     │ - delivery_date            │
+└─────────┬───────────┘     │ - margin_asset             │
+          │                 └─────────────┬───────────────┘
+          │                               │
+          └───────────┬───────────────────┘
+                      ▼
+            ┌─────────────────┐
+            │  ExchangeInfo   │
+            │ (数据库模型)    │
+            │ 统一存储        │
+            └─────────────────┘
+```
+
+#### 5.2.4 代码实现要求
+
+```python
+# 现货解析模型 - permission_sets 为嵌套数组
+class ExchangeInfoSymbolSpot(SnakeCaseModel):
+    symbol: str
+    base_asset: str
+    quote_asset: str
+    permission_sets: list[list[str]]  # 嵌套数组 [["SPOT"]]
+    permissions: list[str]
+    # ... 其他现货字段
+
+# 期货解析模型 - permission_sets 为扁平数组
+class ExchangeInfoSymbolFutures(SnakeCaseModel):
+    symbol: str
+    base_asset: str
+    quote_asset: str
+    permission_sets: list[str]  # 扁平数组 ["GRID"]
+    contract_type: Optional[str]  # 期货特有
+    delivery_date: Optional[int]  # 期货特有
+    # ... 其他期货字段
+
+# 统一数据库模型
+class ExchangeInfo:
+    exchange: str
+    market_type: str  # SPOT 或 FUTURES
+    symbol: str
+    base_asset: str
+    quote_asset: str
+    # ... 其他统一字段
+```
+
+### 5.3 同步流程
 
 ```mermaid
 sequenceDiagram
@@ -447,14 +543,15 @@ class SubscriptionSync:
 | K线(历史) | `KlineResponse` (SnakeCaseModel) | `KlineCreate` | HTTP响应 → 数据库 |
 | K线(实时) | `KlineWebSocket` (SnakeCaseModel) | `KlineCreate` | WS消息 → 数据库 |
 | 24hr行情 | `Ticker24hrSpot/Futures` (SnakeCaseModel) | `TickerCreate` | 验证后转换为前端格式模型 |
-| 交易所信息 | `ExchangeInfoResponse` (SnakeCaseModel) | `ExchangeInfo` | 解析 → 数据库 |
+| 交易所信息(现货) | `ExchangeInfoResponseSpot` (SnakeCaseModel) | `ExchangeInfo` | 解析 → 数据库 |
+| 交易所信息(期货) | `ExchangeInfoResponseFutures` (SnakeCaseModel) | `ExchangeInfo` | 解析 → 数据库 |
 | 账户资产 | `FuturesAsset/SpotBalance` (SnakeCaseModel) | `AccountAssetCreate` | 验证后转换为前端格式模型 |
 
 #### 7.3.3 模型命名规范
 
 | 场景 | 命名规则 | 示例 |
 |------|---------|------|
-| 币安API响应模型 | `{Entity}Response` | `KlineResponse`, `ExchangeInfoResponse` |
+| 币安API响应模型 | `{Entity}Response[Spot|Futures]` | `KlineResponse`, `ExchangeInfoResponseSpot` |
 | WebSocket模型 | `WebSocket{Entity}` | `WebSocketKline`, `WebSocketTicker` |
 | 数据库模型 | `{Entity}Create` | `KlineCreate`, `ExchangeInfo` |
 

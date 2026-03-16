@@ -593,9 +593,9 @@ class OrderData(CamelCaseModel):
 | 模型名称 | 用途 | 主要字段 |
 |---------|------|---------|
 | `SymbolType` | 交易对类型 | `crypto`, `forex`, `stock` |
-| `ConfigData` | 配置数据 | `supports_search`, `supports_group_request`, `supported_resolutions[]` |
+| `ConfigData` | 配置数据 | `supportsSearch`, `supportsGroupRequest`, `supportedResolutions[]` |
 | `SearchSymbolsData` | 搜索数据 | `symbols[]`, `total` |
-| `ServerTimeData` | 时间数据 | `server_time`, `timezone` |
+| `ServerTimeData` | 时间数据 | `serverTime`, `timezone` |
 | `FailedSubscription` | 失败的订阅 | `symbol`, `error_code`, `error_message` |
 | `SubscribeData` | 订阅确认 | `subscriptions[]` |
 | `UnsubscribeData` | 取消确认 | `subscriptions[]` |

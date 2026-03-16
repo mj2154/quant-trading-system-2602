@@ -20,10 +20,12 @@ from uuid import UUID
 import asyncpg
 from pydantic import BaseModel
 
+from ..models.base import CamelCaseModel
+
 from ..converters import convert_binance_to_tv
 from ..models.protocol.constants import PROTOCOL_VERSION
 from ..models.protocol.ws_message import MessageError, MessageSuccess, MessageUpdate
-from ..models.protocol.ws_payload import ErrorData
+from ..models.protocol.ws_payload import ErrorData, ServerTimeData
 from ..models.protocol.ws_payload import SignalData
 from ..models.trading.kline_models import KlineBar, KlineBars
 from ..models.trading.quote_models import QuotesData, QuotesList, QuotesValue
@@ -250,7 +252,7 @@ class DataProcessor:
                 timestamp=self._timestamp_ms(),
                 subscription_key=subscription_key,
                 content=content_model,
-            ).model_dump(by_alias=True)
+            )
 
             logger.info(
                 f"[Notification] channel={channel}, event_type={event_type}, "
@@ -563,13 +565,14 @@ class DataProcessor:
                 return
 
             # 构建响应 - 使用 AccountResponseData 模型
+            # 严格遵循07-websocket-protocol.md规范：账户信息采用透传模式
+            # 数据格式: { "account": { ...Binance API原始数据... } }
             from ..models.protocol.ws_payload import AccountResponseData
 
+            # account_info 结构: {"data": <Binance API原始数据>, "update_time": ..., ...}
+            # 透传模式：直接传递原始数据
             task_data = AccountResponseData(
-                type=task_type.replace("get_", "")
-                + "s",  # get_futures_account -> futures_account
-                content=account_info.get("data"),
-                update_time=account_info.get("update_time"),
+                account=account_info.get("data"),
             )
 
             # 使用 MessageSuccess 模型构建响应
@@ -639,12 +642,42 @@ class DataProcessor:
 
                         # 构建 QuotesValue 数据
                         v_data = q.get("v", {})
+
+                        # 从 symbol 推断 description 格式
+                        # 例如: BTCUSDT -> "BTC/USDT", BTCUSDT.PERP -> "BTC/USDT.PERP"（保留后缀以区分期现货）
+                        clean_symbol = symbol_part
+
+                        # 分离 base/quote asset（假设 quote 固定 4 字符，如 USDT/USDC/BUSD）
+                        if len(clean_symbol) >= 4:
+                            # 保留 .PERP 等后缀
+                            suffix = ""
+                            if clean_symbol.endswith(".PERP") or clean_symbol.endswith(".perp") or clean_symbol.endswith(".P") or clean_symbol.endswith(".p"):
+                                # 提取后缀
+                                for s in [".PERP", ".perp", ".P", ".p"]:
+                                    if clean_symbol.endswith(s):
+                                        suffix = s
+                                        clean_symbol = clean_symbol[:-len(s)]
+                                        break
+
+                            # 分离 base/quote
+                            if len(clean_symbol) >= 4:
+                                base = clean_symbol[:-4]
+                                quote = clean_symbol[-4:]
+                                if base:
+                                    inferred_desc = f"{base}/{quote}{suffix}"
+                                else:
+                                    inferred_desc = symbol_part  # 回退到原始 symbol
+                            else:
+                                inferred_desc = symbol_part
+                        else:
+                            inferred_desc = symbol_part
+
                         quotes_value_data = {
                             "ch": v_data.get("ch", 0.0),
                             "chp": v_data.get("chp", 0.0),
                             "short_name": symbol_part,
                             "exchange": exchange,
-                            "description": symbol_part,
+                            "description": inferred_desc,
                             "lp": v_data.get("lp", 0.0),
                             "ask": v_data.get("ask", 0.0),
                             "bid": v_data.get("bid", 0.0),
@@ -652,6 +685,7 @@ class DataProcessor:
                             "open_price": v_data.get("open_price", v_data.get("open", 0.0)),
                             "high_price": v_data.get("high_price", v_data.get("high", 0.0)),
                             "low_price": v_data.get("low_price", v_data.get("low", 0.0)),
+                            "prev_close_price": v_data.get("prev_close_price"),
                             "volume": v_data.get("volume", 0.0),
                         }
                         quotes_value = QuotesValue(**quotes_value_data)
@@ -669,6 +703,11 @@ class DataProcessor:
                     quotes=quotes,
                     count=result.get("count", 0) if result else 0,
                 )
+            elif task_type == "get_server_time":
+                # 使用 ServerTimeData 模型（符合设计文档 07-websocket-protocol.md 格式）
+                # 设计文档格式: { "serverTime": 1703123456789 }
+                server_time = result.get("server_time", 0) if result else 0
+                task_data = ServerTimeData(server_time=server_time)
             else:
                 # 强制类型安全：未知任务类型必须创建对应的 Pydantic 模型
                 # 否则报错提醒工程师添加专用模型
@@ -908,53 +947,44 @@ class DataProcessor:
             data_type = event_data.get("data_type")
             realtime_data = event_data.get("data")
 
-            logger.debug(
-                f"收到实时数据更新: subscription_key={subscription_key}, "
-                f"data_type={data_type}"
-            )
-
             if not subscription_key:
                 logger.warning(f"通知中缺少 subscription_key: {payload}")
                 return
 
+            # 将币安格式转换为TV格式（返回 CamelCaseModel）
+            tv_content = convert_binance_to_tv(data_type, realtime_data)
+
             # 构建推送消息 - 遵循 TradingView 格式
             # 严格遵循07-websocket-protocol.md规范：使用type字段
-            # 将币安格式转换为TV格式
-            tv_content = convert_binance_to_tv(data_type, realtime_data)
 
             # 修复 QUOTES 的 symbol 问题：从 subscription_key 提取正确格式覆盖 n 字段
             # 因为 convert_quotes 使用的是币安原始数据中的 symbol（缺少 .PERP 后缀）
-            if data_type == "QUOTES" and subscription_key and "n" in tv_content:
-                from ..converters.subscription import SubscriptionKeyParser
+            if data_type == "QUOTES" and subscription_key:
+                from ..models.trading.quote_models import QuotesData
 
-                parsed = SubscriptionKeyParser.parse(subscription_key)
-                if parsed and parsed.symbol:
-                    tv_content["n"] = f"BINANCE:{parsed.symbol}"
+                if isinstance(tv_content, QuotesData):
+                    from ..converters.subscription import SubscriptionKeyParser
+
+                    parsed = SubscriptionKeyParser.parse(subscription_key)
+                    if parsed and parsed.symbol:
+                        # 重新创建 QuotesData 模型以更新 n 字段
+                        tv_content = QuotesData(
+                            n=f"BINANCE:{parsed.symbol}",
+                            s=tv_content.s,
+                            v=tv_content.v,
+                        )
 
             # 使用 MessageUpdate 模型确保符合协议规范
             # 严格遵循07-websocket-protocol.md：subscription_key 提升到顶层，content 作为数据载荷
-            # tv_content 是 TradingView 兼容格式的字典，直接传递
-
+            # tv_content 现在是 CamelCaseModel，确保类型安全
             message = MessageUpdate(
                 type="UPDATE",
                 timestamp=self._timestamp_ms(),
                 subscription_key=subscription_key,
-                content=tv_content if tv_content else {},
-            ).model_dump(by_alias=True)
-
-            # 调试：获取订阅的客户端
-            clients: list[str] = (
-                self._client_manager._subscription_manager.get_subscribed_clients(
-                    subscription_key
-                )
-                if self._client_manager._subscription_manager
-                else []
+                content=tv_content,
             )
-            logger.debug(f"[DEBUG] 订阅 {subscription_key} 的客户端: {clients}")
 
-            # 广播给订阅的客户端
             await self._client_manager.broadcast(subscription_key, message)
-            logger.debug(f"广播实时数据完成: {subscription_key}")
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse realtime notification payload: {e}")

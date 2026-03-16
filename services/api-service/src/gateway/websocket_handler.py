@@ -116,8 +116,9 @@ async def ws_market(
                     logger.debug("Response is None, message already sent by handler")
                 else:
                     # 设置 requestId 用于三阶段模式关联
+                    # response 是 MessageSuccess/MessageError 实例，使用 model_dump 序列化
                     if request_id:
-                        response["requestId"] = request_id
+                        response.request_id = request_id
                     await _safe_send(client_manager, client_id, response)
             except Exception as e:
                 logger.exception(f"Error handling request: {e}")

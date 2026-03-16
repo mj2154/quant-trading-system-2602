@@ -4,16 +4,13 @@
 包含所有端到端测试类和工具。
 
 作者: Claude Code
-版本: v2.0.0 - 模块化重构版
+版本: v3.0.0 - 参数化重构版
 """
 
-from .base_e2e_test import AsyncContextManager, E2ETestBase, WebSocketTestClient, e2e_test
-from .base_simple_test import SimpleE2ETestBase
+from .base import AsyncTestBase, RealtimeTestMixin, RESTTestMixin
 
 __all__ = [
-    "AsyncContextManager",
-    "E2ETestBase",
-    "WebSocketTestClient",
-    "e2e_test",
-    "SimpleE2ETestBase",
+    "AsyncTestBase",
+    "RealtimeTestMixin",
+    "RESTTestMixin",
 ]

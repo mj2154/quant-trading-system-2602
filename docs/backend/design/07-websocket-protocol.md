@@ -150,21 +150,6 @@ API 服务内部使用 **snake_case** 命名规范，与 Python 惯例一致：
 
 **转换机制**：使用 Pydantic v2 的 `to_camel` / `to_snake` 自动转换。
 
-```python
-from pydantic import ConfigDict
-from pydantic.alias_generators import to_camel
-
-class KlineResponse(BaseModel):
-    """API 响应模型 - 序列化时自动转为 camelCase"""
-    model_config = ConfigDict(
-        alias_generator=to_camel,
-        populate_by_name=True,
-        by_alias=True,
-    )
-
-    open_time: int        # 内部使用 snake_case
-    # 序列化后: "openTime": 1234567890
-```
 
 > **详细设计**：见 [DATABASE_COORDINATED_ARCHITECTURE.md](./DATABASE_COORDINATED_ARCHITECTURE.md#44-数据命名规范)
 
@@ -1393,9 +1378,28 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 }
 ```
 
+**成功响应**:
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "SERVER_TIME_DATA",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1703123456790,
+    "data": {
+        "serverTime": 1703123456789
+    }
+}
+```
+
+**字段说明**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `serverTime` | integer | 服务器时间（毫秒时间戳，来源于 Binance API） |
+
 **说明**:
 - 对应 TradingView 的 `getServerTime` 方法
 - 用于获取服务器时间
+- 服务器时间通过 Binance API (`GET /api/v3/time`) 获取
 
 ----
 
@@ -1414,8 +1418,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 **说明**:
 - 需要有效的 API 密钥认证
-- 返回 U 本位合约账户信息，包括余额、持仓、保证金等
-- `account` 字段为 **JSON 对象**，包含 Binance API 返回的完整字段，前端可直接使用
+- 采用**透传模式**：账户信息由 binance-service 直接从 Binance API 获取原始数据，存储到 `account_info` 表，api-service 直接从数据库读取并透传给前端
 
 **成功响应**:
 ```json
@@ -1426,28 +1429,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "timestamp": 1703123456790,
     "data": {
         "account": {
-            "feeTier": 5,
-            "canTrade": true,
-            "canDeposit": true,
-            "canWithdraw": true,
-            "totalInitialMargin": "1000.00000000",
-            "totalMaintMargin": "50.00000000",
-            "totalWalletBalance": "5000.00000000",
-            "totalUnrealizedProfit": "100.50000000",
-            "totalMarginBalance": "5100.50000000",
-            "update_time": 1703123456000,
-            "positions": [
-                {
-                    "symbol": "BTCUSDT",
-                    "position_side": "LONG",
-                    "position_amt": "0.500",
-                    "entry_price": "45000.0",
-                    "mark_price": "45200.0",
-                    "unrealized_profit": "100.00000000",
-                    "liquidation_price": "42000.0",
-                    "margin_size": "500.00000000"
-                }
-            ]
+            // 透传 Binance API 返回的完整 JSON 数据，前端需自行解析
         }
     }
 }
@@ -1470,8 +1452,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 **说明**:
 - 需要有效的 API 密钥认证
-- 返回现货账户信息，包括余额、手续费率、权限等
-- `account` 字段为 **JSON 对象**，包含 Binance API 返回的完整字段，前端可直接使用
+- 采用**透传模式**：账户信息由 binance-service 直接从 Binance API 获取原始数据，存储到 `account_info` 表，api-service 直接从数据库读取并透传给前端
 
 **成功响应**:
 ```json
@@ -1482,20 +1463,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "timestamp": 1703123456790,
     "data": {
         "account": {
-            "makerCommission": 10,
-            "taker_commission": 10,
-            "buyer_commission": 0,
-            "seller_commission": 0,
-            "can_trade": true,
-            "can_withdraw": true,
-            "can_deposit": true,
-            "update_time": 1703123456000,
-            "account_type": "SPOT",
-            "balances": [
-                {"asset": "USDT", "free": "1000.00", "locked": "0.00"},
-                {"asset": "BTC", "free": "0.01", "locked": "0.00"}
-            ],
-            "permissions": ["SPOT", "MARGIN"]
+            // 透传 Binance API 返回的完整 JSON 数据，前端需自行解析
         }
     }
 }
@@ -1653,14 +1621,14 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
-        "supports_search": true,
-        "supports_group_request": false,
-        "supports_marks": false,
-        "supports_timescale_marks": false,
-        "supports_time": true,
-        "supported_resolutions": ["1", "5", "15", "60", "240", "1D", "1W", "1M"],
-        "currency_codes": ["USDT", "BTC", "ETH", "BNB", "BUSD", "USDC", "FDUSD"],
-        "symbols_types": [
+        "supportsSearch": true,
+        "supportsGroupRequest": false,
+        "supportsMarks": false,
+        "supportsTimescaleMarks": false,
+        "supportsTime": true,
+        "supportedResolutions": ["1", "5", "15", "60", "240", "1D", "1W", "1M"],
+        "currencyCodes": ["USDT", "BTC", "ETH", "BNB", "BUSD", "USDC", "FDUSD"],
+        "symbolsTypes": [
             { "name": "All types", "value": "" },
             { "name": "Crypto", "value": "crypto" }
         ]
@@ -1670,33 +1638,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 ---
 
-##### 1.1.1 CONFIG_DATA 数据模型定义
 
-**SymbolType 模型** - TradingView 标的类型：
-
-```python
-class SymbolType(BaseModel):
-    """TradingView 标的类型"""
-    name: str       # 显示名称
-    value: str      # 值
-```
-
-**ConfigData 模型** - 数据源配置响应载荷：
-
-```python
-class ConfigData(BaseModel):
-    """数据源配置响应载荷"""
-    supports_search: bool = True                    # 支持搜索
-    supports_group_request: bool = False            # 支持分组请求
-    supports_marks: bool = False                     # 支持标记
-    supports_timescale_marks: bool = False           # 支持时间轴标记
-    supports_time: bool = True                      # 支持时间
-    supported_resolutions: list[str]                # 支持的分辨率
-    currency_codes: list[str]                        # 支持的货币代码
-    symbols_types: list[SymbolType] = []             # 标的类型列表
-```
-
----
 
 ##### 1.2 交易对搜索响应
 
@@ -1744,160 +1686,7 @@ class ConfigData(BaseModel):
 
 ---
 
-##### 1.2.1 搜索结果数据模型定义
 
-**SymbolSearchItem 模型** - 搜索结果中的单个交易对项：
-
-```python
-class SymbolSearchItem(BaseModel):
-    """搜索结果中的单个交易对项"""
-    symbol: str           # 标的全名（格式：EXCHANGE:SYMBOL）
-    full_name: str        # 标的全名（与 symbol 相同）
-    description: str      # 标的描述
-    exchange: str         # 交易所
-    ticker: str           # 交易代码
-    type: str             # 标的类型 (crypto)
-```
-
-**SearchSymbolsData 模型** - 搜索响应数据载荷：
-
-```python
-class SearchSymbolsData(BaseModel):
-    """搜索响应数据载荷"""
-    symbols: list[SymbolSearchItem]  # 交易对列表
-    total: int                        # 总数量
-    count: int                        # 当前返回数量
-```
-
----
-
-##### 1.3 交易对详情响应
-
-**成功响应**:
-```json
-{
-    "protocolVersion": "2.0",
-    "type": "CONFIG_DATA",
-    "requestId": "550e8400e29b41d4a716446655440000",
-    "timestamp": 1703123456790,
-    "data": {
-        "type": "resolve_symbol",
-        "name": "BTCUSDT",
-        "ticker": "BINANCE:BTCUSDT",
-        "description": "BTC/USDT",
-        "type": "crypto",
-        "exchange": "BINANCE",
-        "listed_exchange": "BINANCE",
-        "currency_code": "USDT",
-        "session": "24x7",
-        "timezone": "Etc/UTC",
-        "format": "price",
-        "minmov": 1.0,
-        "pricescale": 100,
-        "has_intraday": true,
-        "has_daily": true,
-        "has_weekly_and_monthly": true,
-        "visible_plots_set": "ohlcv",
-        "data_status": "streaming",
-        "supported_resolutions": ["1", "5", "15", "60", "240", "1D", "1W", "1M"],
-        "intraday_multipliers": ["1", "5", "15", "60"],
-        "daily_multipliers": ["1"],
-        "weekly_multipliers": ["1"],
-        "monthly_multipliers": ["1"],
-        "volume_precision": 8,
-        "delay": 0,
-        "session_holidays": ""
-    }
-}
-```
-
----
-
-##### 1.4 K 线数据响应
-
-**成功响应**:
-```json
-{
-    "protocolVersion": "2.0",
-    "type": "CONFIG_DATA",
-    "requestId": "550e8400e29b41d4a716446655440000",
-    "timestamp": 1703123456790,
-    "data": {
-        "type": "klines",
-        "symbol": "BINANCE:BTCUSDT",
-        "interval": "60",
-        "bars": [
-            {
-                "time": 1703123456000,
-                "open": 42000.50,
-                "high": 42100.00,
-                "low": 41950.00,
-                "close": 42080.00,
-                "volume": 125.4321
-            }
-        ],
-        "count": 1,
-        "no_data": false
-    }
-}
-```
-
-**Bar 数据结构**:
-```json
-{
-    "time": 1703123456000,      // bar时间（Unix时间戳，毫秒，UTC）
-    "open": 42000.50,           // 开盘价
-    "high": 42100.00,            // 最高价
-    "low": 41950.00,            // 最低价
-    "close": 42080.00,          // 收盘价
-    "volume": 125.4321           // 交易量（可选）
-}
-```
-
----
-
-##### 1.5 服务器时间响应
-
-**成功响应**:
-```json
-{
-    "protocolVersion": "2.0",
-    "type": "CONFIG_DATA",
-    "requestId": "550e8400e29b41d4a716446655440000",
-    "timestamp": 1703123456790,
-    "data": {
-        "type": "server_time",
-        "server_time": 1703123456789,
-        "timezone": "UTC"
-    }
-}
-```
-
----
-
-##### 1.5.1 METRICS_DATA 数据模型定义
-
-**SystemMetrics 模型** - 系统指标数据：
-
-```python
-class SystemMetrics(BaseModel):
-    """系统指标数据"""
-    pending_tasks: int = 0           # 待处理任务数
-    connected_clients: int = 0       # 活跃连接数
-```
-
-**MetricsData 模型** - 指标响应数据载荷：
-
-```python
-class MetricsData(BaseModel):
-    """指标响应数据载荷"""
-    type: str = "metrics"                    # 数据类型
-    metrics: SystemMetrics                   # 指标数据
-    active_connections: int = 0              # 活跃连接数（冗余，为兼容性）
-    subscription_count: int = 0              # 订阅数量（冗余，为兼容性）
-```
-
----
 
 ##### 1.6 查询当前客户端订阅响应
 
@@ -1972,69 +1761,7 @@ class MetricsData(BaseModel):
 | `activeCount` | number | 活跃订阅数 |
 | `inactiveCount` | number | 非活跃订阅数 |
 
-##### 1.6.1 SUBSCRIPTION_DATA 数据模型定义
 
-**SubscriptionItem 模型** - 单个订阅信息：
-
-```python
-class SubscriptionItem(BaseModel):
-    """单个订阅信息"""
-    subscription_key: str           # 订阅键（v2.0格式）
-    data_type: str                  # 数据类型（kline/quotes/trade）
-    exchange: str                   # 交易所代码
-    symbol: str                     # 交易对代码
-    interval: str | None = None     # 分辨率（如适用）
-    product_type: str               # 产品类型（spot/perpetual/quarterly）
-    status: str                     # 订阅状态（active/inactive/error）
-    subscribed_at: int              # 订阅时间戳
-    message_count: int = 0          # 接收到的消息数量
-    last_message_at: int | None = None  # 最后一条消息时间戳
-```
-
-**SubscriptionsData 模型** - 订阅列表响应载荷：
-
-```python
-class SubscriptionsData(BaseModel):
-    """订阅列表响应载荷"""
-    type: str = "subscriptions"
-    subscriptions: list[SubscriptionItem]  # 订阅列表
-    total: int = 0                         # 总订阅数
-    active_count: int = 0                  # 活跃订阅数
-    inactive_count: int = 0                # 非活跃订阅数
-```
-
-**FailedSubscription 模型** - 失败的订阅项（用于 SubscribeData.failed 字段）：
-
-```python
-class FailedSubscription(BaseModel):
-    """失败的订阅项"""
-    subscription_key: str  # 订阅键
-    reason: str           # 失败原因
-```
-
-**说明**:
-- 返回当前客户端的所有订阅信息
-- 包括订阅键、状态、统计信息等
-- 用于前端自助查询和管理订阅
-
-**空订阅响应**:
-```json
-{
-    "protocolVersion": "2.0",
-    "type": "CONFIG_DATA",
-    "requestId": "550e8400e29b41d4a716446655440000",
-    "timestamp": 1703123456790,
-    "data": {
-        "type": "subscriptions",
-        "subscriptions": [],
-        "total": 0,
-        "activeCount": 0,
-        "inactiveCount": 0
-    }
-}
-```
-
----
 
 ##### 1.7 Quotes 报价数据响应
 
@@ -3110,29 +2837,6 @@ API 服务使用 Pydantic 模型确保数据符合协议规范：
 | `createdBy` | string/null | 创建者标识 |
 
 **SignalData 模型定义**（Python/Pydantic）:
-```python
-class SignalData(CamelCaseModel):
-    """信号数据推送载荷模型
-
-    用于 WebSocket 实时信号推送（subscriptionKey 以 SIGNAL: 开头）。
-    与 list_signals API 返回的 SignalRecordResponse 保持一致。
-    """
-
-    id: int = Field(..., description="信号数据库自增ID")
-    alert_id: str = Field(..., description="关联的告警配置ID (UUID)")
-    name: str = Field(..., description="告警配置名称（冗余存储，保留信号产生时的告警名称）")
-    strategy_type: str = Field(..., description="策略类型")
-    symbol: str = Field(..., description="交易对")
-    interval: str = Field(..., description="K线周期")
-    trigger_type: str | None = Field(None, description="触发类型")
-    signal_value: bool | None = Field(
-        None, description="信号值: true=做多, false=做空, null=无信号"
-    )
-    signal_reason: str | None = Field(None, description="信号原因")
-    computed_at: str = Field(..., description="信号计算时间")
-    source_subscription_key: str | None = Field(None, description="触发该信号的订阅键")
-    created_by: str | None = Field(None, description="创建者标识")
-```
 
 **设计说明**:
 - `subscriptionKey: SIGNAL:xxx` 表明这是信号数据
