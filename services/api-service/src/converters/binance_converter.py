@@ -137,27 +137,8 @@ def convert_quotes(data: dict) -> QuotesData:
     bid_price = to_float(data.get("b")) or 0.0
     spread = (ask_price - bid_price) if ask_price and bid_price else 0.0
 
-    # 从 symbol 推断 description 格式（如 BTCUSDT -> BTC/USDT, BTCUSDT.PERP -> BTC/USDT.PERP）
-    # 保留 .PERP 后缀以区分期现货
-    clean_symbol = symbol
-
-    # 分离后缀
-    suffix = ""
-    for s in [".PERP", ".perp", ".P", ".p"]:
-        if clean_symbol.endswith(s):
-            suffix = s
-            clean_symbol = clean_symbol[:-len(s)]
-            break
-
-    if len(clean_symbol) >= 4:
-        base = clean_symbol[:-4]
-        quote = clean_symbol[-4:]
-        if base:
-            description = f"{base}/{quote}{suffix}"
-        else:
-            description = symbol  # 回退到原始 symbol
-    else:
-        description = symbol
+    # description 使用商品代码（如 BTCUSDT），与现货/期货保持一致
+    description = symbol
 
     # 构建 QuotesValue 模型
     quotes_value = QuotesValue(

@@ -210,7 +210,6 @@ import {
   type AlertConfig,
   ALERT_TRIGGER_TYPE_OPTIONS,
   ALERT_STRATEGY_TYPE_OPTIONS,
-  DEFAULT_PARAMS,
   formatParamName,
 } from '../../stores/alert-store'
 import { useStrategyStore } from '../../stores/strategy-store'
@@ -241,6 +240,34 @@ onMounted(async () => {
   strategyStore.fetchStrategies()
 })
 
+// 监听策略列表加载完成，自动初始化当前策略的参数
+watch(
+  () => strategyStore.strategies,
+  (newStrategies) => {
+    if (newStrategies.length > 0) {
+      // 如果当前没有选择策略，使用第一个可用策略
+      if (!formData.strategyType) {
+        formData.strategyType = newStrategies[0].type
+      }
+
+      // 根据当前策略类型初始化参数
+      const strategy = strategyStore.getStrategyByType(formData.strategyType)
+      if (strategy && strategy.params.length > 0) {
+        // 使用策略的默认参数
+        const defaultParams: Record<string, number | boolean> = {}
+        strategy.params.forEach(param => {
+          defaultParams[param.name] = param.default
+        })
+        paramsData.value = defaultParams
+      } else {
+        // 无参数策略（如随机策略），清空参数
+        paramsData.value = {}
+      }
+    }
+  },
+  { immediate: true }
+)
+
 // 表单引用
 const formRef = ref<FormInst | null>(null)
 
@@ -258,11 +285,15 @@ const formData = reactive({
   symbol: 'BINANCE:BTCUSDT',
   interval: '60',
   isEnabled: true,
-  strategyType: 'MACDResonanceStrategyV5',
+  // 默认使用第一个可用策略，如果没有则使用 MACD 共振策略
+  strategyType: '',
 })
 
 // 使用 ref 来存储参数，确保响应性
-const paramsData = ref<Record<string, number | boolean>>({ ...DEFAULT_PARAMS })
+// 初始值使用 strategyStore.getDefaultParams 获取，会根据 strategyType 返回正确的默认值
+const paramsData = ref<Record<string, number | boolean>>(
+  strategyStore.getDefaultParams(formData.strategyType)
+)
 
 // 计算属性访问 params
 const formDataWithParams = computed(() => ({
@@ -401,25 +432,23 @@ const currentParams = computed(() => {
     return strategy.params
   }
 
-  // 回退：使用 DEFAULT_PARAMS
-  return Object.entries(DEFAULT_PARAMS).map(([name, value]) => ({
-    name,
-    description: formatParamName(name),
-    type: 'int' as const,
-    default: value,
-    min: 0,
-    max: 9999,
-  }))
+  // 无参数策略（如随机策略），返回空数组
+  return []
 })
 
 // 处理策略变更，重置参数为默认值
 function handleStrategyChange(strategyType: string) {
   const strategy = strategyStore.getStrategyByType(strategyType)
-  if (strategy) {
-    // 重置参数为默认值
+  if (strategy && strategy.params.length > 0) {
+    // 完全替换参数为新策略的默认值
+    const newParams: Record<string, number | boolean> = {}
     strategy.params.forEach(param => {
-      paramsData.value[param.name] = param.default
+      newParams[param.name] = param.default
     })
+    paramsData.value = newParams
+  } else {
+    // 无参数策略（如随机策略），清空参数
+    paramsData.value = {}
   }
 }
 
@@ -460,7 +489,19 @@ function resetForm() {
   formData.isEnabled = true
   // 使用第一个可用的策略类型，如果没有则使用默认值
   formData.strategyType = strategyStore.strategies[0]?.type || 'MACDResonanceStrategyV5'
-  paramsData.value = { ...DEFAULT_PARAMS }
+
+  // 使用策略的默认参数，而不是硬编码的 DEFAULT_PARAMS
+  const strategy = strategyStore.getStrategyByType(formData.strategyType)
+  if (strategy && strategy.params.length > 0) {
+    const newParams: Record<string, number | boolean> = {}
+    strategy.params.forEach(param => {
+      newParams[param.name] = param.default
+    })
+    paramsData.value = newParams
+  } else {
+    // 无参数策略（如随机策略），清空参数
+    paramsData.value = {}
+  }
 }
 
 // 提交表单

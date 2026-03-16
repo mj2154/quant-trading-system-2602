@@ -12,7 +12,7 @@ class Alpha01Strategy(BaseStrategy):
     type: str = "Alpha01Strategy"
     name: str = "Alpha01策略"
     description: str = "基于ATR止损和枢轴点的趋势跟踪策略"
-    params: list[StrategyParam] = []
+    # params 由注册时自动从 generate_signals 方法签名提取
 
     def __init__(self):
         super().__init__()

@@ -29,7 +29,7 @@ class RandomStrategy(BaseStrategy):
     type: str = "RandomStrategy"
     name: str = "随机策略(测试用)"
     description: str = "随机返回信号，用于测试数据流（不返回None）"
-    params: list = []
+    # params 由注册时自动从 generate_signals 方法签名提取
 
     def __init__(self):
         super().__init__()

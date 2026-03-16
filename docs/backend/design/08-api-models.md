@@ -330,14 +330,109 @@ class OrderData(CamelCaseModel):
 | `AccountInfoUpdate` | 账户更新 | `data`, `update_time` |
 | `AccountInfoResponse` | 账户响应 | `account_type`, `data`, `update_time`, `created_at` |
 | `AccountInfoListResponse` | 账户列表 | `items[]`, `total` |
-| `SpotAccountInfo` | 现货账户 | `account_type`, `balances[]`, `update_time` |
-| `FuturesAccountInfo` | 期货账户 | `account_type`, `assets[]`, `positions[]`, `update_time` |
-| `AccountBalance` | 账户余额 | `asset`, `free`, `locked` |
-| `PositionInfo` | 持仓信息 | `symbol`, `entry_price`, `mark_price`, `quantity`, `unrealized_pnl` |
+| `SpotAccountInfo` | 现货账户视图 | `account_type`, `total_asset`, `total_btc`, `balances[]` |
+| `FuturesAccountInfo` | 期货账户视图 | `account_type`, `total_balance`, `total_asset`, `available_balance`, `positions[]` |
+| `AccountBalance` | 账户余额 | `asset`, `free`, `locked`, `total` |
+| `PositionInfo` | 持仓信息 | `symbol`, `position_side`, `position_amount`, `entry_price`, `mark_price`, `unrealized_pnl`, `leverage`, `margin`, `pnl_percent` |
 
 **使用场景**：
 - `account_info` 表操作
 - 账户信息查询和推送
+
+---
+
+#### 字段详情 - AccountInfoCreate
+
+| 字段名 | 类型 | 必填 | 说明 | JSON字段 |
+|--------|------|-----|------|----------|
+| `account_type` | str | ✅ | 账户类型：`SPOT`(现货), `FUTURES`(期货) | `accountType` |
+| `data` | dict | ✅ | 账户原始数据（JSON格式存储） | `data` |
+
+---
+
+#### 字段详情 - AccountInfoResponse
+
+| 字段名 | 类型 | 必填 | 说明 | JSON字段 |
+|--------|------|-----|------|----------|
+| `id` | int | ✅ | 记录ID | `id` |
+| `account_type` | str | ✅ | 账户类型：`SPOT` / `FUTURES` | `accountType` |
+| `data` | dict | ✅ | 账户原始数据（JSONB存储） | `data` |
+| `update_time` | int | 否 | 币安返回的更新时间（毫秒时间戳） | `updateTime` |
+| `created_at` | datetime | ✅ | 创建时间 | `createdAt` |
+| `updated_at` | datetime | ✅ | 更新时间 | `updatedAt` |
+
+---
+
+#### 字段详情 - SpotAccountInfo（视图模型）
+
+> **说明**：此模型从 `AccountInfoResponse.data` 字段解析而来，用于前端展示
+
+| 字段名 | 类型 | 默认值 | 说明 | JSON字段 |
+|--------|------|--------|------|----------|
+| `account_type` | str | `"SPOT"` | 账户类型 | `accountType` |
+| `exchange` | str | `"BINANCE"` | 交易所 | `exchange` |
+| `total_asset` | float | `0.0` | 总资产（USDT） | `totalAsset` |
+| `total_btc` | float | `0.0` | 总资产（BTC） | `totalBtc` |
+| `balances` | list[dict] | `[]` | 余额列表 | `balances` |
+
+---
+
+#### 字段详情 - FuturesAccountInfo（视图模型）
+
+> **说明**：此模型从 `AccountInfoResponse.data` 字段解析而来，用于前端展示
+
+| 字段名 | 类型 | 默认值 | 说明 | JSON字段 |
+|--------|------|--------|------|----------|
+| `account_type` | str | `"FUTURES"` | 账户类型 | `accountType` |
+| `exchange` | str | `"BINANCE"` | 交易所 | `exchange` |
+| `total_balance` | float | `0.0` | 总余额 | `totalBalance` |
+| `total_asset` | float | `0.0` | 总资产（USDT） | `totalAsset` |
+| `available_balance` | float | `0.0` | 可用余额 | `availableBalance` |
+| `total_position_value` | float | `0.0` | 持仓市值 | `totalPositionValue` |
+| `total_unrealized_pnl` | float | `0.0` | 未实现盈亏 | `totalUnrealizedPnl` |
+| `margin_balance` | float | `0.0` | 保证金余额 | `marginBalance` |
+| `positions` | list[dict] | `[]` | 持仓列表 | `positions` |
+
+---
+
+#### 字段详情 - AccountBalance
+
+| 字段名 | 类型 | 必填 | 说明 | JSON字段 |
+|--------|------|-----|------|----------|
+| `asset` | str | ✅ | 资产名称（如 `BTC`, `USDT`） | `asset` |
+| `free` | float | 否 | 可用数量 | `free` |
+| `locked` | float | 否 | 冻结数量 | `locked` |
+
+**计算属性**：
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `total` | float | 总数量 = free + locked |
+
+---
+
+#### 字段详情 - PositionInfo
+
+| 字段名 | 类型 | 默认值 | 说明 | JSON字段 |
+|--------|------|--------|------|----------|
+| `symbol` | str | - | 交易对 | `symbol` |
+| `position_side` | str | `"BOTH"` | 持仓方向：`LONG`, `SHORT`, `BOTH` | `positionSide` |
+| `position_amount` | float | `0.0` | 持仓数量 | `positionAmount` |
+| `entry_price` | float | `0.0` | 开仓价格 | `entryPrice` |
+| `break_even_price` | float | `0.0` | 盈亏平衡价格 | `breakEvenPrice` |
+| `realized_pnl` | float | `0.0` | 费前累计实现盈亏 | `realizedPnl` |
+| `unrealized_pnl` | float | `0.0` | 未实现盈亏 | `unrealizedPnl` |
+| `margin_type` | str | `"cross"` | 保证金类型：`isolated`(逐仓) / `cross`(全仓) | `marginType` |
+| `isolated_wallet` | float | `0.0` | 逐仓钱包余额 | `isolatedWallet` |
+| `mark_price` | float | `0.0` | 标记价格 | `markPrice` |
+| `leverage` | int | `1` | 杠杆倍数 | `leverage` |
+| `margin` | float | `0.0` | 保证金 | `margin` |
+
+**计算属性**：
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `pnl_percent` | float | 盈亏百分比 = (unrealized_pnl / margin) * 100 |
+
+---
 
 ### exchange_models.py - 交易所信息模型
 
@@ -385,7 +480,7 @@ class OrderData(CamelCaseModel):
 |---------|------|---------|
 | `AlertConfigCreate` | 告警创建 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `is_enabled`, `created_by` |
 | `AlertConfigUpdate` | 告警更新 | `name`, `description`, `is_enabled` |
-| `AlertConfigResponse` | 告警响应 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `is_enabled`, `created_at`, `updated_at` |
+| `AlertConfigResponse` | 告警响应 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `trigger_type`, `is_enabled`, `created_at`, `updated_at` |
 | `AlertConfigListResponse` | 告警列表 | `items[]`, `total` |
 | `EnableDisableResponse` | 启用/禁用响应 | `id`, `name`, `is_enabled`, `message` |
 | `CreateAlertConfigRequest` | 创建请求 | `type`, `id`, `name`, `description`, `strategy_type`, `symbol`, `interval` |
@@ -405,7 +500,7 @@ class OrderData(CamelCaseModel):
 | `StrategyParam` | 策略参数 | `name`, `type`, `required`, `default`, `description` |
 | `StrategyMetadataResponse` | 策略元数据响应 | `strategy_type`, `name`, `description`, `params[]` |
 | `StrategyMetadataListResponse` | 策略元数据列表 | `strategies[]`, `total` |
-| `SignalRecordResponse` | 信号记录响应 | `id`, `alert_id`, `strategy_type`, `symbol`, `signal_time`, `signal_value` |
+| `SignalRecordResponse` | 信号记录响应 | `id`, `alert_id`, `strategy_type`, `symbol`, `interval`, `trigger_type`, `signal_time`, `signal_value`, `signal_reason`, `computed_at`, `source_subscription_key`, `metadata`, `created_by` |
 | `SignalListResponse` | 信号列表响应 | `signals[]`, `total` |
 | `EnableDisableResponse` | 启用/禁用响应 | `id`, `name`, `is_enabled`, `message` |
 
@@ -436,23 +531,36 @@ class OrderData(CamelCaseModel):
 | `alert_id` | str | 告警ID | `alertId` |
 | `strategy_type` | str | 策略类型 | `strategyType` |
 | `symbol` | str | 交易对 | `symbol` |
-| `signal_time` | int | 信号时间 | `signalTime` |
+| `interval` | str | K线周期（如 "60", "240"） | `interval` |
+| `trigger_type` | str | 触发类型 | `triggerType` |
+| `signal_time` | int | 信号时间（毫秒时间戳） | `signalTime` |
 | `signal_value` | any | 信号值 | `signalValue` |
+| `signal_reason` | str \| null | 信号原因（如 "建仓信号", "清仓信号", "无信号"） | `signalReason` |
+| `computed_at` | str \| null | 信号计算时间（ISO8601格式） | `computedAt` |
+| `source_subscription_key` | str \| null | 触发该信号的订阅键 | `sourceSubscriptionKey` |
+| `metadata` | dict \| null | 附加元数据 | `metadata` |
+| `created_by` | str \| null | 创建者标识 | `createdBy` |
 
 **JSON 示例（前端接收 - camelCase）**：
 ```json
 {
     "id": 1,
     "alertId": "550e8400e29b41d4a716446655440001",
-    "strategyType": "price_breakout",
-    "symbol": "BTCUSDT",
+    "strategyType": "MACDResonanceStrategyV5",
+    "symbol": "BINANCE:BTCUSDT",
+    "interval": "60",
+    "triggerType": "each_kline_close",
     "signalTime": 1704067200000,
-    "signalValue": {
-        "breakoutPrice": 50000.0,
-        "direction": "long"
-    }
+    "signalValue": true,
+    "signalReason": "建仓信号",
+    "computedAt": "2026-02-13T10:00:00Z",
+    "sourceSubscriptionKey": "BINANCE:BTCUSDT@KLINE_60",
+    "metadata": {},
+    "createdBy": "user_001"
 }
 ```
+
+> **重要**：此 JSON 格式与 WS协议设计文档（07-websocket-protocol.md）中的 SIGNAL_DATA 响应格式完全对齐。
 
 **说明**：API 服务只负责接收信号通知（通过 WebSocket），不存储或管理信号。信号由 signal-service 处理。
 
@@ -683,16 +791,175 @@ class OrderData(CamelCaseModel):
 | `error_code` | str | 错误码 | `"errorCode"` |
 | `error_message` | str | 错误信息 | `"errorMessage"` |
 
-**JSON 示例**：
-```json
-{
-    "errorCode": "INVALID_SYMBOL",
-    "errorMessage": "交易对不存在"
-}
-```
-
 **使用场景**：
 - 响应消息中的 data 字段内容定义
+
+---
+
+#### 账户数据模型（WS协议 ACCOUNT_DATA 响应）
+
+> **重要说明**：账户信息分为两种数据模型，**来源不同，格式不同**：
+> - **GET 请求**：获取完整账户快照（`GET_FUTURES_ACCOUNT` / `GET_SPOT_ACCOUNT`）
+> - **订阅推送**：获取增量更新（`ACCOUNT_UPDATE` / `outboundAccountPosition`）
+
+##### 1. 期货账户信息（GET 请求 - 完整快照）
+
+**模型**: `FuturesAccountData` - 对应 WS协议 `GET_FUTURES_ACCOUNT` 响应
+
+> **数据来源**: Binance WebSocket API (`v2/account.status`)
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `account_type` | str | 固定值 `"FUTURES"` |
+| `account` | dict | 账户详情 |
+
+**Account 字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `totalInitialMargin` | str | 总初始保证金（仅 USDT 资产） |
+| `totalMaintMargin` | str | 总维持保证金（仅 USDT 资产） |
+| `totalWalletBalance` | str | 总钱包余额（仅 USDT 资产） |
+| `totalUnrealizedProfit` | str | 总未实现盈亏（仅 USDT 资产） |
+| `totalMarginBalance` | str | 总保证金余额（仅 USDT 资产） |
+| `totalPositionInitialMargin` | str | 持仓所需初始保证金（仅 USDT 资产） |
+| `totalOpenOrderInitialMargin` | str | 挂单所需初始保证金（仅 USDT 资产） |
+| `totalCrossWalletBalance` | str | 全仓钱包余额（仅 USDT 资产） |
+| `totalCrossUnPnl` | str | 全仓未实现盈亏（仅 USDT 资产） |
+| `availableBalance` | str | 可用余额 |
+| `maxWithdrawAmount` | str | 最大可转出金额 |
+| `assets` | list[dict] | 资产列表 |
+| `positions` | list[dict] | 持仓列表 |
+| `rateLimits` | list[dict] | 速率限制信息 |
+
+> **JSON 示例**: 参考 WS 协议文档 `1.6 获取期货账户信息` 节
+
+---
+
+##### 2. 现货账户信息（GET 请求 - 完整快照）
+
+**模型**: `SpotAccountData` - 对应 WS协议 `GET_SPOT_ACCOUNT` 响应
+
+> **数据来源**: Binance WebSocket API (`account.status`)
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `account_type` | str | 固定值 `"SPOT"` |
+| `account` | dict | 账户详情 |
+
+**Account 字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `makerCommission` | int | 挂单手续费率 |
+| `takerCommission` | int | 吃单手续费率 |
+| `buyerCommission` | int | 买入手续费率 |
+| `sellerCommission` | int | 卖出手续费率 |
+| `commissionRates` | dict | 手续费率详情 |
+| `canTrade` | bool | 是否可以交易 |
+| `canWithdraw` | bool | 是否可以提现 |
+| `canDeposit` | bool | 是否可以充值 |
+| `brokered` | bool | 是否为经纪商账户 |
+| `requireSelfTradePrevention` | bool | 是否需要自我交易预防 |
+| `preventSor` | bool | 是否阻止 SOR |
+| `updateTime` | int | 最后更新时间（毫秒） |
+| `accountType` | str | 账户类型 |
+| `balances` | list[dict] | 余额列表 |
+| `permissions` | list[str] | 权限列表 |
+| `rateLimits` | list[dict] | 速率限制信息 |
+
+> **JSON 示例**: 参考 WS 协议文档 `1.7 获取现货账户信息` 节
+
+---
+
+##### 3. 期货账户增量推送（订阅）
+
+**模型**: `FuturesAccountUpdate` - 对应 WS协议 `ACCOUNT_UPDATE` 事件
+
+> **数据来源**: Binance WebSocket User Data Stream (`ACCOUNT_UPDATE`)
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `event_type` | str | 固定值 `"account_update"` |
+| `subscription_key` | str | 订阅键，如 `"BINANCE:ACCOUNT@FUTURES"` |
+| `content` | dict | 推送内容 |
+
+**Content 字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `e` | str | 事件类型：`"ACCOUNT_UPDATE"` |
+| `E` | int | 事件时间（毫秒） |
+| `T` | int | 事务时间（毫秒） |
+| `a` | dict | 更新数据 |
+
+**a (更新数据) 字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `m` | str | 事件原因：`DEPOSIT`, `WITHDRAW`, `ORDER`, `FUNDING_FEE`, `WITHDRAW_REJECT`, `ADJUSTMENT`, `INSURANCE_CLEAR`, `ADMIN_DEPOSIT`, `ADMIN_WITHDRAW`, `MARGIN_TRANSFER`, `MARGIN_TYPE_CHANGE`, `ASSET_TRANSFER`, `OPTIONS_PREMIUM_FEE`, `OPTIONS_SETTLE_PROFIT`, `AUTO_EXCHANGE`, `COIN_SWAP_DEPOSIT`, `COIN_SWAP_WITHDRAW` |
+| `B` | list[dict] | 余额更新列表 |
+| `P` | list[dict] | 持仓更新列表 |
+
+**B (余额) 字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `a` | str | 资产名称 |
+| `wb` | str | 钱包余额 |
+| `cw` | str | 可用余额（扣除挂单保证金） |
+| `bc` | str | 变更金额 |
+
+**P (持仓) 字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `s` | str | 交易对 |
+| `pa` | str | 持仓数量 |
+| `ep` | str | 开仓价格 |
+| `bep` | str | 盈亏平衡价格 |
+| `cr` | str | 费前累计实现盈亏 |
+| `up` | str | 未实现盈亏 |
+| `mt` | str | 保证金类型：`isolated`(逐仓) / `cross`(全仓) |
+| `iw` | str | 逐仓钱包余额 |
+| `ps` | str | 持仓方向：`LONG`, `SHORT`, `BOTH` |
+
+> **JSON 示例**: 参考 WS 协议文档 `3.3.2 期货账户增量推送` 节
+
+---
+
+##### 4. 现货账户增量推送（订阅）
+
+**模型**: `SpotAccountUpdate` - 对应 WS协议 `outboundAccountPosition` 事件
+
+> **数据来源**: Binance WebSocket User Data Stream (`outboundAccountPosition`)
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `event_type` | str | 固定值 `"account_update"` |
+| `subscription_key` | str | 订阅键，如 `"BINANCE:ACCOUNT@SPOT"` |
+| `content` | dict | 推送内容 |
+
+**Content 字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `e` | str | 事件类型：`"outboundAccountPosition"` |
+| `E` | int | 事件时间（毫秒） |
+| `u` | int | 账户最后更新时间（毫秒） |
+| `B` | list[dict] | 余额列表 |
+
+**B (余额) 字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `a` | str | 资产名称 |
+| `f` | str | 可用余额 |
+| `l` | str | 冻结余额 |
+
+> **JSON 示例**: 参考 WS 协议文档 `3.3.3 现货账户增量推送` 节
+
+---
 
 ### constants.py - 协议常量
 
@@ -963,5 +1230,220 @@ class OrderData(CamelCaseModel):
 
 ---
 
-**版本**：v1.3
-**更新**：2026-03-15 - 补充缺失的数据模型设计（OrderSide/OrderType/MarketType等枚举、FailedSubscription、SignalRecordResponse等）；完善协议常量枚举值列表；强调蛇形命名与驼峰转换设计原则
+## 附录：快速模板
+
+本章节提供标准化的 Pydantic 模型代码模板，帮助工程师快速编写数据模型。
+
+### 1. 标准化 import 语句
+
+```python
+"""模型文件 docstring
+
+参考文档: docs/backend/design/08-api-models.md
+"""
+import logging
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+
+from pydantic import Field, field_validator, model_validator
+
+from ..base import CamelCaseModel, SnakeCaseModel
+
+logger = logging.getLogger(__name__)
+```
+
+**导入顺序**：
+1. 标准库（logging, datetime, enum, typing）
+2. 第三方库（pydantic）
+3. 本地模块（base, 其他 model）
+
+---
+
+### 2. 模型基类选择
+
+| 场景 | 基类 | 说明 |
+|------|------|------|
+| **API 响应** | `CamelCaseModel` | 序列化时自动转 camelCase 给前端 |
+| **请求接收** | `SnakeCaseModel` | 自动将前端 camelCase 转 snake_case |
+| **数据库模型** | `CamelCaseModel` | 内部使用 snake_case，输出 camelCase |
+| **枚举类型** | `StrEnum` | 推荐使用，Python 3.11+ 原生支持 |
+
+---
+
+### 3. Field 配置速查
+
+```python
+from pydantic import Field
+from typing import Optional
+
+class ExampleModel(CamelCaseModel):
+    """模型说明 docstring"""
+
+    # 必填字段（使用 ... 表示）
+    required_field: str = Field(..., description="必填字段说明")
+
+    # 可选字段（带默认值）
+    optional_field: int = Field(default=0, description="可选字段，默认0")
+
+    # 字符串字段，带长度限制
+    name: str = Field(..., min_length=1, max_length=100, description="名称")
+
+    # 数值字段，带范围限制
+    price: float = Field(..., gt=0, le=1000000, description="价格")
+
+    # 可选字段（使用 Optional 或 | None）
+    description: Optional[str] = Field(default=None, description="描述")
+
+    # 列表字段
+    tags: list[str] = Field(default_factory=list, description="标签列表")
+
+    # 字段验证器
+    @field_validator('field_name')
+    @classmethod
+    def validate_field(cls, v):
+        """字段验证器"""
+        if not valid:
+            raise ValueError('error message')
+        return v
+```
+
+---
+
+### 4. 完整模型示例
+
+```python
+class KlineBar(CamelCaseModel):
+    """单根K线数据（OHLCV）
+
+    用于 WebSocket 推送实时K线、K线历史数据。
+
+    字段说明：
+    - time: K线开始时间（秒，Unix时间戳）
+    - open/high/low/close: 价格数据
+    - volume: 成交量
+
+    JSON 示例（前端接收）:
+    {
+        "time": 1704067200,
+        "open": 50000.0,
+        "high": 51000.0,
+        "low": 49500.0,
+        "close": 50500.0,
+        "volume": 1234.56
+    }
+    """
+    time: int = Field(..., description="K线开始时间（秒）")
+    open: float = Field(..., description="开盘价")
+    high: float = Field(..., description="最高价")
+    low: float = Field(..., description="最低价")
+    close: float = Field(..., description="收盘价")
+    volume: float = Field(..., description="成交量")
+
+
+class OrderRequest(SnakeCaseModel):
+    """订单创建请求
+
+    用于接收前端创建的订单请求。
+
+    字段说明：
+    - symbol: 交易对符号
+    - side: 买卖方向
+    - type: 订单类型
+    - quantity: 数量
+    - price: 价格（LIMIT单必填）
+    """
+    symbol: str = Field(..., description="交易对符号，如 BTCUSDT")
+    side: str = Field(..., description="订单方向：BUY 或 SELL")
+    type: str = Field(..., description="订单类型：LIMIT, MARKET 等")
+    quantity: float = Field(..., gt=0, description="订单数量")
+    price: float | None = Field(default=None, description="价格（LIMIT单必填）")
+    time_in_force: str | None = Field(default="GTC", description="时效：GTC/IOC/FOK")
+
+    @field_validator('side')
+    @classmethod
+    def validate_side(cls, v):
+        if v not in ('BUY', 'SELL'):
+            raise ValueError('side must be BUY or SELL')
+        return v
+```
+
+---
+
+### 5. 常见模式
+
+#### 5.1 枚举类型
+
+```python
+class OrderStatus(StrEnum):
+    """订单状态"""
+    PENDING = "PENDING"
+    FILLED = "FILLED"
+    CANCELLED = "CANCELLED"
+    REJECTED = "REJECTED"
+```
+
+#### 5.2 嵌套模型
+
+```python
+class PositionInfo(CamelCaseModel):
+    """持仓信息"""
+    symbol: str = Field(..., description="交易对")
+    position_amount: float = Field(default=0.0, description="持仓数量")
+    unrealized_pnl: float = Field(default=0.0, description="未实现盈亏")
+
+
+class FuturesAccountInfo(CamelCaseModel):
+    """期货账户信息"""
+    account_type: str = Field(default="FUTURES", description="账户类型")
+    total_balance: float = Field(default=0.0, description="总余额")
+    positions: list[PositionInfo] = Field(default_factory=list, description="持仓列表")
+```
+
+#### 5.3 计算属性
+
+```python
+from pydantic import computed_field
+
+class AccountBalance(CamelCaseModel):
+    """账户余额"""
+    free: float = Field(default=0.0, description="可用数量")
+    locked: float = Field(default=0.0, description="冻结数量")
+
+    @computed_field
+    @property
+    def total(self) -> float:
+        """总数量 = free + locked"""
+        return self.free + self.locked
+```
+
+#### 5.4 响应包装
+
+```python
+class DeleteResponse(CamelCaseModel):
+    """删除操作响应"""
+    success: bool = Field(..., description="是否成功")
+    deleted_id: int = Field(..., description="已删除记录的ID")
+    message: str = Field(default="", description="附加消息")
+```
+
+---
+
+### 6. 快速检查清单
+
+编写新模型时，检查以下事项：
+
+- [ ] 选择了正确的基类（CamelCaseModel / SnakeCaseModel）
+- [ ] 必填字段使用 `Field(...)`
+- [ ] 可选字段有合理的默认值
+- [ ] 数值字段有合理的范围限制（gt, ge, lt, le）
+- [ ] 字符串字段有长度限制（min_length, max_length）
+- [ ] 添加了 docstring 说明模型用途
+- [ ] 每个字段有 description
+- [ ] 需要验证的字段添加了 `@field_validator`
+- [ ] 导入了必要的类型（Optional, Any, list 等）
+
+---
+
+**版本**：v1.5
+**更新**：2026-03-17 - 新增附录：快速模板章节，包含标准化import语句、Field配置速查、完整模型示例、常见模式

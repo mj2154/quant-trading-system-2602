@@ -50,6 +50,7 @@ class LoadedAlertConfig:
     trigger_state: TriggerState  # 触发器状态
     created_at: datetime  # 创建时间
     updated_at: datetime  # 更新时间
+    created_by: str | None = None  # 创建者
 
     def calculate(self, ohlcv: pd.DataFrame) -> StrategyOutput:
         """计算实时信号

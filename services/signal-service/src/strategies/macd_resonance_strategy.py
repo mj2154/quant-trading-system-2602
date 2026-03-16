@@ -68,7 +68,7 @@ class MACDResonanceStrategyV5(BaseStrategy):
     type: str = "MACDResonanceStrategyV5"
     name: str = "MACD共振策略V5"
     description: str = "双MACD指标金叉/死叉共振，结合EMA均线系统过滤，捕捉趋势交易机会"
-    params: list[StrategyParam] = []
+    # params 由注册时自动从 generate_signals 方法签名提取
 
     def __init__(self):
         super().__init__()
@@ -292,7 +292,7 @@ class MACDResonanceStrategyV6(BaseStrategy):
     type: str = "MACDResonanceStrategyV6"
     name: str = "MACD共振策略V6"
     description: str = "MACD共振策略V6性能优化版，使用numpy数组替代pandas Series进行计算，大幅提升性能"
-    params: list[StrategyParam] = []
+    # params 由注册时自动从 generate_signals 方法签名提取
 
     """
     MACD共振交易策略 V6 - 性能优化版
@@ -604,7 +604,7 @@ class MACDResonanceStrategyV601(BaseStrategy):
     type: str = "MACDResonanceStrategyV601"
     name: str = "MACD共振策略V601"
     description: str = "MACD共振策略V601，V6的进一步优化版本"
-    params: list[StrategyParam] = []
+    # params 由注册时自动从 generate_signals 方法签名提取
 
     def __init__(self):
         super().__init__()
@@ -850,65 +850,12 @@ class MACDResonanceStrategyV601(BaseStrategy):
         )
 
 
-# MACD短周期共振策略参数（供 MACDResonanceShortStrategy 和 MACDResonanceShortStrategyV1 使用）
-macd_resonance_short_params = [
-    StrategyParam(
-        name="macd1_fastperiod",
-        type="int",
-        default=12,
-        min=1,
-        max=100,
-        description="MACD1快速EMA周期",
-    ),
-    StrategyParam(
-        name="macd1_slowperiod",
-        type="int",
-        default=26,
-        min=1,
-        max=200,
-        description="MACD1慢速EMA周期",
-    ),
-    StrategyParam(
-        name="macd1_signalperiod",
-        type="int",
-        default=9,
-        min=1,
-        max=50,
-        description="MACD1信号线周期",
-    ),
-    StrategyParam(
-        name="macd2_fastperiod",
-        type="int",
-        default=4,
-        min=1,
-        max=50,
-        description="MACD2快速EMA周期",
-    ),
-    StrategyParam(
-        name="macd2_slowperiod",
-        type="int",
-        default=20,
-        min=1,
-        max=100,
-        description="MACD2慢速EMA周期",
-    ),
-    StrategyParam(
-        name="macd2_signalperiod",
-        type="int",
-        default=4,
-        min=1,
-        max=50,
-        description="MACD2信号线周期",
-    ),
-]
-
-
 class MACDResonanceShortStrategy(BaseStrategy):
     # Strategy metadata - must match class name exactly
     type: str = "MACDResonanceShortStrategy"
     name: str = "MACD做空策略"
     description: str = "基于双MACD共振的基本做空策略，通过死叉信号捕捉下跌趋势中的做空机会"
-    params: list[StrategyParam] = macd_resonance_short_params
+    # params 由注册时自动从 generate_signals 方法签名提取
 
     """
     基于双MACD共振的基本做空策略
@@ -1057,65 +1004,12 @@ class MACDResonanceShortStrategy(BaseStrategy):
         )
 
 
-# MACD短周期共振策略参数（供 MACDResonanceShortStrategy 和 MACDResonanceShortStrategyV1 使用）
-macd_resonance_short_params = [
-    StrategyParam(
-        name="macd1_fastperiod",
-        type="int",
-        default=12,
-        min=1,
-        max=100,
-        description="MACD1快速EMA周期",
-    ),
-    StrategyParam(
-        name="macd1_slowperiod",
-        type="int",
-        default=26,
-        min=1,
-        max=200,
-        description="MACD1慢速EMA周期",
-    ),
-    StrategyParam(
-        name="macd1_signalperiod",
-        type="int",
-        default=9,
-        min=1,
-        max=50,
-        description="MACD1信号线周期",
-    ),
-    StrategyParam(
-        name="macd2_fastperiod",
-        type="int",
-        default=4,
-        min=1,
-        max=50,
-        description="MACD2快速EMA周期",
-    ),
-    StrategyParam(
-        name="macd2_slowperiod",
-        type="int",
-        default=20,
-        min=1,
-        max=100,
-        description="MACD2慢速EMA周期",
-    ),
-    StrategyParam(
-        name="macd2_signalperiod",
-        type="int",
-        default=4,
-        min=1,
-        max=50,
-        description="MACD2信号线周期",
-    ),
-]
-
-
 class MACDResonanceShortStrategyV1(BaseStrategy):
     # Strategy metadata - must match class name exactly
     type: str = "MACDResonanceShortStrategyV1"
     name: str = "MACD做空策略V1"
     description: str = "基于双MACD共振的做空策略修改版"
-    params: list[StrategyParam] = macd_resonance_short_params
+    # params 由注册时自动从 generate_signals 方法签名提取
 
     """
     基于双MACD共振的做空策略（修改版）
@@ -1292,146 +1186,17 @@ class MACDResonanceShortStrategyV1(BaseStrategy):
 # 策略注册
 # ===========================================
 
-# MACD共振策略V5参数
-macd_resonance_v5_params = [
-    StrategyParam(
-        name="macd1_fastperiod",
-        type="int",
-        default=12,
-        min=1,
-        max=100,
-        description="MACD1快速EMA周期",
-    ),
-    StrategyParam(
-        name="macd1_slowperiod",
-        type="int",
-        default=26,
-        min=1,
-        max=200,
-        description="MACD1慢速EMA周期",
-    ),
-    StrategyParam(
-        name="macd1_signalperiod",
-        type="int",
-        default=9,
-        min=1,
-        max=50,
-        description="MACD1信号线周期",
-    ),
-    StrategyParam(
-        name="macd2_fastperiod",
-        type="int",
-        default=4,
-        min=1,
-        max=50,
-        description="MACD2快速EMA周期",
-    ),
-    StrategyParam(
-        name="macd2_slowperiod",
-        type="int",
-        default=20,
-        min=1,
-        max=100,
-        description="MACD2慢速EMA周期",
-    ),
-    StrategyParam(
-        name="macd2_signalperiod",
-        type="int",
-        default=4,
-        min=1,
-        max=50,
-        description="MACD2信号线周期",
-    ),
-]
-
-# MACD共振策略V6参数
-macd_resonance_v6_params = [
-    StrategyParam(
-        name="macd1_fastperiod",
-        type="int",
-        default=12,
-        min=1,
-        max=100,
-        description="MACD1快速EMA周期",
-    ),
-    StrategyParam(
-        name="macd1_slowperiod",
-        type="int",
-        default=26,
-        min=1,
-        max=200,
-        description="MACD1慢速EMA周期",
-    ),
-    StrategyParam(
-        name="macd1_signalperiod",
-        type="int",
-        default=9,
-        min=1,
-        max=50,
-        description="MACD1信号线周期",
-    ),
-    StrategyParam(
-        name="macd2_fastperiod",
-        type="int",
-        default=4,
-        min=1,
-        max=50,
-        description="MACD2快速EMA周期",
-    ),
-    StrategyParam(
-        name="macd2_slowperiod",
-        type="int",
-        default=20,
-        min=1,
-        max=100,
-        description="MACD2慢速EMA周期",
-    ),
-    StrategyParam(
-        name="macd2_signalperiod",
-        type="int",
-        default=4,
-        min=1,
-        max=50,
-        description="MACD2信号线周期",
-    ),
-]
-
-# 注册MACD做多策略V5
-StrategyRegistry.register(
-    StrategyMetadata(
-        type="MACDResonanceStrategyV5",
-        name="MACD做多策略V5",
-        description="双MACD指标金叉/死叉共振，结合EMA均线系统过滤，捕捉趋势交易机会",
-        params=macd_resonance_v5_params,
-    )
-)
+# 注册MACD做多策略V5 - 参数由自动提取机制从 generate_signals 方法签名获取
+StrategyRegistry.register(MACDResonanceStrategyV5)
 
 # 注册MACD做多策略V6
-StrategyRegistry.register(
-    StrategyMetadata(
-        type="MACDResonanceStrategyV6",
-        name="MACD做多策略V6",
-        description="MACD做多策略V6性能优化版，使用numpy数组替代pandas Series进行计算，大幅提升性能",
-        params=macd_resonance_v6_params,
-    )
-)
+StrategyRegistry.register(MACDResonanceStrategyV6)
+
+# 注册MACD做多策略V601
+StrategyRegistry.register(MACDResonanceStrategyV601)
 
 # 注册MACD做空策略
-StrategyRegistry.register(
-    StrategyMetadata(
-        type="MACDResonanceShortStrategy",
-        name="MACD做空策略",
-        description="基于双MACD共振的基本做空策略，通过死叉信号捕捉下跌趋势中的做空机会",
-        params=macd_resonance_short_params,
-    )
-)
+StrategyRegistry.register(MACDResonanceShortStrategy)
 
 # 注册MACD做空策略V1
-StrategyRegistry.register(
-    StrategyMetadata(
-        type="MACDResonanceShortStrategyV1",
-        name="MACD做空策略V1",
-        description="基于双MACD共振的做空策略修改版，添加了EMA均线系统过滤条件",
-        params=macd_resonance_short_params,
-    )
-)
+StrategyRegistry.register(MACDResonanceShortStrategyV1)

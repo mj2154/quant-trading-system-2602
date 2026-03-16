@@ -1011,7 +1011,7 @@ const subscribeRequest = {
 | `GET_FUTURES_ACCOUNT` | 获取期货账户信息 | 查询 U 本位合约账户余额、持仓、保证金等 |
 | `GET_SPOT_ACCOUNT` | 获取现货账户信息 | 查询现货账户余额、手续费率等 |
 
-> **透传模式说明**: 账户信息采用"透传"模式，不同于其他类型由 api-service 处理。账户信息由 binance-service 直接从 Binance API 获取原始数据，存储到 `account_info` 表，api-service 直接从数据库读取并透传给前端，前端负责解析完整字段。这种方式避免了大数据量在服务间传递，减少延迟。
+> **透传模式说明**: 账户信息采用"透传"模式，不同于其他类型由 api-service 处理。账户信息由 binance-service 直接从 Binance WebSocket API 获取原始数据，存储到 `account_info` 表，api-service 直接从数据库读取并透传给前端，前端负责解析完整字段。这种方式避免了大数据量在服务间传递，减少延迟。
 
 **交易类型**（binance-service）:
 | type | 响应类型 | 说明 |
@@ -1403,7 +1403,13 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 ----
 
-##### 1.6 获取期货账户信息
+##### 1.6 获取期货账户信息（GET - 完整快照）
+
+> **重要说明**：此为 **GET 请求** 获取的**完整账户快照**，与订阅推送的增量更新格式不同。
+>
+> - **数据来源**：Binance WebSocket API (`v2/account.status`)
+> - **数据特点**：完整账户数据，包含所有余额和持仓
+> - **使用场景**：前端初始化时获取完整数据，后续通过订阅获取增量更新
 
 **示例请求**:
 ```json
@@ -1418,7 +1424,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 **说明**:
 - 需要有效的 API 密钥认证
-- 采用**透传模式**：账户信息由 binance-service 直接从 Binance API 获取原始数据，存储到 `account_info` 表，api-service 直接从数据库读取并透传给前端
+- 采用**透传模式**：账户信息由 binance-service 直接从 Binance WebSocket API 获取原始数据，存储到 `account_info` 表，api-service 直接从数据库读取并透传给前端
 
 **成功响应**:
 ```json
@@ -1428,16 +1434,78 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
+        "accountType": "FUTURES",
         "account": {
-            // 透传 Binance API 返回的完整 JSON 数据，前端需自行解析
-        }
+            "totalInitialMargin": "1000.00",
+            "totalMaintMargin": "10.00",
+            "totalWalletBalance": "5000.00",
+            "totalUnrealizedProfit": "200.00",
+            "totalMarginBalance": "5200.00",
+            "totalPositionInitialMargin": "800.00",
+            "totalOpenOrderInitialMargin": "200.00",
+            "totalCrossWalletBalance": "5000.00",
+            "totalCrossUnPnl": "200.00",
+            "availableBalance": "4200.00",
+            "maxWithdrawAmount": "4200.00",
+            "assets": [
+                {
+                    "asset": "USDT",
+                    "walletBalance": "5000.00",
+                    "unrealizedProfit": "200.00",
+                    "marginBalance": "5200.00",
+                    "maintMargin": "10.00",
+                    "initialMargin": "1000.00",
+                    "positionInitialMargin": "800.00",
+                    "openOrderInitialMargin": "200.00",
+                    "crossWalletBalance": "5000.00",
+                    "crossUnPnl": "200.00",
+                    "availableBalance": "4200.00",
+                    "maxWithdrawAmount": "4200.00",
+                    "updateTime": 1703123456000
+                }
+            ],
+            "positions": [
+                {
+                    "symbol": "BTCUSDT",
+                    "positionSide": "LONG",
+                    "positionAmt": "0.500",
+                    "unrealizedProfit": "150.00",
+                    "isolatedMargin": "0.00000",
+                    "notional": "25000.00",
+                    "isolatedWallet": "0E-8",
+                    "initialMargin": "800.00",
+                    "maintMargin": "8.00",
+                    "updateTime": 1703123456000
+                }
+            ]
+        },
+        "rateLimits": [
+            {
+                "rateLimitType": "REQUEST_WEIGHT",
+                "interval": "MINUTE",
+                "intervalNum": 1,
+                "limit": 2400,
+                "count": 20
+            }
+        ]
     }
 }
 ```
 
+> **说明**：
+> - 采用**透传模式**：直接返回 Binance WebSocket API (`v2/account.status`) 的原始响应
+> - `totalInitialMargin` 等字段仅计算 USDT 资产（单资产模式）
+> - `positions` 仅返回有持仓或挂单的交易对
+
 ---
 
-##### 1.7 获取现货账户信息
+##### 1.7 获取现货账户信息（GET - 完整快照）
+
+> **重要说明**：此为 **GET 请求** 获取的**完整账户快照**，与订阅推送的增量更新格式不同。
+>
+> - **数据来源**：Binance WebSocket API (`account.status`)
+> - **数据特点**：完整账户数据，包含所有余额、费率信息
+> - **使用场景**：前端初始化时获取完整数据，后续通过订阅获取增量更新
 
 **示例请求**:
 ```json
@@ -1452,7 +1520,7 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
 
 **说明**:
 - 需要有效的 API 密钥认证
-- 采用**透传模式**：账户信息由 binance-service 直接从 Binance API 获取原始数据，存储到 `account_info` 表，api-service 直接从数据库读取并透传给前端
+- 采用**透传模式**：账户信息由 binance-service 直接从 Binance WebSocket API 获取原始数据，存储到 `account_info` 表，api-service 直接从数据库读取并透传给前端
 
 **成功响应**:
 ```json
@@ -1462,12 +1530,62 @@ INFO - 缓存缺失（端点不完整）: BINANCE:BTCUSDT 240 缺少: from_time,
     "requestId": "550e8400e29b41d4a716446655440000",
     "timestamp": 1703123456790,
     "data": {
+        "accountType": "SPOT",
         "account": {
-            // 透传 Binance API 返回的完整 JSON 数据，前端需自行解析
-        }
+            "makerCommission": 10,
+            "takerCommission": 10,
+            "buyerCommission": 0,
+            "sellerCommission": 0,
+            "commissionRates": {
+                "maker": "0.001",
+                "taker": "0.001",
+                "buyer": "0.000",
+                "seller": "0.000"
+            },
+            "canTrade": true,
+            "canWithdraw": true,
+            "canDeposit": true,
+            "brokered": false,
+            "requireSelfTradePrevention": false,
+            "preventSor": false,
+            "updateTime": 1703123456000,
+            "accountType": "SPOT",
+            "balances": [
+                {
+                    "asset": "BTC",
+                    "free": "0.50000000",
+                    "locked": "0.10000000"
+                },
+                {
+                    "asset": "USDT",
+                    "free": "1000.00000000",
+                    "locked": "500.00000000"
+                },
+                {
+                    "asset": "ETH",
+                    "free": "5.00000000",
+                    "locked": "0.00000000"
+                }
+            ],
+            "permissions": ["SPOT", "MARGIN"]
+        },
+        "rateLimits": [
+            {
+                "rateLimitType": "REQUEST_WEIGHT",
+                "interval": "MINUTE",
+                "intervalNum": 1,
+                "limit": 1200,
+                "count": 10
+            }
+        ]
     }
 }
 ```
+
+> **说明**：
+> - 采用**透传模式**：直接返回 Binance WebSocket API (`account.status`) 的原始响应
+> - `balances` 包含所有资产的余额信息
+> - `commissionRates` 显示当前手续费率
 
 ---
 
@@ -2863,6 +2981,202 @@ API 服务使用 Pydantic 模型确保数据符合协议规范：
 - 订阅键格式为 `SIGNAL:{alert_id}`
 - 前端需要手动订阅才能接收信号推送
 - 前端重连后需要重新订阅
+
+---
+
+### 3.3 账户信息（订阅 - 增量推送）
+
+> **重要说明**：账户信息分为两种数据模型，**来源不同，格式不同**：
+> - **GET 请求**：获取完整账户快照（详见 1.6/1.7 节）
+> - **订阅推送**：获取增量更新（详见本节）
+>
+> 前端需要**先通过 GET 请求获取完整数据，再订阅增量更新**。
+
+#### 3.3.1 订阅账户增量
+
+**请求示例**:
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "SUBSCRIBE",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "subscriptions": [
+            "BINANCE:ACCOUNT@FUTURES"
+        ]
+    }
+}
+```
+
+#### 3.3.2 期货账户增量推送（ACCOUNT_UPDATE）
+
+> **数据来源**：Binance WebSocket User Data Stream - `ACCOUNT_UPDATE` 事件
+>
+> **数据特点**：增量更新，只推送发生变化的部分（余额或持仓）
+
+**推送示例**:
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "UPDATE",
+    "timestamp": 1704067205000,
+    "data": {
+        "eventType": "account_update",
+        "subscriptionKey": "BINANCE:ACCOUNT@FUTURES",
+        "content": {
+            "e": "ACCOUNT_UPDATE",
+            "E": 1704067205000,
+            "T": 1704067204000,
+            "a": {
+                "m": "ORDER",
+                "B": [
+                    {
+                        "a": "USDT",
+                        "wb": "5200.00",
+                        "cw": "4200.00",
+                        "bc": "0.00"
+                    }
+                ],
+                "P": [
+                    {
+                        "s": "BTCUSDT",
+                        "pa": "0.500",
+                        "ep": "50000.00",
+                        "bep": "49000.00",
+                        "cr": "200.00",
+                        "up": "150.00",
+                        "mt": "isolated",
+                        "iw": "500.00",
+                        "ps": "LONG"
+                    }
+                ]
+            }
+        }
+    }
+}
+```
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "UPDATE",
+    "timestamp": 1704067205000,
+    "data": {
+        "eventType": "account_update",
+        "subscriptionKey": "BINANCE:ACCOUNT@FUTURES",
+        "content": {
+            "e": "ACCOUNT_UPDATE",
+            "E": 1704067205000,
+            "T": 1704067204000,
+            "a": {
+                "m": "ORDER",
+                "B": [
+                    {
+                        "a": "USDT",
+                        "wb": "5200.00",
+                        "cw": "4200.00",
+                        "bc": "0.00"
+                    }
+                ],
+                "P": [
+                    {
+                        "s": "BTCUSDT",
+                        "pa": "0.500",
+                        "ep": "50000.00",
+                        "bep": "49000.00",
+                        "cr": "200.00",
+                        "up": "150.00",
+                        "mt": "isolated",
+                        "iw": "500.00",
+                        "ps": "LONG"
+                    }
+                ]
+            }
+        }
+    }
+}
+```
+
+**字段说明（期货增量）**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `e` | string | 事件类型：`ACCOUNT_UPDATE` |
+| `E` | long | 事件时间（毫秒） |
+| `T` | long | 事务时间（毫秒） |
+| `a.m` | string | 事件原因：`DEPOSIT`, `WITHDRAW`, `ORDER`, `FUNDING_FEE`, `WITHDRAW_REJECT`, `ADJUSTMENT`, `INSURANCE_CLEAR`, `ADMIN_DEPOSIT`, `ADMIN_WITHDRAW`, `MARGIN_TRANSFER`, `MARGIN_TYPE_CHANGE`, `ASSET_TRANSFER`, `OPTIONS_PREMIUM_FEE`, `OPTIONS_SETTLE_PROFIT`, `AUTO_EXCHANGE`, `COIN_SWAP_DEPOSIT`, `COIN_SWAP_WITHDRAW` |
+| `a.B` | array | 余额更新列表 |
+| `a.B[].a` | string | 资产名称 |
+| `a.B[].wb` | string | 钱包余额 |
+| `a.B[].cw` | string | 可用余额（扣除挂单保证金） |
+| `a.B[].bc` | string | 变更金额 |
+| `a.P` | array | 持仓更新列表 |
+| `a.P[].s` | string | 交易对 |
+| `a.P[].pa` | string | 持仓数量 |
+| `a.P[].ep` | string | 开仓价格 |
+| `a.P[].bep` | string | 盈亏平衡价格 |
+| `a.P[].cr` | string | 费前累计实现盈亏 |
+| `a.P[].up` | string | 未实现盈亏 |
+| `a.P[].mt` | string | 保证金类型：`isolated`(逐仓) / `cross`(全仓) |
+| `a.P[].iw` | string | 逐仓钱包余额 |
+| `a.P[].ps` | string | 持仓方向：`LONG`, `SHORT`, `BOTH` |
+
+#### 3.3.3 现货账户增量推送（outboundAccountPosition）
+
+> **数据来源**：Binance WebSocket User Data Stream - `outboundAccountPosition` 事件
+>
+> **数据特点**：增量更新，只推送发生变化的部分（余额）
+
+**推送示例**:
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "UPDATE",
+    "timestamp": 1704067205000,
+    "data": {
+        "eventType": "account_update",
+        "subscriptionKey": "BINANCE:ACCOUNT@SPOT",
+        "content": {
+            "e": "outboundAccountPosition",
+            "E": 1704067205000,
+            "u": 1704067204000,
+            "B": [
+                {
+                    "a": "BTC",
+                    "f": "0.50000000",
+                    "l": "0.10000000"
+                },
+                {
+                    "a": "USDT",
+                    "f": "1500.00000000",
+                    "l": "0.00000000"
+                }
+            ]
+        }
+    }
+}
+```
+
+**字段说明（现货增量）**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `e` | string | 事件类型：`outboundAccountPosition` |
+| `E` | long | 事件时间（毫秒） |
+| `u` | long | 账户最后更新时间（毫秒） |
+| `B` | array | 余额列表 |
+| `B[].a` | string | 资产名称 |
+| `B[].f` | string | 可用余额 |
+| `B[].l` | string | 冻结余额 |
+
+> **使用说明**：
+> - 期货账户推送采用 Binance User Data Stream 的 `ACCOUNT_UPDATE` 事件
+> - 现货账户推送采用 Binance User Data Stream 的 `outboundAccountPosition` 事件
+> - 前端需要维护本地账户状态，根据增量事件更新本地数据
 
 ---
 

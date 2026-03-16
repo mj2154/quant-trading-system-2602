@@ -103,10 +103,14 @@ class ExchangeInfoRepository:
 
                 # 返回 SymbolInfo 模型
                 # 注意：ticker 必须是 EXCHANGE:SYMBOL 格式，符合 TradingView 要求
+                # description 需要区分期货和现货：期货添加 .PERP 后缀
+                symbol = row["symbol"]
+                description = f"{symbol}.PERP" if market_type == "FUTURES" else symbol
+
                 return SymbolInfo(
-                    name=row["symbol"],
-                    ticker=f"{exchange}:{row['symbol']}",  # 修复：添加交易所前缀
-                    description=f"{row['base_asset']}/{row['quote_asset']}",
+                    name=symbol,
+                    ticker=f"{exchange}:{symbol}",  # 修复：添加交易所前缀
+                    description=description,
                     exchange=exchange,
                     listed_exchange=exchange,
                     type="crypto",
@@ -188,11 +192,12 @@ class ExchangeInfoRepository:
                 symbol_suffix = ".PERP" if row["market_type"] == "FUTURES" else ""
                 ticker = f"{row['symbol']}{symbol_suffix}"
                 full_symbol = f"BINANCE:{ticker}"
+                # description 使用商品代码（如 BTCUSDT），与现货/期货保持一致
                 results.append(
                     SymbolSearchItem(
                         symbol=full_symbol,
                         full_name=full_symbol,  # TradingView格式: EXCHANGE:SYMBOL
-                        description=f"{row['base_asset']}/{row['quote_asset']}",
+                        description=ticker,
                         exchange="BINANCE",
                         ticker=ticker,
                         type="crypto",

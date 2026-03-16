@@ -283,22 +283,37 @@ export class WSClient {
 
   /**
    * 处理推送消息
+   *
+   * 根据 WS协议 v2.0 设计文档 (07-websocket-protocol.md)：
+   * - subscriptionKey 在消息顶层，不在 data 内部
+   * - content 是实际数据载荷
+   *
+   * 消息格式:
+   * {
+   *     "type": "UPDATE",
+   *     "timestamp": 1703123456790,
+   *     "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
+   *     "content": { ... }
+   * }
    */
   private handlePushMessage(message: WSMessage): void {
-    const messageData = message.data as { subscriptionKey?: string; content?: unknown } | undefined
+    // 从消息顶层获取 subscriptionKey（不是从 data 内部）
+    const subscriptionKey = (message as unknown as { subscriptionKey?: string }).subscriptionKey
 
-    if (!messageData) {
+    if (!subscriptionKey) {
+      console.warn('[WSClient] UPDATE message missing subscriptionKey:', message)
       return
     }
 
-    const subscriptionKey = messageData.subscriptionKey as string
+    // 从消息顶层获取 content
+    const content = (message as unknown as { content?: unknown }).content
 
-    if (subscriptionKey) {
-      const subscription = this.subscriptions.get(subscriptionKey)
+    const subscription = this.subscriptions.get(subscriptionKey)
 
-      if (subscription) {
-        subscription.handler(messageData.content, subscriptionKey)
-      }
+    if (subscription) {
+      subscription.handler(content, subscriptionKey)
+    } else {
+      console.debug('[WSClient] No subscription found for key:', subscriptionKey)
     }
   }
 

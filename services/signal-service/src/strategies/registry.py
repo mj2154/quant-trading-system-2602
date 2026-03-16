@@ -1,8 +1,9 @@
 """Strategy registry for managing available trading strategies."""
+import inspect
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_origin, get_args
 
 from ..db.database import Database
 
@@ -59,19 +60,143 @@ class StrategyRegistry:
     - type: str = "StrategyClassName" (must match class name)
     - name: str = "Strategy Display Name"
     - description: str = "Strategy description"
-    - params: list[StrategyParam] = [...]
+
+    Parameters are automatically extracted from generate_signals method signature.
     """
 
     _registry: dict[str, StrategyMetadata] = {}
     _discovered: bool = False
 
     @classmethod
-    def register(cls, strategy_class: type) -> None:
-        """Register a strategy class by reading its class attributes.
+    def _extract_params_from_signature(cls, strategy_class: type) -> list[StrategyParam]:
+        """Automatically extract parameters from generate_signals method signature.
+
+        Uses inspect.signature to extract parameter names, types, and default values
+        from the generate_signals method. Skips 'self' and 'ohlv' parameters.
 
         Args:
-            strategy_class: Strategy class (not instance) to register.
+            strategy_class: Strategy class to extract parameters from.
+
+        Returns:
+            List of StrategyParam objects extracted from method signature.
         """
+        params = []
+
+        # Get generate_signals method
+        if not hasattr(strategy_class, 'generate_signals'):
+            logger.warning(f"Strategy {strategy_class.__name__} has no generate_signals method")
+            return params
+
+        try:
+            # Get method signature
+            sig = inspect.signature(strategy_class.generate_signals)
+
+            for param_name, param in sig.parameters.items():
+                # Skip 'self', 'ohlcv', and **kwargs parameters
+                if param_name in ('self', 'ohlcv', 'ohlcv'):
+                    continue
+                # Skip **kwargs and *args
+                if param.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
+                    continue
+
+                # Determine parameter type from annotation
+                param_type = 'int'  # default type
+                if param.annotation is not inspect.Parameter.empty:
+                    annotation = param.annotation
+                    # Handle Union types like int | np.ndarray
+                    origin = get_origin(annotation)
+                    if origin is not None:
+                        # Get the first non-None type from Union
+                        args = get_args(annotation)
+                        for arg in args:
+                            if arg is not type(None):
+                                annotation = arg
+                                break
+
+                    # Map Python types to string types
+                    type_map = {
+                        int: 'int',
+                        float: 'float',
+                        bool: 'bool',
+                        str: 'str',
+                    }
+                    if annotation in type_map:
+                        param_type = type_map[annotation]
+
+                # Get default value - must have a valid default, not None
+                default = None
+                if param.default is not inspect.Parameter.empty and param.default is not None:
+                    default = param.default
+                    # If default is a numpy type, convert to Python type
+                    if hasattr(default, 'item'):  # numpy scalar
+                        default = default.item()
+                else:
+                    # Set sensible defaults based on type
+                    if param_type == 'int':
+                        default = 1
+                    elif param_type == 'float':
+                        default = 0.0
+                    elif param_type == 'bool':
+                        default = False
+
+                # Generate description from parameter name
+                description = cls._generate_param_description(param_name)
+
+                strategy_param = StrategyParam(
+                    name=param_name,
+                    type=param_type,
+                    default=default,
+                    description=description,
+                    min=None,
+                    max=None,
+                )
+                params.append(strategy_param)
+
+        except Exception as e:
+            logger.warning(f"Failed to extract parameters from {strategy_class.__name__}: {e}")
+
+        return params
+
+    @classmethod
+    def _generate_param_description(cls, param_name: str) -> str:
+        """Generate human-readable description from parameter name.
+
+        Args:
+            param_name: Parameter name in snake_case.
+
+        Returns:
+            Human-readable description.
+        """
+        # Convert snake_case to Title Case with spaces
+        # e.g., "macd1_fastperiod" -> "Macd1 Fastperiod"
+        words = param_name.replace('_', ' ')
+        # Handle numbers: "macd1_fastperiod" -> "MACD1 Fastperiod"
+        result = []
+        for word in words.split():
+            if word.isdigit():
+                result.append(word)
+            else:
+                result.append(word.capitalize())
+        return ' '.join(result)
+
+    @classmethod
+    def register(cls, strategy_or_metadata: type | StrategyMetadata) -> None:
+        """Register a strategy class or metadata by reading its class attributes.
+
+        Parameters are automatically extracted from generate_signals method signature.
+
+        Args:
+            strategy_or_metadata: Strategy class (not instance) or StrategyMetadata instance to register.
+        """
+        # Handle StrategyMetadata instance (manual registration with explicit params)
+        if isinstance(strategy_or_metadata, StrategyMetadata):
+            cls._registry[strategy_or_metadata.type] = strategy_or_metadata
+            logger.info(f"Registered strategy: {strategy_or_metadata.type} with {len(strategy_or_metadata.params)} parameters (manual)")
+            return
+
+        # Handle strategy class (auto-extract params from generate_signals method signature)
+        strategy_class = strategy_or_metadata
+
         # Check if class has required metadata attributes
         if not hasattr(strategy_class, 'type') or not strategy_class.type:
             logger.warning(f"Strategy class {strategy_class.__name__} missing 'type' attribute, skipping")
@@ -81,21 +206,18 @@ class StrategyRegistry:
             logger.warning(f"Strategy class {strategy_class.__name__} missing 'name' attribute, skipping")
             return
 
-        # Create metadata from class attributes
-        type_id = strategy_class.type
-        params = []
-        if hasattr(strategy_class, 'params'):
-            params = strategy_class.params or []
+        # Auto-extract parameters from generate_signals method signature
+        params = cls._extract_params_from_signature(strategy_class)
 
         metadata = StrategyMetadata(
-            type=type_id,
+            type=strategy_class.type,
             name=strategy_class.name,
             description=getattr(strategy_class, 'description', ''),
             params=params,
         )
 
-        cls._registry[type_id] = metadata
-        logger.info(f"Registered strategy: {type_id}")
+        cls._registry[strategy_class.type] = metadata
+        logger.info(f"Registered strategy: {strategy_class.type} with {len(params)} parameters (auto-extracted)")
 
     @classmethod
     def discover_strategies(cls) -> None:

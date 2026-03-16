@@ -198,22 +198,23 @@ class SignalService:
 
         # Remove the alert from memory and cleanup indexes
         try:
-            alert_uuid = UUID(alert_id)
-            if alert_uuid in self._alerts:
+            # Use string as key (consistent with _load_alerts_from_db)
+            alert_id_str = str(alert_id)
+            if alert_id_str in self._alerts:
                 # Get old subscription_key before deletion
-                old_alert = self._alerts[alert_uuid]
+                old_alert = self._alerts[alert_id_str]
                 old_subscription_key = _build_subscription_key(
                     old_alert.symbol,
                     old_alert.interval
                 )
 
                 # Remove from _alerts
-                del self._alerts[alert_uuid]
+                del self._alerts[alert_id_str]
                 logger.info("[ALERT_DELETE] Alert removed from _alerts: id=%s", alert_id)
 
                 # Cleanup _alerts_by_key index
                 if old_subscription_key in self._alerts_by_key:
-                    self._alerts_by_key[old_subscription_key].discard(alert_uuid)
+                    self._alerts_by_key[old_subscription_key].discard(alert_id_str)
                     if not self._alerts_by_key[old_subscription_key]:
                         del self._alerts_by_key[old_subscription_key]
                     logger.info(
@@ -393,6 +394,7 @@ class SignalService:
             trigger_type=alert.trigger_type,
             params=alert.params,
             is_enabled=alert.is_enabled,
+            created_by=alert.created_by,
             strategy=strategy,
             trigger_state=TriggerState(),
             created_at=created_at,
@@ -475,6 +477,7 @@ class SignalService:
                 trigger_type=alert.trigger_type,
                 params=alert.params,
                 is_enabled=alert.is_enabled,
+                created_by=alert.created_by,
                 strategy=strategy,
                 trigger_state=TriggerState(),
                 created_at=datetime.utcnow(),
@@ -1280,6 +1283,7 @@ class SignalService:
                     trigger_type=loaded_alert.trigger_type,
                     params=loaded_alert.params,
                     is_enabled=loaded_alert.is_enabled,
+                    created_by=loaded_alert.created_by,
                     strategy=loaded_alert.strategy,
                     trigger_state=new_trigger_state,
                     created_at=loaded_alert.created_at,
@@ -1332,6 +1336,7 @@ class SignalService:
             trigger_type=loaded_alert.trigger_type,
             params=loaded_alert.params,
             is_enabled=loaded_alert.is_enabled,
+            created_by=loaded_alert.created_by,
             strategy=strategy,
             trigger_state=loaded_alert.trigger_state,
             created_at=datetime.utcnow(),
@@ -1413,6 +1418,7 @@ class SignalService:
             trigger_type=loaded_alert.trigger_type,
             params=loaded_alert.params,
             is_enabled=loaded_alert.is_enabled,
+            created_by=loaded_alert.created_by,
             strategy=loaded_alert.strategy,
             trigger_state=new_trigger_state,
             created_at=loaded_alert.created_at,

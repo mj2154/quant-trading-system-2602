@@ -221,10 +221,11 @@ class DataProcessor:
             event_data = self._convert_uuids_to_str(event_data)
 
             # signal_new: 使用 SignalData 模型验证数据合规性
+            # 注意：验证后不覆盖 event_data，保留 snake_case 原始数据
+            # camelCase 转换只在序列化输出时进行（设计文档约定）
             if channel == "signal_new":
                 try:
-                    validated_signal = SignalData(**event_data)
-                    event_data = validated_signal.model_dump(by_alias=True)
+                    SignalData(**event_data)
                 except Exception as e:
                     logger.warning(
                         "[SignalData validation] Invalid signal data: %s, error: %s",

@@ -291,6 +291,10 @@ export const useAlertStore = defineStore('alert', () => {
       if (currentAlert.value?.id === id) {
         currentAlert.value = null
       }
+
+      // 重新订阅剩余告警的信号（删除告警后取消该告警的订阅）
+      subscribeToAlertSignalEvents()
+
       return true
     } catch (error) {
       alertsError.value = error instanceof Error ? error.message : '删除告警失败'
