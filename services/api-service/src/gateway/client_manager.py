@@ -20,6 +20,8 @@ import uuid
 from fastapi import WebSocket
 from pydantic import BaseModel
 
+from ..models.base import CamelCaseModel
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,42 +96,28 @@ class ClientManager:
         """
         return self._clients.get(client_id)
 
-    async def send(self, client_id: str, message: BaseModel) -> bool:
+    async def send(self, client_id: str, message: CamelCaseModel) -> bool:
         """向指定客户端发送消息
 
-        强制要求 message 为 Pydantic 模型，确保类型安全贯穿整个链路。
+        强制要求 message 为 CamelCaseModel，确保类型安全贯穿整个链路。
 
         Args:
             client_id: 客户端 ID
-            message: 消息，必须是 Pydantic 模型
+            message: 消息，必须是 CamelCaseModel（驼峰模型）
 
         Returns:
             发送是否成功
         """
-        # 将模型转换为字典进行序列化
-        message_dict = message.model_dump(by_alias=True)
         websocket = self.get_websocket(client_id)
         if websocket is None:
             logger.warning(f"ClientManager.send: 未找到客户端 {client_id}")
             return False
 
         try:
-            # v2.1规范：type 在 data 内部
-            msg_type = (
-                message_dict.get("data", {}).get("type")
-                if message_dict.get("data")
-                else message_dict.get("type")
-            )
-            request_id = message_dict.get("requestId", "N/A")
-
-            logger.debug(
-                f"[ClientManager.send] 发送给 client_id={client_id}, requestId={request_id}, type={msg_type}"
-            )
             # 使用 model_dump_json 确保正确序列化
-            json_str = message.model_dump_json(by_alias=True, exclude_none=True)
-            logger.debug(f"ClientManager.send: 完整消息: {json_str}")
+            # serialize_as_any=True 修复嵌套 CamelCaseModel 序列化问题
+            json_str = message.model_dump_json(by_alias=True, exclude_none=True, serialize_as_any=True)
             await websocket.send_text(json_str)
-            logger.debug("ClientManager.send: 发送成功")
             return True
         except Exception as e:
             logger.warning(f"ClientManager.send: 发送失败 {client_id}: {e}")
@@ -137,10 +125,10 @@ class ClientManager:
             await self.disconnect(client_id)
             return False
 
-    async def broadcast(self, subscription_key: str, message: BaseModel) -> None:
+    async def broadcast(self, subscription_key: str, message: CamelCaseModel) -> None:
         """广播消息给订阅指定键的所有客户端
 
-        强制要求 message 为 Pydantic 模型，确保类型安全。
+        强制要求 message 为 CamelCaseModel，确保类型安全。
 
         支持通配符匹配：
         - 精确匹配：订阅 'SIGNAL:123' 接收发送到 'SIGNAL:123' 的消息
@@ -149,7 +137,7 @@ class ClientManager:
 
         Args:
             subscription_key: 订阅键
-            message: 消息，必须是 Pydantic 模型
+            message: 消息，必须是 CamelCaseModel
         """
         if not self._subscription_manager:
             return
@@ -164,9 +152,6 @@ class ClientManager:
         # 1. 精确匹配
         exact_clients = self._subscription_manager.get_subscribed_clients(
             subscription_key
-        )
-        logger.debug(
-            f"[Broadcast] 精确匹配 {subscription_key}: {len(exact_clients)} 客户端"
         )
         clients.update(exact_clients)
 
@@ -197,27 +182,22 @@ class ClientManager:
         clients.update(all_star_clients)
 
         if not clients:
-            logger.debug(f"[Broadcast] 没有客户端订阅 key={subscription_key}")
             return
 
-        logger.debug(
-            f"[Broadcast] Broadcasting to {len(clients)} clients for key: {subscription_key}"
-        )
-
-        # 并发发送，不等待完成
+        # 并发发送
         tasks = [self.send(client_id, message) for client_id in clients]
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def broadcast_pattern(self, pattern: str, message: BaseModel, symbol: str) -> None:
+    async def broadcast_pattern(self, pattern: str, message: CamelCaseModel, symbol: str) -> None:
         """按模式广播消息给匹配的订阅客户端
 
-        强制要求 message 为 Pydantic 模型。
+        强制要求 message 为 CamelCaseModel。
 
         支持通配符匹配，如 `BINANCE:*` 匹配所有 BINANCE 订阅。
 
         Args:
             pattern: 订阅键模式
-            message: 消息，必须是 Pydantic 模型
+            message: 消息，必须是 CamelCaseModel
             symbol: 消息相关的交易对
         """
         # 精确匹配
