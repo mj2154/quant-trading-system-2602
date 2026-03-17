@@ -1,34 +1,27 @@
 /**
  * 账户信息状态管理 Store
  *
- * 管理账户信息查询、WebSocket通信和实时更新
+ * 管理账户信息查询和实时更新
  *
- * 使用 WebSocket 协议 (protocolVersion 2.0) 与后端通信
+ * 使用 DataService 统一管理 WebSocket 连接
  */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { dataService } from '../services/data-service/DataService'
 import type {
-  SpotAccountInfo,
-  FuturesAccountInfo,
-  AccountResponse,
+  SpotAccountDetail,
+  SpotAccountData,
+  FuturesAccountDetail,
+  FuturesAccountData,
   AccountOverview,
   PositionItem,
   BalanceItem,
 } from '../types/api'
 
-// WebSocket URL - 使用环境变量或默认配置
-const WS_BASE_URL = import.meta.env?.VITE_WS_URL || 'ws://127.0.0.1:8000'
-
-// ==================== 常量定义 ====================
-
-/**
- * requestId 生成器 (UUID v4 hex 格式，32字符，符合 WS 协议规范)
- * 格式: 550e8400e29b41d4a716446655440000
- */
-function generateRequestId(): string {
-  return crypto.randomUUID().replace(/-/g, '')
-}
+// 类型别名，保持向后兼容
+type SpotAccountInfo = SpotAccountDetail
+type FuturesAccountInfo = FuturesAccountDetail
 
 // ==================== Store 定义 ====================
 
@@ -45,23 +38,8 @@ export const useAccountStore = defineStore('account', () => {
   const futuresLoading = ref(false)
   const futuresError = ref<string | null>(null)
 
-  // WebSocket 连接
-  const ws = ref<WebSocket | null>(null)
+  // DataService 连接状态
   const wsConnected = ref(false)
-  const wsConnecting = ref(false)
-
-  // 待处理的请求回调
-  const pendingRequests = new Map<string, {
-    resolve: (value: unknown) => void
-    reject: (reason?: unknown) => void
-    timeoutId: number
-  }>()
-
-  // WebSocket 重连定时器引用（用于清理）
-  let reconnectTimeoutId: number | null = null
-
-  // 请求超时时间 (毫秒)
-  const REQUEST_TIMEOUT = 30000
 
   // ==================== 计算属性 ====================
 
@@ -174,174 +152,22 @@ export const useAccountStore = defineStore('account', () => {
       .sort((a, b) => parseFloat(b.total) - parseFloat(a.total))
   })
 
-  // ==================== WebSocket 基础方法 ====================
-
-  /**
-   * 发送 WebSocket 消息并等待响应
-   */
-  function sendWSRequest<T>(message: Record<string, unknown>): Promise<T> {
-    return new Promise((resolve, reject) => {
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket 未连接'))
-        return
-      }
-
-      const requestId = message.requestId as string
-
-      // 设置超时
-      const timeoutId = window.setTimeout(() => {
-        pendingRequests.delete(requestId)
-        reject(new Error(`请求超时: ${requestId}`))
-      }, REQUEST_TIMEOUT)
-
-      // 存储回调
-      pendingRequests.set(requestId, { resolve: resolve as (value: unknown) => void, reject, timeoutId })
-
-      // 发送消息
-      ws.value.send(JSON.stringify(message))
-    })
-  }
-
-  /**
-   * 构建基础请求消息
-   * 使用 v2.0 协议: type 字段替代 action 字段
-   */
-  function buildRequestMessage(data: Record<string, unknown>): Record<string, unknown> {
-    // 从 data.type 获取请求类型，映射到协议请求类型
-    const dataType = data.type as string
-    const typeMap: Record<string, string> = {
-      'get_spot_account': 'GET_SPOT_ACCOUNT',
-      'get_futures_account': 'GET_FUTURES_ACCOUNT',
-    }
-    return {
-      protocolVersion: '2.0',
-      type: typeMap[dataType] || dataType,
-      requestId: generateRequestId(),
-      timestamp: Date.now(),
-      data,
-    }
-  }
-
-  /**
-   * 连接 WebSocket
-   */
-  function connectWebSocket() {
-    // 如果已连接或正在连接，直接返回
-    if (ws.value?.readyState === WebSocket.OPEN) {
-      return
-    }
-    if (wsConnecting.value) {
-      return
-    }
-
-    wsConnecting.value = true
-
-    try {
-      ws.value = new WebSocket(`${WS_BASE_URL}/ws`)
-
-      ws.value.onopen = () => {
-        wsConnected.value = true
-        wsConnecting.value = false
-        console.debug('[AccountStore] WebSocket connected')
-      }
-
-      ws.value.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          handleWebSocketMessage(message)
-        } catch (error) {
-          console.warn('[AccountStore] Failed to parse WebSocket message:', error)
-        }
-      }
-
-      ws.value.onerror = (error) => {
-        console.warn('[AccountStore] WebSocket error:', error)
-        wsConnecting.value = false
-      }
-
-      ws.value.onclose = () => {
-        wsConnected.value = false
-        wsConnecting.value = false
-        console.debug('[AccountStore] WebSocket disconnected')
-        // 自动重连（保存定时器引用以便清理）
-        reconnectTimeoutId = window.setTimeout(() => {
-          reconnectTimeoutId = null
-          connectWebSocket()
-        }, 3000)
-      }
-    } catch (error) {
-      console.warn('[AccountStore] Failed to create WebSocket:', error)
-      wsConnecting.value = false
-    }
-  }
-
-  /**
-   * 处理 WebSocket 消息
-   * 使用 v2.0 协议: type 字段替代 action 字段
-   */
-  function handleWebSocketMessage(message: Record<string, unknown>) {
-    const msgType = message.type as string
-    const requestId = message.requestId as string
-
-    // 处理 ack 确认响应
-    if (msgType === 'ACK') {
-      console.debug('[AccountStore] 收到 ACK 确认, requestId:', requestId)
-      return
-    }
-
-    // 处理请求响应 - v2.0 使用具体数据类型
-    if (msgType === 'ACCOUNT_DATA' || msgType === 'ERROR') {
-      console.debug('[AccountStore] 收到响应, requestId:', requestId, 'type:', msgType, 'data:', JSON.stringify(message.data))
-      const pending = pendingRequests.get(requestId)
-      if (pending) {
-        clearTimeout(pending.timeoutId)
-        pendingRequests.delete(requestId)
-
-        if (msgType === 'ACCOUNT_DATA') {
-          pending.resolve(message.data)
-        } else {
-          const errorData = message.data as Record<string, unknown>
-          const errorMsg = (errorData?.errorMessage || errorData?.message || 'Unknown error') as string
-          pending.reject(errorMsg)
-        }
-      }
-    }
-  }
-
   // ==================== 账户 Actions ====================
 
   /**
    * 获取现货账户信息
    */
   async function fetchSpotAccount(): Promise<SpotAccountInfo | null> {
-    // 确保 WebSocket 已连接
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      connectWebSocket()
-      // 等待连接建立（最多等待3秒）
-      for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        if (ws.value?.readyState === WebSocket.OPEN) break
-      }
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        spotError.value = 'WebSocket 连接失败'
-        return null
-      }
-    }
-
     spotLoading.value = true
     spotError.value = null
+    wsConnected.value = false
 
     try {
-      const message = buildRequestMessage({
-        type: 'get_spot_account',
-      })
-
-      const response = await sendWSRequest<AccountResponse>(message)
-
-      // 后端返回 content 字段为 JSON 对象
-      const responseData = response as unknown as { content: SpotAccountInfo }
-      spotAccount.value = responseData.content
-      return spotAccount.value
+      // 使用 DataService 获取现货账户信息
+      const account = await dataService.getSpotAccount()
+      spotAccount.value = account
+      wsConnected.value = true
+      return account
     } catch (error) {
       spotError.value = error instanceof Error ? error.message : '获取现货账户信息失败'
       console.warn('fetchSpotAccount error:', error)
@@ -355,34 +181,16 @@ export const useAccountStore = defineStore('account', () => {
    * 获取期货账户信息
    */
   async function fetchFuturesAccount(): Promise<FuturesAccountInfo | null> {
-    // 确保 WebSocket 已连接
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      connectWebSocket()
-      // 等待连接建立（最多等待3秒）
-      for (let i = 0; i < 30; i++) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        if (ws.value?.readyState === WebSocket.OPEN) break
-      }
-      if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-        futuresError.value = 'WebSocket 连接失败'
-        return null
-      }
-    }
-
     futuresLoading.value = true
     futuresError.value = null
+    wsConnected.value = false
 
     try {
-      const message = buildRequestMessage({
-        type: 'get_futures_account',
-      })
-
-      const response = await sendWSRequest<AccountResponse>(message)
-
-      // 后端返回 content 字段，前端转换为 account_info
-      const responseData = response as unknown as { content: FuturesAccountInfo }
-      futuresAccount.value = responseData.content
-      return futuresAccount.value
+      // 使用 DataService 获取期货账户信息
+      const account = await dataService.getFuturesAccount()
+      futuresAccount.value = account
+      wsConnected.value = true
+      return account
     } catch (error) {
       futuresError.value = error instanceof Error ? error.message : '获取期货账户信息失败'
       console.warn('fetchFuturesAccount error:', error)
@@ -410,57 +218,28 @@ export const useAccountStore = defineStore('account', () => {
     futuresError.value = null
   }
 
-  /**
-   * 断开 WebSocket
-   */
-  function disconnectWebSocket() {
-    // 清除重连定时器
-    if (reconnectTimeoutId !== null) {
-      clearTimeout(reconnectTimeoutId)
-      reconnectTimeoutId = null
-    }
-
-    // 清除所有待处理的请求
-    for (const [_, pending] of pendingRequests) {
-      clearTimeout(pending.timeoutId)
-      pending.reject(new Error('WebSocket 连接关闭'))
-    }
-    pendingRequests.clear()
-
-    if (ws.value) {
-      ws.value.close()
-      ws.value = null
-      wsConnected.value = false
-    }
-  }
-
   // ==================== 初始化 ====================
 
   /**
-   * 初始化 Store
+   * 初始化 Store - 连接 DataService
    */
   function initialize() {
     console.debug('[AccountStore] 初始化 Store')
-    connectWebSocket()
+    // DataService 会自动连接，不需要手动调用
+    // 首次调用 fetchSpotAccount 或 fetchFuturesAccount 时会自动连接
   }
 
   /**
    * 重置 Store
    */
   function reset() {
-    // 清除重连定时器
-    if (reconnectTimeoutId !== null) {
-      clearTimeout(reconnectTimeoutId)
-      reconnectTimeoutId = null
-    }
-
     spotAccount.value = null
     spotLoading.value = false
     spotError.value = null
     futuresAccount.value = null
     futuresLoading.value = false
     futuresError.value = null
-    disconnectWebSocket()
+    wsConnected.value = false
   }
 
   return {
@@ -485,10 +264,6 @@ export const useAccountStore = defineStore('account', () => {
     fetchFuturesAccount,
     refreshAccounts,
     clearError,
-
-    // ==================== WebSocket Actions ====================
-    connectWebSocket,
-    disconnectWebSocket,
 
     // ==================== 生命周期 ====================
     initialize,

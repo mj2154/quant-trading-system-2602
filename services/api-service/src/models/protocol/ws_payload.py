@@ -17,6 +17,7 @@ from pydantic import Field
 from ..base import CamelCaseModel
 
 # 从 trading 模块导入数据模型
+from ..trading.account_models import FuturesAccountData, SpotAccountData
 from ..trading.kline_models import KlineBars
 from ..trading.quote_models import QuotesData
 from ..trading.symbol_models import SymbolInfo
@@ -252,10 +253,10 @@ class AccountResponseData(CamelCaseModel):
     }
 
     字段说明:
-    - account: 账户详细信息（包含 Binance API 返回的完整字段）
+    - account: 账户详细信息（FuturesAccountData 或 SpotAccountData）
     """
 
-    account: dict[str, Any] | None = None
+    account: FuturesAccountData | SpotAccountData | None = None
 
 
 # ==================== 实时推送载荷 ====================

@@ -48,6 +48,17 @@ import type {
 } from '../../types/api'
 
 /**
+ * 图表配置数据类型
+ */
+export interface DatafeedConfiguration {
+  supports_search: boolean
+  supports_group_request: boolean
+  supported_resolutions: string[]
+  intraday_multipliers: string[]
+  symbols_types: Array<{ name: string; value: string }>
+}
+
+/**
  * 获取WebSocket URL
  */
 function getWSUrl(): string {
@@ -157,6 +168,21 @@ export class DataService {
     return this.wsClient!
   }
 
+  /**
+   * 通用请求方法
+   *
+   * @param requestType - 请求类型（如 'GET_CONFIG', 'GET_SEARCH_SYMBOLS'）
+   * @param params - 请求参数
+   * @returns 请求响应
+   */
+  async request<T = unknown>(
+    requestType: string,
+    params: Record<string, unknown> = {}
+  ): Promise<T> {
+    const ws = await this.ensureConnected()
+    return ws.request<T>(requestType as never, params)
+  }
+
   // ==================== 市场数据 ====================
 
   /**
@@ -210,6 +236,23 @@ export class DataService {
     // 转换响应格式为 QuotesList
     return {
       quotes: (response.quotes || []) as QuotesList['quotes'],
+    }
+  }
+
+  /**
+   * 获取图表数据源配置
+   *
+   * @returns 图表配置
+   */
+  async getConfig(): Promise<DatafeedConfiguration> {
+    const ws = await this.ensureConnected()
+
+    const response = await ws.request<{ config: DatafeedConfiguration }>('GET_CONFIG')
+
+    // 强制启用批量请求支持（Watchlist 需要此功能）
+    return {
+      ...response.config,
+      supports_group_request: true,
     }
   }
 
@@ -668,6 +711,52 @@ export class DataService {
     const ws = await this.ensureConnected()
 
     const response = await ws.request<OrderResponse>('GET_ORDER', params)
+
+    return response.order
+  }
+
+  /**
+   * 创建订单
+   *
+   * @param params - 订单参数
+   * @returns 创建的订单
+   */
+  async createOrder(params: {
+    symbol: string
+    side: string
+    orderType: string
+    quantity?: string
+    quoteOrderQty?: string
+    price?: string
+    timeInForce?: string
+    stopPrice?: string
+    reduceOnly?: boolean
+    positionSide?: string
+    clientOrderId?: string
+  }): Promise<Order> {
+    const ws = await this.ensureConnected()
+
+    // 生成客户端订单ID
+    const clientOrderId = params.clientOrderId || crypto.randomUUID().replace(/-/g, '')
+
+    const response = await ws.request<OrderResponse>('CREATE_ORDER', {
+      ...params,
+      clientOrderId,
+    })
+
+    return response.order
+  }
+
+  /**
+   * 取消订单
+   *
+   * @param params - 订单参数（symbol + orderId 或 origClientOrderId）
+   * @returns 取消的订单
+   */
+  async cancelOrder(params: { symbol: string; orderId?: number; origClientOrderId?: string }): Promise<Order> {
+    const ws = await this.ensureConnected()
+
+    const response = await ws.request<OrderResponse>('CANCEL_ORDER', params)
 
     return response.order
   }

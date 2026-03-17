@@ -48,7 +48,7 @@ function formatCommissionRate(value: string | number | undefined): string {
   return (num / 10000).toFixed(4) + '%'
 }
 
-// 格式化 commission_rates 中的字符串费率
+// 格式化 commissionRates 中的字符串费率
 function formatStringRate(value: string | undefined): string {
   if (!value) return '-'
   const num = parseFloat(value)
@@ -108,8 +108,8 @@ onMounted(() => {
 // 计算账户风险等级
 const riskLevel = computed(() => {
   if (!store.futuresAccount) return { level: 'unknown', label: '未知', color: 'default' as const }
-  const totalPnl = parseFloat(store.futuresAccount.total_unrealized_profit || '0')
-  const totalMargin = parseFloat(store.futuresAccount.total_initial_margin || '1')
+  const totalPnl = parseFloat(store.futuresAccount.totalUnrealizedProfit || '0')
+  const totalMargin = parseFloat(store.futuresAccount.totalInitialMargin || '1')
   const rate = totalPnl / totalMargin
 
   if (rate > 0.2) return { level: 'low', label: '低风险', color: 'success' as const }
@@ -153,15 +153,15 @@ const spotBalanceColumns = [
 // 期货资产表格列
 const futuresAssetColumns = [
   { title: '资产', key: 'asset', width: 80 },
-  { title: '钱包余额', key: 'wallet_balance', width: 120, render: (row: any) => formatNumber(row.wallet_balance) },
-  { title: '未实现盈亏', key: 'unrealized_profit', width: 120, render: (row: any) => h('span', { class: getPnlClass(row.unrealized_profit) }, (parseFloat(row.unrealized_profit) > 0 ? '+' : '') + formatNumber(row.unrealized_profit)) },
-  { title: '保证金余额', key: 'margin_balance', width: 120, render: (row: any) => formatNumber(row.margin_balance) },
-  { title: '可用余额', key: 'available_balance', width: 120, render: (row: any) => h('span', { class: 'text-success' }, formatNumber(row.available_balance)) },
-  { title: '初始保证金', key: 'initial_margin', width: 120, render: (row: any) => formatNumber(row.initial_margin) },
-  { title: '维持保证金', key: 'maint_margin', width: 120, render: (row: any) => formatNumber(row.maint_margin) },
-  { title: '可提现', key: 'max_withdraw_amount', width: 100, render: (row: any) => formatNumber(row.max_withdraw_amount) },
-  { title: '全仓余额', key: 'cross_wallet_balance', width: 120, render: (row: any) => formatNumber(row.cross_wallet_balance) },
-  { title: '联合保证金', key: 'margin_available', width: 90, render: (row: any) => row.margin_available ? h(NTag, { type: 'success', size: 'small' }, { default: () => '可用' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '不可用' }) },
+  { title: '钱包余额', key: 'walletBalance', width: 120, render: (row: any) => formatNumber(row.walletBalance) },
+  { title: '未实现盈亏', key: 'unrealizedProfit', width: 120, render: (row: any) => h('span', { class: getPnlClass(row.unrealizedProfit) }, (parseFloat(row.unrealizedProfit) > 0 ? '+' : '') + formatNumber(row.unrealizedProfit)) },
+  { title: '保证金余额', key: 'marginBalance', width: 120, render: (row: any) => formatNumber(row.marginBalance) },
+  { title: '可用余额', key: 'availableBalance', width: 120, render: (row: any) => h('span', { class: 'text-success' }, formatNumber(row.availableBalance)) },
+  { title: '初始保证金', key: 'initialMargin', width: 120, render: (row: any) => formatNumber(row.initialMargin) },
+  { title: '维持保证金', key: 'maintMargin', width: 120, render: (row: any) => formatNumber(row.maintMargin) },
+  { title: '可提现', key: 'maxWithdrawAmount', width: 100, render: (row: any) => formatNumber(row.maxWithdrawAmount) },
+  { title: '全仓余额', key: 'crossWalletBalance', width: 120, render: (row: any) => formatNumber(row.crossWalletBalance) },
+  { title: '联合保证金', key: 'marginAvailable', width: 90, render: (row: any) => row.marginAvailable ? h(NTag, { type: 'success', size: 'small' }, { default: () => '可用' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '不可用' }) },
 ]
 
 // 资产颜色映射
@@ -184,8 +184,8 @@ function getAssetColor(asset: string): string {
 // 总权益计算
 const totalEquity = computed(() => {
   if (!store.futuresAccount) return '0'
-  const wallet = parseFloat(store.futuresAccount.total_wallet_balance || '0')
-  const pnl = parseFloat(store.futuresAccount.total_unrealized_profit || '0')
+  const wallet = parseFloat(store.futuresAccount.totalWalletBalance || '0')
+  const pnl = parseFloat(store.futuresAccount.totalUnrealizedProfit || '0')
   return (wallet + pnl).toFixed(2)
 })
 </script>
@@ -211,8 +211,8 @@ const totalEquity = computed(() => {
           <div class="stat-metrics">
             <div class="metric">
               <span class="metric-label">未实现盈亏</span>
-              <span class="metric-value" :class="getPnlClass(store.futuresAccount?.total_unrealized_profit)">
-                {{ store.futuresAccount?.total_unrealized_profit && parseFloat(store.futuresAccount.total_unrealized_profit) > 0 ? '+' : '' }}{{ formatNumber(store.futuresAccount?.total_unrealized_profit) }}
+              <span class="metric-value" :class="getPnlClass(store.futuresAccount?.totalUnrealizedProfit)">
+                {{ store.futuresAccount?.totalUnrealizedProfit && parseFloat(store.futuresAccount.totalUnrealizedProfit) > 0 ? '+' : '' }}{{ formatNumber(store.futuresAccount?.totalUnrealizedProfit) }}
               </span>
             </div>
             <div class="metric">
@@ -224,11 +224,11 @@ const totalEquity = computed(() => {
         <div class="stat-side">
           <div class="side-item">
             <span class="side-label">可用</span>
-            <span class="side-value">{{ formatNumber(store.futuresAccount?.available_balance) }}</span>
+            <span class="side-value">{{ formatNumber(store.futuresAccount?.availableBalance) }}</span>
           </div>
           <div class="side-item">
             <span class="side-label">保证金</span>
-            <span class="side-value">{{ formatNumber(store.futuresAccount?.total_initial_margin) }}</span>
+            <span class="side-value">{{ formatNumber(store.futuresAccount?.totalInitialMargin) }}</span>
           </div>
         </div>
       </div>
@@ -241,7 +241,7 @@ const totalEquity = computed(() => {
         <div class="stat-content">
           <div class="stat-header">
             <span class="stat-label">现货账户</span>
-            <NTag :type="store.spotAccount?.can_trade ? 'success' : 'warning'" size="small">{{ store.spotAccount?.account_type || '标准账户' }}</NTag>
+            <NTag :type="store.spotAccount?.canTrade ? 'success' : 'warning'" size="small">{{ store.spotAccount?.accountType || '标准账户' }}</NTag>
           </div>
           <div class="stat-value-row">
             <span class="stat-value-lg">{{ store.spotLoading ? '加载中...' : store.spotBalances.length }}</span>
@@ -254,7 +254,7 @@ const totalEquity = computed(() => {
             </div>
             <div class="metric">
               <span class="metric-label">费率(M/T)</span>
-              <span class="metric-value">{{ formatStringRate(store.spotAccount?.commission_rates?.maker) }} / {{ formatStringRate(store.spotAccount?.commission_rates?.taker) }}</span>
+              <span class="metric-value">{{ formatStringRate(store.spotAccount?.commissionRates?.maker) }} / {{ formatStringRate(store.spotAccount?.commissionRates?.taker) }}</span>
             </div>
           </div>
         </div>
@@ -262,9 +262,9 @@ const totalEquity = computed(() => {
           <div class="side-item">
             <span class="side-label">权限</span>
             <div class="side-badges">
-              <NTag v-if="store.spotAccount?.can_trade" type="success" size="tiny">交易</NTag>
-              <NTag v-if="store.spotAccount?.can_deposit" type="info" size="tiny">充值</NTag>
-              <NTag v-if="store.spotAccount?.can_withdraw" type="warning" size="tiny">提现</NTag>
+              <NTag v-if="store.spotAccount?.canTrade" type="success" size="tiny">交易</NTag>
+              <NTag v-if="store.spotAccount?.canDeposit" type="info" size="tiny">充值</NTag>
+              <NTag v-if="store.spotAccount?.canWithdraw" type="warning" size="tiny">提现</NTag>
             </div>
           </div>
         </div>
@@ -301,12 +301,12 @@ const totalEquity = computed(() => {
             <div class="metric-card-footer">
               <div class="metric-detail">
                 <span class="label">钱包余额</span>
-                <span class="value">{{ formatNumber(store.futuresAccount?.total_wallet_balance) }}</span>
+                <span class="value">{{ formatNumber(store.futuresAccount?.totalWalletBalance) }}</span>
               </div>
               <div class="metric-detail">
                 <span class="label">未实现盈亏</span>
-                <span class="value" :class="getPnlClass(store.futuresAccount?.total_unrealized_profit)">
-                  {{ store.futuresAccount?.total_unrealized_profit && parseFloat(store.futuresAccount.total_unrealized_profit) > 0 ? '+' : '' }}{{ formatNumber(store.futuresAccount?.total_unrealized_profit) }}
+                <span class="value" :class="getPnlClass(store.futuresAccount?.totalUnrealizedProfit)">
+                  {{ store.futuresAccount?.totalUnrealizedProfit && parseFloat(store.futuresAccount.totalUnrealizedProfit) > 0 ? '+' : '' }}{{ formatNumber(store.futuresAccount?.totalUnrealizedProfit) }}
                 </span>
               </div>
             </div>
@@ -319,16 +319,16 @@ const totalEquity = computed(() => {
               <span>可用资金 (Available)</span>
             </div>
             <div class="metric-card-value success">
-              {{ formatNumber(store.futuresAccount?.available_balance) }} <span class="unit">USDT</span>
+              {{ formatNumber(store.futuresAccount?.availableBalance) }} <span class="unit">USDT</span>
             </div>
             <div class="metric-card-footer">
               <div class="metric-detail">
                 <span class="label">最大可提现</span>
-                <span class="value">{{ formatNumber(store.futuresAccount?.max_withdraw_amount) }}</span>
+                <span class="value">{{ formatNumber(store.futuresAccount?.maxWithdrawAmount) }}</span>
               </div>
               <div class="metric-detail">
                 <span class="label">挂单保证金</span>
-                <span class="value">{{ formatNumber(store.futuresAccount?.total_open_order_initial_margin) }}</span>
+                <span class="value">{{ formatNumber(store.futuresAccount?.totalOpenOrderInitialMargin) }}</span>
               </div>
             </div>
           </NCard>
@@ -340,16 +340,16 @@ const totalEquity = computed(() => {
               <span>保证金状态 (Margin)</span>
             </div>
             <div class="metric-card-value">
-              {{ formatNumber(store.futuresAccount?.total_margin_balance) }} <span class="unit">USDT</span>
+              {{ formatNumber(store.futuresAccount?.totalMarginBalance) }} <span class="unit">USDT</span>
             </div>
             <div class="metric-card-footer">
               <div class="metric-detail">
                 <span class="label">初始保证金</span>
-                <span class="value">{{ formatNumber(store.futuresAccount?.total_initial_margin) }}</span>
+                <span class="value">{{ formatNumber(store.futuresAccount?.totalInitialMargin) }}</span>
               </div>
               <div class="metric-detail">
                 <span class="label">维持保证金</span>
-                <span class="value">{{ formatNumber(store.futuresAccount?.total_maint_margin) }}</span>
+                <span class="value">{{ formatNumber(store.futuresAccount?.totalMaintMargin) }}</span>
               </div>
             </div>
           </NCard>
@@ -363,7 +363,7 @@ const totalEquity = computed(() => {
             <div class="info-grid">
               <div class="info-item">
                 <span class="info-label">更新于</span>
-                <span class="info-value">{{ formatTime(store.futuresAssets?.[0]?.update_time) }}</span>
+                <span class="info-value">{{ formatTime(store.futuresAssets?.[0]?.updateTime) }}</span>
               </div>
             </div>
           </NCard>
@@ -438,12 +438,12 @@ const totalEquity = computed(() => {
               <span>账户信息</span>
             </div>
             <div class="metric-card-value">
-              {{ store.spotAccount?.account_type || '标准账户' }}
+              {{ store.spotAccount?.accountType || '标准账户' }}
             </div>
             <div class="account-permissions">
-              <NTag v-if="store.spotAccount?.can_trade" type="success" size="small">可交易</NTag>
-              <NTag v-if="store.spotAccount?.can_deposit" type="info" size="small">可充值</NTag>
-              <NTag v-if="store.spotAccount?.can_withdraw" type="warning" size="small">可提现</NTag>
+              <NTag v-if="store.spotAccount?.canTrade" type="success" size="small">可交易</NTag>
+              <NTag v-if="store.spotAccount?.canDeposit" type="info" size="small">可充值</NTag>
+              <NTag v-if="store.spotAccount?.canWithdraw" type="warning" size="small">可提现</NTag>
             </div>
             <div class="metric-card-footer" v-if="store.spotAccount?.uid">
               <span class="label">用户ID: {{ store.spotAccount?.uid }}</span>
@@ -456,16 +456,16 @@ const totalEquity = computed(() => {
               <span>手续费率 (Maker/Taker)</span>
             </div>
             <div class="metric-card-value">
-              {{ formatStringRate(store.spotAccount?.commission_rates?.maker) }} <span class="unit">/</span> {{ formatStringRate(store.spotAccount?.commission_rates?.taker) }}
+              {{ formatStringRate(store.spotAccount?.commissionRates?.maker) }} <span class="unit">/</span> {{ formatStringRate(store.spotAccount?.commissionRates?.taker) }}
             </div>
             <div class="metric-card-footer">
               <div class="metric-detail">
                 <span class="label">挂单</span>
-                <span class="value">{{ formatStringRate(store.spotAccount?.commission_rates?.maker) }}</span>
+                <span class="value">{{ formatStringRate(store.spotAccount?.commissionRates?.maker) }}</span>
               </div>
               <div class="metric-detail">
                 <span class="label">吃单</span>
-                <span class="value">{{ formatStringRate(store.spotAccount?.commission_rates?.taker) }}</span>
+                <span class="value">{{ formatStringRate(store.spotAccount?.commissionRates?.taker) }}</span>
               </div>
             </div>
           </NCard>
@@ -476,10 +476,10 @@ const totalEquity = computed(() => {
               <span>交易手续费 (Buyer/Seller)</span>
             </div>
             <div class="metric-card-value small">
-              买入: {{ formatStringRate(store.spotAccount?.commission_rates?.buyer) }}
+              买入: {{ formatStringRate(store.spotAccount?.commissionRates?.buyer) }}
             </div>
             <div class="metric-card-value small">
-              卖出: {{ formatStringRate(store.spotAccount?.commission_rates?.seller) }}
+              卖出: {{ formatStringRate(store.spotAccount?.commissionRates?.seller) }}
             </div>
           </NCard>
 
@@ -495,39 +495,39 @@ const totalEquity = computed(() => {
               </div>
               <div class="info-item">
                 <span class="info-label">自成交防护</span>
-                <span class="info-value">{{ store.spotAccount?.require_self_trade_prevention ? '开启' : '关闭' }}</span>
+                <span class="info-value">{{ store.spotAccount?.requireSelfTradePrevention ? '开启' : '关闭' }}</span>
               </div>
               <div class="info-item">
                 <span class="info-label">SOR防护</span>
-                <span class="info-value">{{ store.spotAccount?.prevent_sor ? '开启' : '关闭' }}</span>
+                <span class="info-value">{{ store.spotAccount?.preventSor ? '开启' : '关闭' }}</span>
               </div>
               <div class="info-item">
                 <span class="info-label">更新时间</span>
-                <span class="info-value">{{ formatTime(store.spotAccount?.update_time) }}</span>
+                <span class="info-value">{{ formatTime(store.spotAccount?.updateTime) }}</span>
               </div>
             </div>
           </NCard>
         </div>
 
         <!-- 详细费率卡片 -->
-        <div class="detail-row" v-if="store.spotAccount?.commission_rates">
+        <div class="detail-row" v-if="store.spotAccount?.commissionRates">
           <NCard title="详细费率 (Commission Rates)" class="detail-card full-width">
             <div class="commission-rates-grid">
               <div class="rate-item">
                 <span class="rate-label">挂单 (Maker)</span>
-                <span class="rate-value">{{ formatStringRate(store.spotAccount?.commission_rates?.maker) }}</span>
+                <span class="rate-value">{{ formatStringRate(store.spotAccount?.commissionRates?.maker) }}</span>
               </div>
               <div class="rate-item">
                 <span class="rate-label">吃单 (Taker)</span>
-                <span class="rate-value">{{ formatStringRate(store.spotAccount?.commission_rates?.taker) }}</span>
+                <span class="rate-value">{{ formatStringRate(store.spotAccount?.commissionRates?.taker) }}</span>
               </div>
               <div class="rate-item">
                 <span class="rate-label">买入 (Buyer)</span>
-                <span class="rate-value">{{ formatStringRate(store.spotAccount?.commission_rates?.buyer) }}</span>
+                <span class="rate-value">{{ formatStringRate(store.spotAccount?.commissionRates?.buyer) }}</span>
               </div>
               <div class="rate-item">
                 <span class="rate-label">卖出 (Seller)</span>
-                <span class="rate-value">{{ formatStringRate(store.spotAccount?.commission_rates?.seller) }}</span>
+                <span class="rate-value">{{ formatStringRate(store.spotAccount?.commissionRates?.seller) }}</span>
               </div>
             </div>
           </NCard>

@@ -828,9 +828,53 @@ class OrderData(CamelCaseModel):
 | `totalCrossUnPnl` | str | 全仓未实现盈亏（仅 USDT 资产） |
 | `availableBalance` | str | 可用余额 |
 | `maxWithdrawAmount` | str | 最大可转出金额 |
-| `assets` | list[dict] | 资产列表 |
-| `positions` | list[dict] | 持仓列表 |
+| `feeTier` | int | 账户手续费等级 |
+| `feeBurn` | bool | 是否开启手续费折扣: true=折扣开启, false=折扣关闭 |
+| `multiAssetsMargin` | bool | 是否为多资产模式 |
+| `tradeGroupId` | int | 交易组ID |
+| `updateTime` | long | 更新时间（毫秒） |
+| `assets` | list | 资产列表 |
+| `positions` | list | 持仓列表 |
 | `rateLimits` | list[dict] | 速率限制信息 |
+
+**Assets（资产列表）数组元素字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `asset` | str | 资产名称（如 USDT, BUSD, BTC） |
+| `walletBalance` | str | 余额 |
+| `unrealizedProfit` | str | 未实现盈亏 |
+| `marginBalance` | str | 保证金余额 |
+| `maintMargin` | str | 维持保证金 |
+| `initialMargin` | str | 当前所需起始保证金 |
+| `positionInitialMargin` | str | 持仓所需起始保证金（基于最新标记价格） |
+| `openOrderInitialMargin` | str | 当前挂单所需起始保证金（基于最新标记价格） |
+| `crossWalletBalance` | str | 全仓账户余额 |
+| `crossUnPnl` | str | 全仓持仓未实现盈亏 |
+| `availableBalance` | str | 可用余额 |
+| `maxWithdrawAmount` | str | 最大可转出余额 |
+| `marginAvailable` | bool | 该资产是否可用作多资产模式的保证金 |
+| `updateTime` | long | 更新时间（毫秒） |
+
+**Positions（持仓列表）数组元素字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `symbol` | str | 交易对符号（如 BTCUSDT） |
+| `initialMargin` | str | 持仓所需起始保证金（基于最新标记价格） |
+| `maintMargin` | str | 维持保证金 |
+| `unrealizedProfit` | str | 持仓未实现盈亏 |
+| `positionInitialMargin` | str | 持仓所需起始保证金（基于最新标记价格） |
+| `openOrderInitialMargin` | str | 当前挂单所需起始保证金（基于最新标记价格） |
+| `leverage` | str | 当前杠杆倍数 |
+| `isolated` | bool | 是否为逐仓 |
+| `entryPrice` | str | 平均入场价格 |
+| `maxNotional` | str | 当前杠杆下的最大可用名义价值 |
+| `bidNotional` | str | 买单名义价值（忽略） |
+| `askNotional` | str | 卖单名义价值（忽略） |
+| `positionSide` | str | 持仓方向: BOTH(单向), LONG(多头), SHORT(空头) |
+| `positionAmt` | str | 持仓数量 |
+| `updateTime` | long | 更新时间（毫秒） |
 
 > **JSON 示例**: 参考 WS 协议文档 `1.6 获取期货账户信息` 节
 
@@ -840,7 +884,7 @@ class OrderData(CamelCaseModel):
 
 **模型**: `SpotAccountData` - 对应 WS协议 `GET_SPOT_ACCOUNT` 响应
 
-> **数据来源**: Binance WebSocket API (`account.status`)
+> **数据来源**: Binance REST API (`GET /api/v3/account`)
 
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
@@ -864,9 +908,27 @@ class OrderData(CamelCaseModel):
 | `preventSor` | bool | 是否阻止 SOR |
 | `updateTime` | int | 最后更新时间（毫秒） |
 | `accountType` | str | 账户类型 |
-| `balances` | list[dict] | 余额列表 |
+| `balances` | list | 余额列表 |
 | `permissions` | list[str] | 权限列表 |
+| `uid` | long | 用户ID |
 | `rateLimits` | list[dict] | 速率限制信息 |
+
+**CommissionRates（手续费率详情）字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `maker` | str | 挂单手续费率 |
+| `taker` | str | 吃单手续费率 |
+| `buyer` | str | 买入手续费率 |
+| `seller` | str | 卖出手续费率 |
+
+**Balances（余额列表）数组元素字段**：
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `asset` | str | 资产名称 |
+| `free` | str | 可用数量 |
+| `locked` | str | 锁定数量 |
 
 > **JSON 示例**: 参考 WS 协议文档 `1.7 获取现货账户信息` 节
 

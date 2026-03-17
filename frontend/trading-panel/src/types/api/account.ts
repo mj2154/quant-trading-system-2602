@@ -34,44 +34,67 @@ export interface SpotCommissionRates {
 }
 
 /**
- * 现货账户信息
+ * 现货账户详情
  *
- * 对应后端 SpotAccountInfo
+ * 对应后端 SpotAccountDetail
+ * 设计文档: 08-api-models.md
  */
-export interface SpotAccountInfo {
+export interface SpotAccountDetail {
   /** 挂单手续费率 */
-  makerCommission: number | string
+  makerCommission?: number
   /** 吃单手续费率 */
-  takerCommission: number | string
+  takerCommission?: number
   /** 买入手续费率 */
-  buyerCommission: number | string
+  buyerCommission?: number
   /** 卖出手续费率 */
-  sellerCommission: number | string
+  sellerCommission?: number
   /** 手续费率详情 */
-  commissionRates: SpotCommissionRates | null
+  commissionRates?: SpotCommissionRates | null
   /** 是否可以交易 */
-  canTrade: boolean
+  canTrade?: boolean
   /** 是否可以提现 */
-  canWithdraw: boolean
+  canWithdraw?: boolean
   /** 是否可以充值 */
-  canDeposit: boolean
+  canDeposit?: boolean
   /** 是否是经纪商 */
-  brokered: boolean
+  brokered?: boolean
   /** 是否需要自成交预防 */
-  requireSelfTradePrevention: boolean
+  requireSelfTradePrevention?: boolean
   /** 是否阻止 SOR */
-  preventSor: boolean
+  preventSor?: boolean
   /** 更新时间 */
-  updateTime: number
+  updateTime?: number
   /** 账户类型 */
-  accountType: string
+  accountType?: string
   /** 余额列表 */
-  balances: SpotBalance[]
+  balances?: SpotBalance[]
   /** 权限列表 */
-  permissions: string[]
+  permissions?: string[]
   /** 用户ID */
   uid?: number
+  /** 速率限制信息 */
+  rateLimits?: Record<string, unknown>[]
 }
+
+/**
+ * 现货账户数据（外层包装）
+ *
+ * 对应后端 SpotAccountData
+ * 设计文档: 08-api-models.md
+ */
+export interface SpotAccountData {
+  /** 账户类型 */
+  accountType: string
+  /** 账户详情 */
+  account: SpotAccountDetail
+}
+
+/**
+ * 现货账户信息（别名，保持向后兼容）
+ *
+ * @deprecated 请使用 SpotAccountDetail
+ */
+export type SpotAccountInfo = SpotAccountDetail
 
 // ==================== 期货账户类型 ====================
 
@@ -140,11 +163,12 @@ export interface FuturesPosition {
 }
 
 /**
- * 期货账户信息
+ * 期货账户详情
  *
- * 对应后端 FuturesAccountInfo (V3 API)
+ * 对应后端 FuturesAccountDetail (V3 API)
+ * 设计文档: 08-api-models.md
  */
-export interface FuturesAccountInfo {
+export interface FuturesAccountDetail {
   /** 账户总起始保证金 */
   totalInitialMargin?: string
   /** 账户总维持保证金 */
@@ -162,18 +186,48 @@ export interface FuturesAccountInfo {
   /** 全仓钱包余额 */
   totalCrossWalletBalance?: string
   /** 全仓未实现盈亏 */
-  totalCrossUnrealizedProfit?: string
+  totalCrossUnPnl?: string
   /** 可用余额 */
   availableBalance?: string
   /** 最大可转出余额 */
   maxWithdrawAmount?: string
+  /** 账户手续费等级 */
+  feeTier?: number
+  /** 是否开启手续费折扣 */
+  feeBurn?: boolean
+  /** 是否为多资产模式 */
+  multiAssetsMargin?: boolean
+  /** 交易组ID */
+  tradeGroupId?: number
   /** 更新时间 */
   updateTime?: number
   /** 资产列表 */
   assets: FuturesAsset[]
   /** 持仓列表 */
   positions: FuturesPosition[]
+  /** 速率限制信息 */
+  rateLimits?: Record<string, unknown>[]
 }
+
+/**
+ * 期货账户数据（外层包装）
+ *
+ * 对应后端 FuturesAccountData
+ * 设计文档: 08-api-models.md
+ */
+export interface FuturesAccountData {
+  /** 账户类型 */
+  accountType: string
+  /** 账户详情 */
+  account: FuturesAccountDetail
+}
+
+/**
+ * 期货账户信息（别名，保持向后兼容）
+ *
+ * @deprecated 请使用 FuturesAccountDetail
+ */
+export type FuturesAccountInfo = FuturesAccountDetail
 
 // ==================== 统一账户类型 ====================
 

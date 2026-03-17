@@ -566,15 +566,33 @@ class DataProcessor:
                 return
 
             # 构建响应 - 使用 AccountResponseData 模型
-            # 严格遵循07-websocket-protocol.md规范：账户信息采用透传模式
-            # 数据格式: { "account": { ...Binance API原始数据... } }
+            # 严格遵循设计文档08-api-models.md规范：使用具体Pydantic模型
             from ..models.protocol.ws_payload import AccountResponseData
+            from ..models.trading.account_models import (
+                FuturesAccountData,
+                SpotAccountData,
+                FuturesAccountDetail,
+                SpotAccountDetail,
+            )
 
             # account_info 结构: {"data": <Binance API原始数据>, "update_time": ..., ...}
-            # 透传模式：直接传递原始数据
-            task_data = AccountResponseData(
-                account=account_info.get("data"),
-            )
+            # 根据账户类型转换为对应的Pydantic模型
+            raw_data = account_info.get("data", {})
+            account_model: FuturesAccountData | SpotAccountData
+            if account_type == "FUTURES":
+                # raw_data 是账户详情字典，需要包装成 FuturesAccountDetail 再包装成 FuturesAccountData
+                account_model = FuturesAccountData(
+                    account_type="FUTURES",
+                    account=FuturesAccountDetail(**raw_data),
+                )
+            else:
+                # 现货账户
+                account_model = SpotAccountData(
+                    account_type="SPOT",
+                    account=SpotAccountDetail(**raw_data),
+                )
+
+            task_data = AccountResponseData(account=account_model)
 
             # 使用 MessageSuccess 模型构建响应
             # 严格遵循07-websocket-protocol.md规范：使用具体数据类型

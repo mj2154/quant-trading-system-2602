@@ -23,23 +23,66 @@ import pytest
 class TestAccountAPI:
     """账户查询测试
 
-    注意：账户信息采用透传模式，data.account 包含 Binance API 返回的原始数据。
-    具体字段取决于 Binance API 返回的实际数据格式，测试只需验证基本结构。
+    严格遵循设计文档 08-api-models.md 规定的字段结构。
+
+    数据模型：
+    - FuturesAccountData: account_type="FUTURES", account=FuturesAccountDetail
+    - SpotAccountData: account_type="SPOT", account=SpotAccountDetail
     """
+
+    # 设计文档规定的期货账户必填字段
+    FUTURES_ACCOUNT_REQUIRED_FIELDS = [
+        "accountType",  # 固定值 "FUTURES"
+        "account",  # 账户详情对象
+    ]
+
+    # 设计文档规定的期货账户详情必填字段
+    FUTURES_ACCOUNT_DETAIL_REQUIRED_FIELDS = [
+        "totalInitialMargin",
+        "totalMaintMargin",
+        "totalWalletBalance",
+        "totalUnrealizedProfit",
+        "totalMarginBalance",
+        "assets",
+        "positions",
+    ]
+
+    # 设计文档规定的现货账户必填字段
+    SPOT_ACCOUNT_REQUIRED_FIELDS = [
+        "accountType",  # 固定值 "SPOT"
+        "account",  # 账户详情对象
+    ]
+
+    # 设计文档规定的现货账户详情必填字段
+    SPOT_ACCOUNT_DETAIL_REQUIRED_FIELDS = [
+        "makerCommission",
+        "takerCommission",
+        "canTrade",
+        "canWithdraw",
+        "canDeposit",
+        "balances",
+    ]
 
     @pytest.mark.ws
     async def test_get_futures_account_response_format(self, ws_connected_client):
         """测试 GET_FUTURES_ACCOUNT 响应格式
 
-        设计文档: 07-websocket-protocol.md
+        设计文档: 08-api-models.md
         响应类型: ACCOUNT_DATA
+        数据模型: FuturesAccountData
 
-        设计文档规定格式（透传模式）:
+        设计文档规定格式:
         {
             "type": "ACCOUNT_DATA",
             "data": {
                 "account": {
-                    // 透传 Binance API 返回的完整 JSON 数据
+                    "accountType": "FUTURES",
+                    "account": {
+                        "totalInitialMargin": "...",
+                        "totalWalletBalance": "...",
+                        "assets": [...],
+                        "positions": [...]
+                    }
                 }
             }
         }
@@ -57,32 +100,67 @@ class TestAccountAPI:
         assert "requestId" in response, "缺少 requestId 字段"
         assert "timestamp" in response, "缺少 timestamp 字段"
 
-        # 验证 data.account 字段（透传模式：包含 Binance API 返回的原始数据）
+        # 验证 data 字段
         assert "data" in response, "缺少 data 字段"
         data = response["data"]
+
+        # 验证 account 字段
         assert "account" in data, \
             f"data.account 字段不存在，实际 data 包含: {list(data.keys())}"
 
         account = data["account"]
-        # 透传模式下，account 是 Binance API 返回的原始数据，只需验证不为空
-        assert account is not None and len(account) > 0, \
-            f"account 字段不应为空"
+        assert account is not None, "account 字段不应为 None"
 
-        print(f"[DEBUG] 期货账户响应符合设计文档（透传模式）: account 包含 {len(account)} 个字段")
+        # 验证设计文档规定的必填字段
+        for field in self.FUTURES_ACCOUNT_REQUIRED_FIELDS:
+            assert field in account, \
+                f"FuturesAccountData 缺少必填字段 {field}，实际字段: {list(account.keys())}"
+
+        # 验证 accountType 值为 "FUTURES"
+        assert account["accountType"] == "FUTURES", \
+            f"accountType 应为 FUTURES，实际为 {account['accountType']}"
+
+        # 验证 account 详情字段
+        account_detail = account["account"]
+        assert account_detail is not None, "account.account 字段不应为 None"
+        assert isinstance(account_detail, dict), "account.account 应为对象"
+
+        for field in self.FUTURES_ACCOUNT_DETAIL_REQUIRED_FIELDS:
+            assert field in account_detail, \
+                f"FuturesAccountDetail 缺少必填字段 {field}，实际字段: {list(account_detail.keys())}"
+
+        # 验证 assets 和 positions 为数组
+        assert isinstance(account_detail["assets"], list), "assets 应为数组"
+        assert isinstance(account_detail["positions"], list), "positions 应为数组"
+
+        print(f"[DEBUG] 期货账户响应符合设计文档 08-api-models.md")
+        print(f"  - accountType: {account['accountType']}")
+        print(f"  - account 包含字段: {list(account_detail.keys())}")
+        print(f"  - assets 数量: {len(account_detail['assets'])}")
+        print(f"  - positions 数量: {len(account_detail['positions'])}")
 
     @pytest.mark.ws
     async def test_get_spot_account_response_format(self, ws_connected_client):
         """测试 GET_SPOT_ACCOUNT 响应格式
 
-        设计文档: 07-websocket-protocol.md
+        设计文档: 08-api-models.md
         响应类型: ACCOUNT_DATA
+        数据模型: SpotAccountData
 
-        设计文档规定格式（透传模式）:
+        设计文档规定格式:
         {
             "type": "ACCOUNT_DATA",
             "data": {
                 "account": {
-                    // 透传 Binance API 返回的完整 JSON 数据
+                    "accountType": "SPOT",
+                    "account": {
+                        "makerCommission": 0,
+                        "takerCommission": 0,
+                        "canTrade": true,
+                        "canWithdraw": true,
+                        "canDeposit": true,
+                        "balances": [...]
+                    }
                 }
             }
         }
@@ -100,18 +178,42 @@ class TestAccountAPI:
         assert "requestId" in response, "缺少 requestId 字段"
         assert "timestamp" in response, "缺少 timestamp 字段"
 
-        # 验证 data.account 字段（透传模式）
+        # 验证 data 字段
         assert "data" in response, "缺少 data 字段"
         data = response["data"]
+
+        # 验证 account 字段
         assert "account" in data, \
             f"data.account 字段不存在，实际 data 包含: {list(data.keys())}"
 
         account = data["account"]
-        # 透传模式下，account 是 Binance API 返回的原始数据，只需验证不为空
-        assert account is not None and len(account) > 0, \
-            f"account 字段不应为空"
+        assert account is not None, "account 字段不应为 None"
 
-        print(f"[DEBUG] 现货账户响应符合设计文档（透传模式）: account 包含 {len(account)} 个字段")
+        # 验证设计文档规定的必填字段
+        for field in self.SPOT_ACCOUNT_REQUIRED_FIELDS:
+            assert field in account, \
+                f"SpotAccountData 缺少必填字段 {field}，实际字段: {list(account.keys())}"
+
+        # 验证 accountType 值为 "SPOT"
+        assert account["accountType"] == "SPOT", \
+            f"accountType 应为 SPOT，实际为 {account['accountType']}"
+
+        # 验证 account 详情字段
+        account_detail = account["account"]
+        assert account_detail is not None, "account.account 字段不应为 None"
+        assert isinstance(account_detail, dict), "account.account 应为对象"
+
+        for field in self.SPOT_ACCOUNT_DETAIL_REQUIRED_FIELDS:
+            assert field in account_detail, \
+                f"SpotAccountDetail 缺少必填字段 {field}，实际字段: {list(account_detail.keys())}"
+
+        # 验证 balances 为数组
+        assert isinstance(account_detail["balances"], list), "balances 应为数组"
+
+        print(f"[DEBUG] 现货账户响应符合设计文档 08-api-models.md")
+        print(f"  - accountType: {account['accountType']}")
+        print(f"  - account 包含字段: {list(account_detail.keys())}")
+        print(f"  - balances 数量: {len(account_detail['balances'])}")
 
 
 class TestOrderAPI:

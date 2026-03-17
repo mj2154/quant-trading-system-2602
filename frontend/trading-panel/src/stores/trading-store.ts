@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { dataService } from '../services/data-service/DataService'
 import type {
   Order,
   CreateOrderParams,
@@ -7,7 +8,6 @@ import type {
   OrderUpdate,
   OrderListResponse,
 } from '../types/api'
-import type { TradingMessage } from '../types/trading-types'
 
 // Development mode flag
 const isDev = import.meta.env.DEV
@@ -17,114 +17,6 @@ function log(level: 'log' | 'error', message: string, ...args: unknown[]) {
   if (level === 'error' || isDev) {
     console[level](`[TradingStore] ${message}`, ...args)
   }
-}
-
-// Generate unique request ID (UUID v4 hex 格式，32字符，符合 WS 协议规范)
-// 格式: 550e8400e29b41d4a716446655440000
-function generateRequestId(): string {
-  return crypto.randomUUID().replace(/-/g, '')
-}
-
-// WebSocket connection management
-let wsConnection: WebSocket | null = null
-const messageHandlers = new Map<string, (data: unknown) => void>()
-
-function getWebSocketUrl(): string {
-  // Get WebSocket URL from environment - fail if not configured in production
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = import.meta.env.VITE_WS_HOST
-  if (!host) {
-    if (isDev) {
-      log('log', 'VITE_WS_HOST not set, using localhost:8000 for development')
-      return `${wsProtocol}//localhost:8000/ws`
-    }
-    throw new Error('VITE_WS_HOST environment variable is required')
-  }
-  return `${wsProtocol}//${host}/ws`
-}
-
-function connectWebSocket(): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-      resolve(wsConnection)
-      return
-    }
-
-    try {
-      wsConnection = new WebSocket(getWebSocketUrl())
-
-      wsConnection.onopen = () => {
-        log('log', 'WebSocket connected')
-        resolve(wsConnection!)
-      }
-
-      wsConnection.onerror = (error) => {
-        log('error', 'WebSocket error:', error)
-        reject(error)
-      }
-
-      wsConnection.onclose = () => {
-        log('log', 'WebSocket closed')
-        wsConnection = null
-      }
-
-      wsConnection.onmessage = (event) => {
-        try {
-          const message: TradingMessage = JSON.parse(event.data)
-          // 协议格式：响应消息通过 requestId 关联请求
-          // ACK 和 SUCCESS/ERROR 都带有 requestId 字段
-          const requestId = message.requestId
-          if (requestId && messageHandlers.has(requestId)) {
-            const handler = messageHandlers.get(requestId)
-            if (handler) {
-              handler(message.data)
-            }
-          }
-        } catch (e) {
-          log('error', 'Failed to parse message:', e)
-        }
-      }
-    } catch (error) {
-      reject(error)
-    }
-  })
-}
-
-function sendMessage<T>(type: string, data?: unknown): Promise<T> {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const ws = await connectWebSocket()
-      // 协议格式：requestId 使用随机字符串，符合 07-websocket-protocol.md 规范
-      const requestId = generateRequestId()
-
-      // Set up one-time handler for response (根据 requestId 匹配)
-      messageHandlers.set(requestId, (responseData) => {
-        messageHandlers.delete(requestId)
-        resolve(responseData as T)
-      })
-
-      // 协议格式：严格遵循 07-websocket-protocol.md 规定的请求消息格式
-      const message = {
-        protocolVersion: '2.0',
-        type,
-        requestId,
-        timestamp: Date.now(),
-        data,
-      }
-
-      ws.send(JSON.stringify(message))
-
-      // Timeout after 30 seconds
-      setTimeout(() => {
-        if (messageHandlers.has(requestId)) {
-          messageHandlers.delete(requestId)
-          reject(new Error(`Request ${type} timed out`))
-        }
-      }, 30000)
-    } catch (error) {
-      reject(error)
-    }
-  })
 }
 
 export const useTradingStore = defineStore('trading', () => {
@@ -252,7 +144,8 @@ export const useTradingStore = defineStore('trading', () => {
 
       // Send to server
       try {
-        const response = await sendMessage<Order>('CREATE_ORDER', {
+        // 使用 DataService 创建订单
+        const response = await dataService.createOrder({
           ...params,
           clientOrderId,
         })
@@ -299,7 +192,8 @@ export const useTradingStore = defineStore('trading', () => {
       }
 
       // Fetch from server
-      const response = await sendMessage<Order>('GET_ORDER', { clientOrderId })
+      // 使用 DataService 获取订单详情
+      const response = await dataService.getOrder({ origClientOrderId: clientOrderId })
 
       if (response) {
         // Update local cache (immutable update)
@@ -327,20 +221,14 @@ export const useTradingStore = defineStore('trading', () => {
     error.value = null
 
     try {
-      // Fetch from server
-      const response = await sendMessage<OrderListResponse>('LIST_ORDERS', filters || {})
-
-      // 解析响应: 后端返回 { type: "order_list", orders: [...], count: N }
-      // 需要从 response.data 中提取 orders 和 count
-      const responseData = response as { type?: string; orders?: Order[]; count?: number } | undefined
-      const ordersArray = Array.isArray(responseData?.orders) ? responseData.orders : []
-      const count = typeof responseData?.count === 'number' ? responseData.count : ordersArray.length
+      // 使用 DataService 获取订单列表
+      const response = await dataService.listOrders(filters)
 
       // Update local cache
-      orders.value = ordersArray
+      orders.value = response.orders
       lastUpdate.value = new Date()
 
-      return { orders: ordersArray, count }
+      return { orders: response.orders, count: response.count }
     } catch (e) {
       log('error', 'Failed to fetch orders:', e)
       error.value = e instanceof Error ? e.message : 'Failed to fetch orders'
@@ -355,19 +243,14 @@ export const useTradingStore = defineStore('trading', () => {
     error.value = null
 
     try {
-      // Fetch from server - 通过 symbol 参数筛选，不传则返回所有
-      const response = await sendMessage<Order[]>('GET_OPEN_ORDERS', { symbol })
-
-      // 解析响应: 后端返回 { type: "open_orders", orders: [...] }
-      // 需要从 response 中提取 orders 数组
-      const responseData = response as { type?: string; orders?: Order[] } | undefined
-      const ordersArray = Array.isArray(responseData?.orders) ? responseData.orders : []
+      // 使用 DataService 获取挂单列表
+      const response = await dataService.getOpenOrders(symbol)
 
       // Update local cache
-      openOrders.value = ordersArray
+      openOrders.value = response.orders
       lastUpdate.value = new Date()
 
-      return ordersArray
+      return response.orders
     } catch (e) {
       log('error', 'Failed to fetch open orders:', e)
       error.value = e instanceof Error ? e.message : 'Failed to fetch open orders'
@@ -388,8 +271,17 @@ export const useTradingStore = defineStore('trading', () => {
         throw new Error('Order not found')
       }
 
-      // Send cancel request to server
-      const response = await sendMessage<Order>('CANCEL_ORDER', { clientOrderId })
+      // 获取订单的 symbol
+      const order = orders.value[index]
+      if (!order) {
+        throw new Error('Order not found')
+      }
+
+      // 使用 DataService 取消订单
+      const response = await dataService.cancelOrder({
+        symbol: order.symbol,
+        origClientOrderId: clientOrderId,
+      })
 
       // Update order status (immutable update)
       const orderIndex = orders.value.findIndex((o) => o.clientOrderId === clientOrderId)

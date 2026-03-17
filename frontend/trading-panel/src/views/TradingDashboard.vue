@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { NGrid, NGridItem, NCard, NTabs, NTabPane } from 'naive-ui'
 import { useTradingStore } from '../stores/trading-store'
+import { dataService } from '../services/data-service/DataService'
 import SpotOrderForm from '../components/trading/SpotOrderForm.vue'
 
 // Development mode flag
@@ -16,72 +17,34 @@ function log(level: 'log' | 'error', message: string, ...args: unknown[]) {
 
 const tradingStore = useTradingStore()
 
-// WebSocket subscription for order updates
-let ws: WebSocket | null = null
+// 取消订阅函数
+let unsubscribeOrder: (() => void) | null = null
 
-function connectWebSocket() {
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = import.meta.env.VITE_WS_HOST
-  if (!host) {
-    if (isDev) {
-      log('log', 'VITE_WS_HOST not set, using localhost:8000 for development')
-    } else {
-      log('error', 'VITE_WS_HOST environment variable is required in production')
-      return
-    }
-  }
-  const url = `${wsProtocol}//${host || 'localhost:8000'}/ws`
-
+function setupOrderSubscription() {
   try {
-    ws = new WebSocket(url)
-
-    ws.onopen = () => {
-      log('log', 'WebSocket connected')
-      // Subscribe to order updates (遵循 07-websocket-protocol.md 订阅消息格式)
-      ws?.send(
-        JSON.stringify({
-          protocolVersion: '2.0',
-          type: 'SUBSCRIBE',
-          timestamp: Date.now(),
-          data: {
-            subscriptions: ['TRADING:ORDER'],
-          },
-        })
-      )
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data)
-        if (message.type === 'ORDER_UPDATE') {
-          tradingStore.handleOrderUpdate(message.data)
-        }
-      } catch (e) {
-        log('error', 'Failed to parse message:', e)
+    // 使用 DataService 订阅订单更新
+    unsubscribeOrder = dataService.subscribe('TRADING:ORDER', (data) => {
+      log('log', 'Received order update:', data)
+      // 处理订单更新
+      if (data && typeof data === 'object' && 'clientOrderId' in data) {
+        tradingStore.handleOrderUpdate(data as any)
       }
-    }
-
-    ws.onerror = (error) => {
-      log('error', 'WebSocket error:', error)
-    }
-
-    ws.onclose = () => {
-      log('log', 'WebSocket closed')
-      ws = null
-    }
+    })
+    log('log', 'Subscribed to order updates via DataService')
   } catch (error) {
-    log('error', 'Failed to connect WebSocket:', error)
+    log('error', 'Failed to subscribe to order updates:', error)
   }
 }
 
 onMounted(() => {
-  connectWebSocket()
+  setupOrderSubscription()
 })
 
 onUnmounted(() => {
-  if (ws) {
-    ws.close()
-    ws = null
+  // 取消订阅
+  if (unsubscribeOrder) {
+    unsubscribeOrder()
+    unsubscribeOrder = null
   }
 })
 

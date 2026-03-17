@@ -83,9 +83,13 @@ export type {
 export type {
   SpotBalance,
   SpotCommissionRates,
+  SpotAccountDetail,
+  SpotAccountData,
   SpotAccountInfo,
   FuturesAsset,
   FuturesPosition,
+  FuturesAccountDetail,
+  FuturesAccountData,
   FuturesAccountInfo,
   AccountInfo,
   AccountResponse,
