@@ -11,24 +11,13 @@ import {
   NSpin,
 } from 'naive-ui'
 import { useSpotOrder } from '../../composables/useSpotOrder'
+import { dataService } from '../../services/data-service/DataService'
 import type { SpotOrderType, OrderTimeInForce } from '../../types/api'
 import { useAccountStore } from '../../stores/account-store'
 
 // Types
 type OrderSide = 'BUY' | 'SELL'
 type OrderTypeTab = 'LIMIT' | 'MARKET' | 'STOP'
-
-// Quote data from WebSocket
-interface QuoteData {
-  symbol: string
-  lastPrice: string
-  priceChange: string
-  priceChangePercent: string
-  highPrice: string
-  lowPrice: string
-  volume: string
-  quoteVolume: string
-}
 
 // Composables
 const { createSpotOrder, isLoading, error } = useSpotOrder()
@@ -37,77 +26,20 @@ const accountStore = useAccountStore()
 // Current price from quotes (WebSocket)
 const currentPrice = ref<number>(0)
 
-// WebSocket for quotes
-let ws: WebSocket | null = null
-const wsConnected = ref(false)
-
-// Connect to WebSocket and fetch quotes once
-function connectAndFetchQuote(targetSymbol: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = import.meta.env.VITE_WS_HOST || 'localhost:8000'
-    const url = `${wsProtocol}//${host}/ws`
-
-    try {
-      ws = new WebSocket(url)
-
-      ws.onopen = () => {
-        wsConnected.value = true
-        console.log('[SpotOrderForm] WebSocket connected')
-
-        // Send GET_QUOTES request - follow WebSocket protocol v2.0 (same as TV chart)
-        ws?.send(JSON.stringify({
-          protocolVersion: '2.0',
-          type: 'GET_QUOTES',
-          requestId: crypto.randomUUID(),
-          timestamp: Date.now(),
-          data: {
-            type: 'quotes',  // Required - maps to GET_QUOTES
-            symbols: [`BINANCE:${targetSymbol}`]
-          }
-        }))
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          console.log('[SpotOrderForm] Received message:', JSON.stringify(message))
-
-          // Handle ACK confirmation
-          if (message.type === 'ACK') {
-            console.log('[SpotOrderForm] Received ACK, waiting for data...')
-            return
-          }
-
-          // Handle quotes data response
-          if (message.type === 'QUOTES_DATA' && message.data?.quotes?.[0]) {
-            const quote = message.data.quotes[0]
-            // 正确的字段是 quote.v.lp (TradingView quotes格式)
-            currentPrice.value = parseFloat(quote.v?.lp) || 0
-            console.log('[SpotOrderForm] Quote price:', currentPrice.value)
-            resolve()
-          } else if (message.type === 'ERROR') {
-            console.error('[SpotOrderForm] Quotes error:', message.data)
-            reject(new Error(message.data?.message || 'Failed to get quotes'))
-          }
-        } catch (e) {
-          console.error('[SpotOrderForm] Failed to parse message:', e)
-        }
-      }
-
-      ws.onerror = (e) => {
-        console.error('[SpotOrderForm] WebSocket error:', e)
-        reject(e)
-      }
-
-      ws.onclose = () => {
-        wsConnected.value = false
-        console.log('[SpotOrderForm] WebSocket closed')
-      }
-    } catch (e) {
-      reject(e)
+// 使用 DataService 获取报价
+async function fetchQuote(targetSymbol: string): Promise<void> {
+  try {
+    const response = await dataService.getQuotes([`BINANCE:${targetSymbol}`])
+    if (response.quotes && response.quotes.length > 0) {
+      const quote = response.quotes[0]
+      // DataService 返回的报价格式: { lp: lastPrice, ... }
+      currentPrice.value = parseFloat((quote as any).lp) || 0
+      console.log('[SpotOrderForm] Quote price:', currentPrice.value)
     }
-  })
+  } catch (e) {
+    console.error('[SpotOrderForm] Failed to fetch quote:', e)
+    throw e
+  }
 }
 
 // Emit for parent notification
@@ -419,9 +351,9 @@ onMounted(async () => {
   accountStore.initialize()
   await accountStore.refreshAccounts()
 
-  // Fetch quotes once via WebSocket (no subscription needed)
+  // Fetch quotes once via DataService
   try {
-    await connectAndFetchQuote(symbol.value)
+    await fetchQuote(symbol.value)
     // Set default price for both buy and sell panels
     buyPrice.value = currentPrice.value || undefined
     sellPrice.value = currentPrice.value || undefined
