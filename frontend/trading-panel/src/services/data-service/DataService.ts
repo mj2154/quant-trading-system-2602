@@ -2,17 +2,19 @@
  * 统一数据服务 - DataService 单例类
  *
  * 职责:
- * - 管理单一WebSocket连接
+ * - 管理WebSocket连接
  * - 提供类型安全的GET请求方法
+ * - 订阅管理（去重、状态维护）
  * - 自动重连
  *
  * 基于 types/api/ 目录下的类型定义
  */
 
-import { WSClient } from '../../libs/ws-client/WSClient'
 import {
-  type WSClientOptions,
-  DEFAULT_WS_CLIENT_OPTIONS,
+  PROTOCOL_VERSION,
+  type WSMessage,
+  type WSRequestMessage,
+  type ClientRequestType,
   type GetKlinesResponse,
   type GetQuotesResponse,
   type AccountDataResponse,
@@ -23,13 +25,15 @@ import {
   type SignalResponse,
   type StrategyMetadataListResponse,
   type StrategyMetadataResponse,
-} from '../../libs/ws-client/types'
+} from './types'
 import type {
   GetKlinesParams,
   KlineBars,
   QuotesList,
   SpotAccountInfo,
   FuturesAccountInfo,
+  SpotAccountData,
+  FuturesAccountData,
   AlertConfig,
   SignalRecord,
   Order,
@@ -39,12 +43,7 @@ import type {
   SubscriptionCallback,
   KlineBar,
   QuotesValue,
-  TradeData,
   AccountUpdate,
-  KlineSubscriptionOptions,
-  QuotesSubscriptionOptions,
-  AccountSubscriptionOptions,
-  SignalSubscriptionOptions,
 } from '../../types/api'
 
 /**
@@ -59,12 +58,28 @@ export interface DatafeedConfiguration {
 }
 
 /**
+ * 待处理的请求
+ */
+interface PendingRequest<T = unknown> {
+  resolve: (value: T) => void
+  reject: (error: Error) => void
+  timeoutId: number
+}
+
+/**
  * 获取WebSocket URL
  */
 function getWSUrl(): string {
   const wsHost = import.meta.env?.VITE_WS_HOST || 'localhost:8000'
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${wsHost}/ws`
+}
+
+/**
+ * 生成UUID v4 hex格式的requestId
+ */
+export function generateRequestId(): string {
+  return crypto.randomUUID().replace(/-/g, '')
 }
 
 /**
@@ -84,13 +99,27 @@ function getWSUrl(): string {
  */
 export class DataService {
   private static instance: DataService
-  private wsClient: WSClient | null = null
+  private ws: WebSocket | null = null
+
+  // 连接状态
+  private connected = false
+  private connecting = false
+
+  // 待处理的请求 (requestId -> pending request)
+  private pendingRequests = new Map<string, PendingRequest>()
+
+  // 消息处理器 (subscriptionKey -> handler)
+  private messageHandlers = new Map<string, Set<(data: unknown, subscriptionKey: string) => void>>()
 
   // 订阅信息存储 (subscriptionKey -> SubscriptionInfo)
   private subscriptionInfos = new Map<string, SubscriptionInfo>()
 
-  // 待恢复的订阅 (用于重连后自动恢复)
-  private pendingSubscriptions: Array<{ key: string; options: SubscriptionOptions }> = []
+  // 重连定时器
+  private reconnectTimeoutId: number | null = null
+
+  // 连接回调
+  private onConnectCallback: (() => void) | null = null
+  private onDisconnectCallback: (() => void) | null = null
 
   // 私有构造函数确保单例
   private constructor() {}
@@ -110,24 +139,343 @@ export class DataService {
   // ==================== 连接管理 ====================
 
   /**
+   * 设置连接回调
+   */
+  onConnect(callback: () => void): void {
+    this.onConnectCallback = callback
+  }
+
+  /**
+   * 设置断开连接回调
+   */
+  onDisconnect(callback: () => void): void {
+    this.onDisconnectCallback = callback
+  }
+
+  /**
    * 初始化并连接到WebSocket服务器
    */
   async connect(): Promise<void> {
-    if (!this.wsClient) {
-      const options: WSClientOptions = {
-        ...DEFAULT_WS_CLIENT_OPTIONS,
-        url: getWSUrl(),
-        autoReconnect: true,
-        reconnectInterval: 3000,
-        requestTimeout: 30000,
+    return new Promise((resolve, reject) => {
+      // 如果已连接，直接resolve
+      if (this.connected) {
+        resolve()
+        return
       }
-      this.wsClient = new WSClient(options)
-    }
-    await this.wsClient.connect()
 
-    // 连接成功后恢复之前的订阅
-    this.restoreSubscriptions()
+      // 如果正在连接，等待连接完成
+      if (this.connecting) {
+        const checkConnection = () => {
+          if (this.connected) {
+            resolve()
+          } else if (!this.connecting) {
+            reject(new Error('Connection failed'))
+          } else {
+            setTimeout(checkConnection, 50)
+          }
+        }
+        checkConnection()
+        return
+      }
+
+      this.connecting = true
+
+      try {
+        this.ws = new WebSocket(getWSUrl())
+
+        this.ws.onopen = () => {
+          this.connected = true
+          this.connecting = false
+          this.onConnectCallback?.()
+          resolve()
+        }
+
+        this.ws.onclose = () => {
+          this.handleDisconnect()
+        }
+
+        this.ws.onerror = () => {
+          if (!this.connected) {
+            this.connecting = false
+            reject(new Error('WebSocket connection failed'))
+          }
+        }
+
+        this.ws.onmessage = (event) => {
+          this.handleMessage(event.data)
+        }
+      } catch (error) {
+        this.connecting = false
+        reject(error)
+      }
+    })
   }
+
+  /**
+   * 处理连接断开
+   */
+  private handleDisconnect(): void {
+    const wasConnected = this.connected
+
+    this.connected = false
+    this.ws = null
+
+    // 清除所有待处理的请求
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeoutId)
+      pending.reject(new Error('Connection closed'))
+    }
+    this.pendingRequests.clear()
+
+    if (wasConnected) {
+      this.onDisconnectCallback?.()
+    }
+
+    // 自动重连
+    this.scheduleReconnect()
+  }
+
+  /**
+   * 调度重连
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectTimeoutId !== null) {
+      return
+    }
+
+    this.reconnectTimeoutId = window.setTimeout(() => {
+      this.reconnectTimeoutId = null
+
+      if (!this.connected) {
+        this.connect().catch(() => {
+          // 连接失败时会自动调度重连
+        })
+      }
+    }, 3000)
+  }
+
+  /**
+   * 断开连接
+   */
+  disconnect(): void {
+    if (this.reconnectTimeoutId !== null) {
+      clearTimeout(this.reconnectTimeoutId)
+      this.reconnectTimeoutId = null
+    }
+
+    if (this.ws) {
+      this.ws.close()
+      this.ws = null
+    }
+
+    // 清除所有待处理的请求
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeoutId)
+      pending.reject(new Error('Connection closed'))
+    }
+    this.pendingRequests.clear()
+
+    this.connected = false
+    this.connecting = false
+
+    this.onDisconnectCallback?.()
+  }
+
+  /**
+   * 获取连接状态
+   */
+  get isConnected(): boolean {
+    return this.connected
+  }
+
+  /**
+   * 确保已连接
+   */
+  private async ensureConnected(): Promise<WebSocket> {
+    if (!this.connected || !this.ws) {
+      await this.connect()
+    }
+    return this.ws!
+  }
+
+  // ==================== 消息处理 ====================
+
+  /**
+   * 处理接收到的消息
+   */
+  private handleMessage(data: string): void {
+    try {
+      const message: WSMessage = JSON.parse(data)
+
+      // 根据消息类型分发处理
+      const messageType = message.type
+
+      // 1. 处理ACK确认
+      if (messageType === 'ACK') {
+        return
+      }
+
+      // 2. 处理错误响应
+      if (messageType === 'ERROR') {
+        const requestId = message.requestId
+        if (!requestId) return
+        const pending = this.pendingRequests.get(requestId)
+
+        if (pending) {
+          clearTimeout(pending.timeoutId)
+          this.pendingRequests.delete(requestId)
+
+          const errorData = message.data as { errorCode?: string; errorMessage?: string } | undefined
+          const error = new Error(
+            `${errorData?.errorCode || 'ERROR'}: ${errorData?.errorMessage || 'Unknown error'}`
+          )
+          pending.reject(error)
+        }
+        return
+      }
+
+      // 3. 处理推送消息 (UPDATE)
+      if (messageType === 'UPDATE') {
+        this.handlePushMessage(message)
+        return
+      }
+
+      // 4. 处理订单更新推送
+      if (messageType === 'ORDER_UPDATE') {
+        this.handlePushMessage(message)
+        return
+      }
+
+      // 5. 处理成功响应 (带requestId)
+      const requestId = message.requestId
+      if (requestId) {
+        const pending = this.pendingRequests.get(requestId)
+
+        if (pending) {
+          clearTimeout(pending.timeoutId)
+          this.pendingRequests.delete(requestId)
+          pending.resolve(message.data as never)
+        }
+      }
+    } catch (error) {
+      console.error('[DataService] Failed to parse message:', error)
+    }
+  }
+
+  /**
+   * 处理推送消息
+   */
+  private handlePushMessage(message: WSMessage): void {
+    // 从消息顶层获取 subscriptionKey
+    const subscriptionKey = (message as unknown as { subscriptionKey?: string }).subscriptionKey
+
+    if (!subscriptionKey) {
+      console.warn('[DataService] UPDATE message missing subscriptionKey')
+      return
+    }
+
+    // 从消息顶层获取 content
+    const content = (message as unknown as { content?: unknown }).content
+
+    const handlers = this.messageHandlers.get(subscriptionKey)
+
+    if (handlers && handlers.size > 0) {
+      handlers.forEach((handler) => {
+        handler(content, subscriptionKey)
+      })
+    } else {
+      // 无 handler 静默忽略
+    }
+  }
+
+  // ==================== 发送消息 ====================
+
+  /**
+   * 发送WebSocket消息
+   */
+  private sendMessage(message: WSRequestMessage): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('[DataService] Cannot send message: WebSocket not connected')
+      return
+    }
+    this.ws.send(JSON.stringify(message))
+  }
+
+  /**
+   * 发送请求并等待响应
+   */
+  async request<T = unknown>(
+    requestType: ClientRequestType,
+    data?: Record<string, unknown>
+  ): Promise<T> {
+    // 确保已连接
+    await this.ensureConnected()
+
+    return new Promise((resolve, reject) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'))
+        return
+      }
+
+      const requestId = generateRequestId()
+
+      // 设置超时 (30秒)
+      const timeoutId = window.setTimeout(() => {
+        this.pendingRequests.delete(requestId)
+        reject(new Error(`Request ${requestType} timed out`))
+      }, 30000)
+
+      // 存储pending request
+      this.pendingRequests.set(requestId, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        timeoutId,
+      })
+
+      // 构建请求消息
+      const request: WSRequestMessage = {
+        protocolVersion: PROTOCOL_VERSION,
+        type: requestType,
+        requestId,
+        timestamp: Date.now(),
+        data,
+      }
+
+      // 发送消息
+      this.sendMessage(request)
+    })
+  }
+
+  /**
+   * 发送订阅/取消订阅命令
+   */
+  private sendSubscription(type: 'SUBSCRIBE' | 'UNSUBSCRIBE', subscriptionKeys: string[]): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('[DataService] Cannot send subscription: WebSocket not connected')
+      return
+    }
+
+    if (subscriptionKeys.length === 0) {
+      return
+    }
+
+    const requestId = generateRequestId()
+
+    const message: WSRequestMessage = {
+      protocolVersion: PROTOCOL_VERSION,
+      type,
+      requestId,
+      timestamp: Date.now(),
+      data: {
+        subscriptions: subscriptionKeys,
+      },
+    }
+
+    this.sendMessage(message)
+    // 静默发送
+  }
+
+  // ==================== 恢复订阅 ====================
 
   /**
    * 恢复之前的订阅
@@ -136,60 +484,23 @@ export class DataService {
     for (const [key, info] of this.subscriptionInfos) {
       if (info.options.reconnect !== false && info.status === 'active') {
         // 重新发送订阅消息
-        this.wsClient?.subscribe(key, (data, sk) => {
-          info.callback(data as never, sk)
-        })
+        this.sendSubscription('SUBSCRIBE', [key])
+
+        // 确保 handler 已注册
+        let handlers = this.messageHandlers.get(key)
+        if (!handlers) {
+          handlers = new Set()
+          this.messageHandlers.set(key, handlers)
+        }
+        handlers.add(info.callback)
       }
     }
-  }
-
-  /**
-   * 断开连接
-   */
-  disconnect(): void {
-    this.wsClient?.disconnect()
-    this.wsClient = null
-  }
-
-  /**
-   * 获取连接状态
-   */
-  get isConnected(): boolean {
-    return this.wsClient?.isConnected ?? false
-  }
-
-  /**
-   * 确保已连接
-   */
-  private async ensureConnected(): Promise<WSClient> {
-    if (!this.wsClient || !this.wsClient.isConnected) {
-      await this.connect()
-    }
-    return this.wsClient!
-  }
-
-  /**
-   * 通用请求方法
-   *
-   * @param requestType - 请求类型（如 'GET_CONFIG', 'GET_SEARCH_SYMBOLS'）
-   * @param params - 请求参数
-   * @returns 请求响应
-   */
-  async request<T = unknown>(
-    requestType: string,
-    params: Record<string, unknown> = {}
-  ): Promise<T> {
-    const ws = await this.ensureConnected()
-    return ws.request<T>(requestType as never, params)
   }
 
   // ==================== 市场数据 ====================
 
   /**
    * 获取K线数据
-   *
-   * @param params - 获取K线请求参数
-   * @returns K线数据
    */
   async getKlines(params: GetKlinesParams): Promise<KlineBars> {
     const ws = await this.ensureConnected()
@@ -209,9 +520,8 @@ export class DataService {
       requestParams.limit = params.limit
     }
 
-    const response = await ws.request<GetKlinesResponse>('GET_KLINES', requestParams)
+    const response = await this.request<GetKlinesResponse>('GET_KLINES', requestParams)
 
-    // 转换响应格式为 KlineBars
     return {
       symbol: response.symbol,
       interval: response.interval,
@@ -224,16 +534,12 @@ export class DataService {
 
   /**
    * 获取报价数据
-   *
-   * @param symbols - 交易对列表
-   * @returns 报价数据列表
    */
   async getQuotes(symbols: string[]): Promise<QuotesList> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<GetQuotesResponse>('GET_QUOTES', { symbols })
+    const response = await this.request<GetQuotesResponse>('GET_QUOTES', { symbols })
 
-    // 转换响应格式为 QuotesList
     return {
       quotes: (response.quotes || []) as QuotesList['quotes'],
     }
@@ -241,15 +547,12 @@ export class DataService {
 
   /**
    * 获取图表数据源配置
-   *
-   * @returns 图表配置
    */
   async getConfig(): Promise<DatafeedConfiguration> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<{ config: DatafeedConfiguration }>('GET_CONFIG')
+    const response = await this.request<{ config: DatafeedConfiguration }>('GET_CONFIG')
 
-    // 强制启用批量请求支持（Watchlist 需要此功能）
     return {
       ...response.config,
       supports_group_request: true,
@@ -260,53 +563,45 @@ export class DataService {
 
   /**
    * 获取现货账户信息
-   *
-   * @returns 现货账户信息
    */
   async getSpotAccount(): Promise<SpotAccountInfo> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<AccountDataResponse>('GET_SPOT_ACCOUNT')
+    const response = await this.request<AccountDataResponse>('GET_SPOT_ACCOUNT')
 
-    return response.account as SpotAccountInfo
+    // response.account 是 SpotAccountData，需取其内部的 account 字段
+    return (response.account as SpotAccountData).account as SpotAccountInfo
   }
 
   /**
    * 获取期货账户信息
-   *
-   * @returns 期货账户信息
    */
   async getFuturesAccount(): Promise<FuturesAccountInfo> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<AccountDataResponse>('GET_FUTURES_ACCOUNT')
+    const response = await this.request<AccountDataResponse>('GET_FUTURES_ACCOUNT')
 
-    return response.account as FuturesAccountInfo
+    // response.account 是 FuturesAccountData，需取其内部的 account 字段
+    return (response.account as FuturesAccountData).account as FuturesAccountInfo
   }
 
   // ==================== 告警管理 ====================
 
   /**
    * 获取告警配置列表
-   *
-   * @param page - 页码
-   * @param pageSize - 每页数量
-   * @returns 告警配置列表
    */
   async listAlertConfigs(page = 1, pageSize = 20): Promise<AlertConfig[]> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<AlertConfigResponse>('LIST_ALERT_CONFIGS', {
+    const response = await this.request<AlertConfigResponse>('LIST_ALERT_CONFIGS', {
       page,
       pageSize,
     })
 
-    // 后端返回 camelCase 格式
-    return (response.items || []).map(item => {
+    return (response.items || []).map((item) => {
       const rawItem = item as unknown as Record<string, unknown>
       return {
         ...item,
-        // 兼容 snake_case 和 camelCase
         strategyType: (rawItem.strategyType as string) || (rawItem.strategy_type as string) || '',
         triggerType: (rawItem.triggerType as string) || (rawItem.trigger_type as string) || '',
         isEnabled: (rawItem.isEnabled as boolean) ?? (rawItem.is_enabled as boolean) ?? true,
@@ -320,16 +615,11 @@ export class DataService {
 
   /**
    * 获取单个告警配置
-   *
-   * @param id - 告警ID
-   * @returns 告警配置
    */
   async getAlert(id: string): Promise<AlertConfig | null> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    // GET_ALERT_CONFIG 后端未实现，暂时使用列表查询
-    // TODO: 后端实现 GET_ALERT_CONFIG 后改为直接查询
-    const response = await ws.request<AlertConfigResponse>('LIST_ALERT_CONFIGS', {
+    const response = await this.request<AlertConfigResponse>('LIST_ALERT_CONFIGS', {
       limit: 1,
       offset: 0,
     })
@@ -339,7 +629,6 @@ export class DataService {
     }
 
     const alert = response.items[0]
-    // 过滤参数值类型
     return {
       ...alert,
       params: this.convertParamsFromBackend(alert.params),
@@ -348,9 +637,6 @@ export class DataService {
 
   /**
    * 创建告警配置
-   *
-   * @param config - 告警配置
-   * @returns 创建的告警配置
    */
   async createAlert(config: {
     name: string
@@ -362,13 +648,11 @@ export class DataService {
     params?: Record<string, number | boolean>
     isEnabled?: boolean
   }): Promise<AlertConfig> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    // 转换参数名称：前端使用简写，后端需要完整名称
     const params = this.convertParamsToBackend(config.params)
 
-    const response = await ws.request<AlertConfigOperationResponse>('CREATE_ALERT_CONFIG', {
-      // 生成 UUIDv4 hex 格式（32字符无短横线），与订单ID格式一致
+    const response = await this.request<AlertConfigOperationResponse>('CREATE_ALERT_CONFIG', {
       id: crypto.randomUUID().replace(/-/g, ''),
       name: config.name,
       description: config.description || '',
@@ -378,7 +662,6 @@ export class DataService {
       triggerType: config.triggerType || 'each_kline_close',
       params,
       isEnabled: config.isEnabled ?? true,
-      // 创建者标识，使用默认用户（个人项目）
       createdBy: 'local_user',
     })
 
@@ -386,7 +669,6 @@ export class DataService {
       throw new Error('Failed to create alert')
     }
 
-    // 后端已自动转换为驼峰命名，直接返回
     return {
       id: response.id,
       name: response.name || '',
@@ -404,10 +686,6 @@ export class DataService {
 
   /**
    * 更新告警配置
-   *
-   * @param id - 告警ID
-   * @param updates - 更新内容
-   * @returns 更新后的告警配置
    */
   async updateAlert(
     id: string,
@@ -422,9 +700,8 @@ export class DataService {
       isEnabled?: boolean
     }
   ): Promise<AlertConfig> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    // 转换参数名称
     const params = updates.params ? this.convertParamsToBackend(updates.params) : undefined
 
     const requestData: Record<string, unknown> = { id }
@@ -437,13 +714,12 @@ export class DataService {
     if (params !== undefined) requestData.params = params
     if (updates.isEnabled !== undefined) requestData.isEnabled = updates.isEnabled
 
-    const response = await ws.request<AlertConfigOperationResponse>('UPDATE_ALERT_CONFIG', requestData)
+    const response = await this.request<AlertConfigOperationResponse>('UPDATE_ALERT_CONFIG', requestData)
 
     if (!response.id) {
       throw new Error('Failed to update alert')
     }
 
-    // 后端已自动转换为驼峰命名，直接返回
     return {
       id: response.id,
       name: response.name || '',
@@ -461,28 +737,21 @@ export class DataService {
 
   /**
    * 删除告警配置
-   *
-   * @param id - 告警ID
-   * @returns 是否删除成功
    */
   async deleteAlert(id: string): Promise<boolean> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    await ws.request<{ success: boolean }>('DELETE_ALERT_CONFIG', { id })
+    await this.request<{ success: boolean }>('DELETE_ALERT_CONFIG', { id })
     return true
   }
 
   /**
    * 启用告警
-   * 使用 UPDATE_ALERT_CONFIG + isEnabled 字段实现
-   *
-   * @param id - 告警ID
-   * @returns 启用结果
    */
   async enableAlert(id: string): Promise<{ id: string; isEnabled: boolean }> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<{ id: string; isEnabled: boolean }>('UPDATE_ALERT_CONFIG', {
+    const response = await this.request<{ id: string; isEnabled: boolean }>('UPDATE_ALERT_CONFIG', {
       id,
       isEnabled: true,
     })
@@ -492,15 +761,11 @@ export class DataService {
 
   /**
    * 禁用告警
-   * 使用 UPDATE_ALERT_CONFIG + isEnabled 字段实现
-   *
-   * @param id - 告警ID
-   * @returns 禁用结果
    */
   async disableAlert(id: string): Promise<{ id: string; isEnabled: boolean }> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<{ id: string; isEnabled: boolean }>('UPDATE_ALERT_CONFIG', {
+    const response = await this.request<{ id: string; isEnabled: boolean }>('UPDATE_ALERT_CONFIG', {
       id,
       isEnabled: false,
     })
@@ -508,65 +773,12 @@ export class DataService {
     return response
   }
 
-  /**
-   * 批量订阅信号
-   *
-   * @param alertIds - 告警ID数组
-   * @param callback - 信号回调
-   * @returns 取消订阅函数
-   */
-  subscribeAllSignals(
-    alertIds: string[],
-    callback: (signal: SignalRecord) => void
-  ): () => void {
-    if (!this.wsClient) {
-      throw new Error('DataService not connected. Call connect() first.')
-    }
-
-    if (alertIds.length === 0) {
-      return () => {}
-    }
-
-    const unsubscribers: Array<() => void> = []
-
-    for (const alertId of alertIds) {
-      const subscriptionKey = `SIGNAL:${alertId}`
-
-      // 存储订阅信息
-      this.subscriptionInfos.set(subscriptionKey, {
-        key: subscriptionKey,
-        callback: callback as SubscriptionCallback<unknown>,
-        options: { reconnect: true },
-        subscribedAt: Date.now(),
-        status: 'active',
-      })
-
-      const unsub = this.subscribe(subscriptionKey, (data) => {
-        callback(data as SignalRecord)
-      })
-      unsubscribers.push(unsub)
-    }
-
-    // 返回批量取消订阅函数
-    return () => {
-      for (const unsub of unsubscribers) {
-        unsub()
-      }
-      for (const alertId of alertIds) {
-        this.subscriptionInfos.delete(`SIGNAL:${alertId}`)
-      }
-    }
-  }
-
   // ==================== 参数转换 ====================
 
   /**
    * 将前端参数转换为后端API格式
-   * 前端使用 snake_case 格式，直接传递给后端
-   * 如果没有提供参数，返回 MACD 策略的默认值
    */
   private convertParamsToBackend(params?: Record<string, number | boolean>): Record<string, number | boolean> {
-    // 默认参数使用 snake_case 格式
     const defaultParams: Record<string, number> = {
       macd1_fastperiod: 12,
       macd1_slowperiod: 26,
@@ -580,13 +792,11 @@ export class DataService {
       return { ...defaultParams }
     }
 
-    // 返回前端传入的参数（已经是 snake_case 格式）
     return { ...params }
   }
 
   /**
    * 将后端返回的参数转换为前端格式
-   * 保留 snake_case 键名，让前端表单可以动态渲染
    */
   private convertParamsFromBackend(params?: Record<string, unknown> | null): Record<string, number | boolean> {
     if (!params || Object.keys(params).length === 0) {
@@ -606,9 +816,6 @@ export class DataService {
 
   /**
    * 获取信号列表
-   *
-   * @param params - 查询参数
-   * @returns 信号列表
    */
   async listSignals(params?: {
     page?: number
@@ -620,9 +827,9 @@ export class DataService {
     fromTime?: number
     toTime?: number
   }): Promise<SignalRecord[]> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<SignalResponse>('LIST_SIGNALS', params || {})
+    const response = await this.request<SignalResponse>('LIST_SIGNALS', params || {})
 
     return response.items || []
   }
@@ -631,9 +838,6 @@ export class DataService {
 
   /**
    * 获取订单列表
-   *
-   * @param params - 查询参数
-   * @returns 订单列表
    */
   async listOrders(params?: {
     symbol?: string
@@ -642,9 +846,9 @@ export class DataService {
     endTime?: number
     limit?: number
   }): Promise<OrderListData> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<OrderListResponseData>('LIST_ORDERS', params || {})
+    const response = await this.request<OrderListResponseData>('LIST_ORDERS', params || {})
 
     return {
       orders: response.orders || [],
@@ -654,15 +858,12 @@ export class DataService {
 
   /**
    * 获取当前挂单
-   *
-   * @param symbol - 交易对（可选）
-   * @returns 挂单列表
    */
   async getOpenOrders(symbol?: string): Promise<OrderListData> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
     const params = symbol ? { symbol } : {}
-    const response = await ws.request<OrderListResponseData>('GET_OPEN_ORDERS', params)
+    const response = await this.request<OrderListResponseData>('GET_OPEN_ORDERS', params)
 
     return {
       orders: response.orders || [],
@@ -674,27 +875,22 @@ export class DataService {
 
   /**
    * 获取所有策略元数据列表
-   *
-   * @returns 策略元数据列表
    */
   async getStrategyMetadata(): Promise<StrategyMetadataResponse[]> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<StrategyMetadataListResponse>('GET_STRATEGY_METADATA')
+    const response = await this.request<StrategyMetadataListResponse>('GET_STRATEGY_METADATA')
 
     return response.strategies || []
   }
 
   /**
    * 获取指定策略的元数据
-   *
-   * @param strategyType - 策略类型（如 MACDResonanceStrategyV5）
-   * @returns 策略元数据
    */
   async getStrategyMetadataByType(strategyType: string): Promise<StrategyMetadataResponse | null> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<{ strategy: StrategyMetadataResponse }>('GET_STRATEGY_METADATA_BY_TYPE', {
+    const response = await this.request<{ strategy: StrategyMetadataResponse }>('GET_STRATEGY_METADATA_BY_TYPE', {
       strategyType,
     })
 
@@ -703,23 +899,17 @@ export class DataService {
 
   /**
    * 获取订单详情
-   *
-   * @param params - 查询参数
-   * @returns 订单详情
    */
   async getOrder(params: { symbol: string; orderId?: number; origClientOrderId?: string }): Promise<Order> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<OrderResponse>('GET_ORDER', params)
+    const response = await this.request<OrderResponse>('GET_ORDER', params)
 
     return response.order
   }
 
   /**
    * 创建订单
-   *
-   * @param params - 订单参数
-   * @returns 创建的订单
    */
   async createOrder(params: {
     symbol: string
@@ -734,12 +924,11 @@ export class DataService {
     positionSide?: string
     clientOrderId?: string
   }): Promise<Order> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    // 生成客户端订单ID
     const clientOrderId = params.clientOrderId || crypto.randomUUID().replace(/-/g, '')
 
-    const response = await ws.request<OrderResponse>('CREATE_ORDER', {
+    const response = await this.request<OrderResponse>('CREATE_ORDER', {
       ...params,
       clientOrderId,
     })
@@ -749,14 +938,11 @@ export class DataService {
 
   /**
    * 取消订单
-   *
-   * @param params - 订单参数（symbol + orderId 或 origClientOrderId）
-   * @returns 取消的订单
    */
   async cancelOrder(params: { symbol: string; orderId?: number; origClientOrderId?: string }): Promise<Order> {
-    const ws = await this.ensureConnected()
+    await this.ensureConnected()
 
-    const response = await ws.request<OrderResponse>('CANCEL_ORDER', params)
+    const response = await this.request<OrderResponse>('CANCEL_ORDER', params)
 
     return response.order
   }
@@ -764,48 +950,97 @@ export class DataService {
   // ==================== 订阅管理 ====================
 
   /**
+   * 注册消息处理器
+   */
+  private addHandler(subscriptionKey: string, handler: (data: unknown, subscriptionKey: string) => void): void {
+    let handlers = this.messageHandlers.get(subscriptionKey)
+    if (!handlers) {
+      handlers = new Set()
+      this.messageHandlers.set(subscriptionKey, handlers)
+    }
+    handlers.add(handler)
+  }
+
+  /**
+   * 移除消息处理器
+   */
+  private removeHandler(subscriptionKey: string, handler?: (data: unknown, subscriptionKey: string) => void): void {
+    const handlers = this.messageHandlers.get(subscriptionKey)
+    if (!handlers) return
+
+    if (handler) {
+      handlers.delete(handler)
+      if (handlers.size === 0) {
+        this.messageHandlers.delete(subscriptionKey)
+      }
+    } else {
+      this.messageHandlers.delete(subscriptionKey)
+    }
+  }
+
+  /**
+   * 检查是否存在处理器
+   */
+  private hasHandler(subscriptionKey: string): boolean {
+    const handlers = this.messageHandlers.get(subscriptionKey)
+    return handlers !== undefined && handlers.size > 0
+  }
+
+  /**
    * 订阅实时数据
-   *
-   * @param subscriptionKey - 订阅键
-   * @param handler - 数据回调
-   * @returns 取消订阅函数
    */
   subscribe(subscriptionKey: string, handler: (data: unknown, subscriptionKey?: string) => void): () => void {
-    if (!this.wsClient) {
-      throw new Error('DataService not connected. Call connect() first.')
+    // 检查是否已有 handler
+    if (!this.hasHandler(subscriptionKey)) {
+      // 首次订阅：发送订阅命令
+      this.sendSubscription('SUBSCRIBE', [subscriptionKey])
     }
-    return this.wsClient.subscribe(subscriptionKey, handler)
+
+    // 注册 handler
+    this.addHandler(subscriptionKey, (data, sk) => {
+      handler(data, sk)
+    })
+
+    // 记录订阅信息
+    this.subscriptionInfos.set(subscriptionKey, {
+      key: subscriptionKey,
+      callback: handler as SubscriptionCallback<unknown>,
+      options: { reconnect: true },
+      subscribedAt: Date.now(),
+      status: 'active',
+    })
+
+    // 返回取消订阅函数
+    return () => {
+      this.unsubscribe(subscriptionKey)
+    }
   }
 
   /**
    * 取消订阅
-   *
-   * @param subscriptionKey - 订阅键
    */
   unsubscribe(subscriptionKey: string): void {
-    this.wsClient?.unsubscribe(subscriptionKey)
+    // 发送取消订阅命令
+    this.sendSubscription('UNSUBSCRIBE', [subscriptionKey])
+
+    // 移除 handler
+    this.removeHandler(subscriptionKey)
+
+    // 删除订阅信息
     this.subscriptionInfos.delete(subscriptionKey)
   }
 
   /**
    * 获取当前所有订阅
-   *
-   * @returns 订阅键数组
    */
   getSubscriptions(): string[] {
-    return this.wsClient?.getSubscriptions() || []
+    return Array.from(this.messageHandlers.keys())
   }
 
   // ==================== 类型安全订阅方法 ====================
 
   /**
    * 订阅K线实时数据
-   *
-   * @param symbol - 交易对 (如 'BINANCE:BTCUSDT')
-   * @param interval - K线周期 (如 '1', '5', '60', '1D')
-   * @param callback - 数据回调
-   * @param options - 订阅选项
-   * @returns 取消订阅函数
    */
   subscribeKline(
     symbol: string,
@@ -839,11 +1074,6 @@ export class DataService {
 
   /**
    * 订阅报价实时数据
-   *
-   * @param symbols - 交易对列表
-   * @param callback - 数据回调 (接收Map格式，key为symbol)
-   * @param options - 订阅选项
-   * @returns 取消订阅函数
    */
   subscribeQuotes(
     symbols: string[],
@@ -853,9 +1083,9 @@ export class DataService {
     const finalOptions: SubscriptionOptions = { reconnect: true, ...options }
     const quotesMap = new Map<string, QuotesValue>()
 
-    // 收集所有 subscriptionKeys 和 handlers
+    // 收集所有 subscriptionKeys
     const subscriptionKeys: string[] = []
-    const handlersMap = new Map<string, (data: unknown) => void>()
+    const keysToSubscribe: string[] = []
 
     for (const symbol of symbols) {
       const subscriptionKey = `${symbol}@QUOTES`
@@ -867,7 +1097,14 @@ export class DataService {
         quotesMap.set(symbol, quoteData)
         callback(new Map(quotesMap))
       }
-      handlersMap.set(subscriptionKey, handler)
+
+      // 只对未订阅的 key 发送订阅命令
+      if (!this.hasHandler(subscriptionKey)) {
+        keysToSubscribe.push(subscriptionKey)
+      }
+
+      // 注册 handler
+      this.addHandler(subscriptionKey, handler)
 
       // 存储订阅信息
       this.subscriptionInfos.set(subscriptionKey, {
@@ -879,28 +1116,21 @@ export class DataService {
       })
     }
 
-    // 一次性订阅（WSClient 会将所有 keys 放入一个数组发送）
-    const unsubscribe = this.wsClient!.subscribe(subscriptionKeys, handlersMap)
+    // 批量发送订阅命令
+    if (keysToSubscribe.length > 0) {
+      this.sendSubscription('SUBSCRIBE', keysToSubscribe)
+    }
 
     // 返回批量取消订阅函数
     return () => {
-      unsubscribe()
-      // 清理订阅信息
-      for (const symbol of symbols) {
-        this.subscriptionInfos.delete(`${symbol}@QUOTES`)
+      for (const key of subscriptionKeys) {
+        this.unsubscribe(key)
       }
     }
   }
 
   /**
    * 订阅账户增量更新
-   *
-   * 注意：账户订阅需要先GET初始化数据，再订阅增量更新
-   *
-   * @param accountType - 账户类型 'SPOT' | 'FUTURES'
-   * @param callback - 数据回调
-   * @param options - 订阅选项
-   * @returns 取消订阅函数
    */
   subscribeAccount(
     accountType: 'SPOT' | 'FUTURES',
@@ -930,11 +1160,6 @@ export class DataService {
 
   /**
    * 订阅信号实时推送
-   *
-   * @param alertId - 告警ID
-   * @param callback - 数据回调
-   * @param options - 订阅选项
-   * @returns 取消订阅函数
    */
   subscribeSignal(
     alertId: string,
@@ -962,13 +1187,51 @@ export class DataService {
     }
   }
 
+  /**
+   * 批量订阅信号
+   */
+  subscribeAllSignals(
+    alertIds: string[],
+    callback: (signal: SignalRecord) => void
+  ): () => void {
+    if (alertIds.length === 0) {
+      return () => {}
+    }
+
+    const unsubscribers: Array<() => void> = []
+
+    for (const alertId of alertIds) {
+      const subscriptionKey = `SIGNAL:${alertId}`
+
+      // 存储订阅信息
+      this.subscriptionInfos.set(subscriptionKey, {
+        key: subscriptionKey,
+        callback: callback as SubscriptionCallback<unknown>,
+        options: { reconnect: true },
+        subscribedAt: Date.now(),
+        status: 'active',
+      })
+
+      const unsub = this.subscribe(subscriptionKey, (data) => {
+        callback(data as SignalRecord)
+      })
+      unsubscribers.push(unsub)
+    }
+
+    return () => {
+      for (const unsub of unsubscribers) {
+        unsub()
+      }
+      for (const alertId of alertIds) {
+        this.subscriptionInfos.delete(`SIGNAL:${alertId}`)
+      }
+    }
+  }
+
   // ==================== 订阅信息管理 ====================
 
   /**
    * 获取订阅信息
-   *
-   * @param subscriptionKey - 订阅键
-   * @returns 订阅信息
    */
   getSubscriptionInfo(subscriptionKey: string): SubscriptionInfo | undefined {
     return this.subscriptionInfos.get(subscriptionKey)
@@ -976,8 +1239,6 @@ export class DataService {
 
   /**
    * 获取所有订阅信息
-   *
-   * @returns 订阅信息数组
    */
   getAllSubscriptionInfos(): SubscriptionInfo[] {
     return Array.from(this.subscriptionInfos.values())
@@ -988,9 +1249,11 @@ export class DataService {
    */
   clearSubscriptions(): void {
     // 取消所有WS订阅
-    for (const key of this.subscriptionInfos.keys()) {
-      this.wsClient?.unsubscribe(key)
+    const keys = Array.from(this.messageHandlers.keys())
+    if (keys.length > 0) {
+      this.sendSubscription('UNSUBSCRIBE', keys)
     }
+    this.messageHandlers.clear()
     this.subscriptionInfos.clear()
   }
 
@@ -998,9 +1261,6 @@ export class DataService {
 
   /**
    * 批量订阅 (遵循协议: 50个/包, 250ms间隔)
-   *
-   * @param subscriptions - 订阅配置数组
-   * @returns 取消所有订阅的函数
    */
   subscribeBatch(
     subscriptions: Array<{

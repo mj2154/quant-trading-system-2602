@@ -1,5 +1,5 @@
 /**
- * 统一WebSocket客户端 - 类型定义
+ * DataService 类型定义
  *
  * 严格遵循 WS协议 v2.0 设计文档
  * 文档: docs/backend/design/07-websocket-protocol.md
@@ -8,12 +8,14 @@
 import type {
   SpotAccountInfo,
   FuturesAccountInfo,
+  SpotAccountData,
+  FuturesAccountData,
   AlertConfig,
   SignalRecord,
   Order,
   OrderListResponse,
   CreateOrderParams,
-} from '../../types'
+} from '../../types/api'
 
 // ==================== 协议基础类型 ====================
 
@@ -193,9 +195,9 @@ export interface GetQuotesResponse {
   count: number
 }
 
-/** 账户数据响应 */
+/** 账户数据响应 - 对应后端 AccountResponseData 的 data 字段 */
 export interface AccountDataResponse {
-  account: SpotAccountInfo | FuturesAccountInfo
+  account: SpotAccountData | FuturesAccountData
   accountType: 'spot' | 'futures'
 }
 

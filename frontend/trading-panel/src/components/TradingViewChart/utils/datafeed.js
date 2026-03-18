@@ -542,9 +542,10 @@ export default {
         // 合并 symbols 和 fastSymbols，并去重
         const allSymbols = [...new Set([...symbols, ...fastSymbols])];
 
-        // 如果已存在相同 listenerGUID，先取消旧订阅（避免重复）
+        // 如果已存在相同 listenerGUID，直接返回已存储的取消订阅函数（不重复订阅）
         if (quotesSubscriptions.has(listenerGUID)) {
-            this.unsubscribeQuotes(listenerGUID);
+            const existing = quotesSubscriptions.get(listenerGUID);
+            return existing.unsubscribe;
         }
 
         // 直接使用完整格式 EXCHANGE:SYMBOL（如 BINANCE:BTCUSDT）
@@ -568,6 +569,9 @@ export default {
             onRealtimeCallback,
             unsubscribe  // 存储取消订阅函数
         });
+
+        // 返回取消订阅函数给 TradingView
+        return unsubscribe;
     },
 
     /**

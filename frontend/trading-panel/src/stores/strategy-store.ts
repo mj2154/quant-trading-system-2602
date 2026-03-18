@@ -8,7 +8,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { dataService } from '../services/data-service/DataService'
-import type { StrategyMetadataResponse } from '../libs/ws-client/types'
+import type { StrategyMetadataResponse } from '../services/data-service/types'
 
 // ==================== 类型定义 ====================
 
