@@ -10,18 +10,18 @@ from typing import List
 class BinanceAccountSubscriptionKey:
     """账户信息订阅键常量
 
-    订阅键格式：BINANCE:ACCOUNT@{ACCOUNT_TYPE}
+    订阅键格式：BINANCE:{ACCOUNT_TYPE}@ACCOUNT
 
     用途：
-    - 现货账户: BINANCE:ACCOUNT@SPOT
-    - 期货账户: BINANCE:ACCOUNT@FUTURES
+    - 现货账户: BINANCE:SPOT@ACCOUNT
+    - 期货账户: BINANCE:FUTURES@ACCOUNT
     """
 
     # 现货账户订阅键
-    SPOT = "BINANCE:ACCOUNT@SPOT"
+    SPOT = "BINANCE:SPOT@ACCOUNT"
 
     # 期货账户订阅键
-    FUTURES = "BINANCE:ACCOUNT@FUTURES"
+    FUTURES = "BINANCE:FUTURES@ACCOUNT"
 
     @classmethod
     def get_all(cls) -> list[str]:

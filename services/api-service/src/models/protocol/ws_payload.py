@@ -216,11 +216,97 @@ class MetricsData(CamelCaseModel):
     subscription_count: int = 0  # 订阅数量（冗余，为兼容性）
 
 
+class OrderResultData(CamelCaseModel):
+    """订单结果数据模型
+
+    用于存储币安 API 返回的订单信息。
+    支持现货和期货订单响应的所有字段。
+
+    设计文档: docs/backend/design/08-api-models.md
+    使用 extra="allow" 允许灵活处理不同市场类型的字段差异。
+    序列化时会自动将内部 snake_case 转换为前端需要的 camelCase。
+    """
+
+    # 核心订单标识（通用字段）
+    order_id: int | None = Field(None, description="币安订单ID")
+    client_order_id: str | None = Field(None, description="客户端订单ID")
+    symbol: str | None = Field(None, description="交易对")
+
+    # 订单状态
+    status: str | None = Field(None, description="订单状态")
+
+    # 订单方向和类型
+    side: str | None = Field(None, description="订单方向 BUY/SELL")
+    order_type: str | None = Field(None, description="订单类型")
+    position_side: str | None = Field(None, description="持仓方向")
+
+    # 数量和价格
+    orig_qty: str | None = Field(None, description="原始数量")
+    price: str | None = Field(None, description="价格")
+    avg_price: str | None = Field(None, description="平均价格")
+    executed_qty: str | None = Field(None, description="已执行数量")
+    cum_qty: str | None = Field(None, description="累计数量")
+    cum_quote: str | None = Field(None, description="累计报价")
+
+    # 时间相关
+    time_in_force: str | None = Field(None, description="时间策略")
+    transact_time: int | None = Field(None, description="交易时间")
+    update_time: int | None = Field(None, description="更新时间")
+
+    # 止损止盈
+    stop_price: str | None = Field(None, description="止损价格")
+
+    # 期货特有
+    reduce_only: bool | None = Field(None, description="是否只减仓")
+    close_position: bool | None = Field(None, description="是否平仓")
+
+    # 现货特有
+    iceberg_qty: str | None = Field(None, description="冰山数量")
+
+    # 其他
+    is_working: bool | None = Field(None, description="是否正在运行")
+    working_time: int | None = Field(None, description="工作时间")
+
+    # 允许额外字段（兼容不同市场的响应差异）
+    model_config = {"extra": "allow"}
+
+
+class OrderPayloadData(CamelCaseModel):
+    """订单请求参数数据模型
+
+    用于存储下单时传入的参数（用于前端回显）。
+    支持现货和期货订单请求的所有字段。
+
+    设计文档: docs/backend/design/08-api-models.md
+    """
+
+    # 核心字段
+    symbol: str | None = Field(None, description="交易对")
+    side: str | None = Field(None, description="订单方向")
+    order_type: str | None = Field(None, description="订单类型")
+    quantity: float | None = Field(None, description="数量")
+
+    # 订单标识
+    new_client_order_id: str | None = Field(None, description="客户端订单ID")
+
+    # 价格相关
+    price: float | None = Field(None, description="价格")
+    stop_price: float | None = Field(None, description="止损价格")
+    time_in_force: str | None = Field(None, description="时间策略")
+
+    # 期货特有
+    position_side: str | None = Field(None, description="持仓方向")
+    reduce_only: bool | None = Field(None, description="是否只减仓")
+
+    # 允许额外字段
+    model_config = {"extra": "allow"}
+
+
 class OrderResponseData(CamelCaseModel):
     """订单响应数据模型
 
     用于 WebSocket 订单操作响应（CREATE_ORDER, GET_ORDER, CANCEL_ORDER）。
-    严格遵循设计文档: docs/backend/design/07-websocket-protocol.md
+    严格遵循设计文档: docs/backend/design/07-websocket-protocol.md 和 08-api-models.md
 
     字段说明:
     - type: 固定值 "order"
@@ -233,8 +319,8 @@ class OrderResponseData(CamelCaseModel):
     type: str = "order"
     status: str
     task_id: int | None = None
-    result: dict[str, Any] | None = None
-    payload: dict[str, Any] | None = None
+    result: OrderResultData | None = None
+    payload: OrderPayloadData | None = None
 
 
 class AccountResponseData(CamelCaseModel):

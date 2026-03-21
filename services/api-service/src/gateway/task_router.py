@@ -22,16 +22,13 @@ import json
 import logging
 from typing import Any
 
-from pydantic import BaseModel
-
-from ..models.base import CamelCaseModel
-
 from ..db.alert_signal_repository import AlertConfigRepository
 from ..db.exchange_info_repository import ExchangeInfoRepository
 from ..db.order_tasks_repository import OrderTasksRepository
 from ..db.strategy_metadata_repository import StrategyMetadataRepository
 from ..db.strategy_signals_repository import StrategySignalsRepository
 from ..db.tasks_repository import TasksRepository
+from ..models.base import CamelCaseModel
 from ..models.db.signal_models import (
     StrategyMetadataListResponse,
     StrategyMetadataResponse,
@@ -56,17 +53,21 @@ from ..models.protocol.ws_payload import (
     UnsubscribeData,
 )
 from ..models.trading.kline_models import KlineBar, KlineBars
-from ..models.trading.symbol_models import SymbolInfo
 from ..models.trading.order_models import (
     CancelOrderRequest,
-    CreateOrderRequest,
+    FuturesCreateOrderRequest,
+    FuturesModifyOrderRequest,
+    FuturesModifyOrderResponseData,
     GetOrderRequest,
     OpenOrdersResponseData,
     OrderCancelResponseData,
     OrderData,
     OrderListResponseData,
+    SpotAmendOrderRequest,
+    SpotAmendOrderResponseData,
+    SpotCreateOrderRequest,
 )
-from ..protocol.messages import AckData, MessageAck
+from ..protocol.messages import MessageAck
 from ..utils.symbol import parse_semantic_symbol
 from .alert_handler import AlertHandler
 from .client_manager import ClientManager
@@ -472,6 +473,14 @@ class TaskRouter:
             result = await self._handle_cancel_order(client_id, data, request_id)
             # 第三阶段：发送结果
             await self._client_manager.send(client_id, result)
+            return None
+
+        elif msg_type == "MODIFY_ORDER":
+            # 第一阶段：发送 ACK
+            await self._client_manager.send(client_id, self._create_ack(request_id))
+            # 第二阶段：创建任务并注册映射（由 _on_order_task_notification 发送最终响应）
+            await self._handle_modify_order(client_id, data, request_id)
+            # 不发送响应，等待币安服务处理完成后的通知
             return None
 
         elif msg_type == "GET_OPEN_ORDERS":
@@ -1025,9 +1034,14 @@ class TaskRouter:
             await self._client_manager.send(client_id, error_resp)
             return
 
-        # 使用 Pydantic 模型验证订单数据
+        # 根据市场类型选择正确的模型验证订单数据
         try:
-            validated_order = CreateOrderRequest.model_validate(data)
+            symbol = data.get("symbol", "")
+            # 期货: symbol 包含 .PERP 后缀
+            if ".PERP" in symbol.upper():
+                validated_order = FuturesCreateOrderRequest.model_validate(data)
+            else:
+                validated_order = SpotCreateOrderRequest.model_validate(data)
         except Exception as e:
             error_resp = self._error_response(
                 error_code="INVALID_PARAMETERS",
@@ -1129,11 +1143,11 @@ class TaskRouter:
             )
             query_payload: dict[str, Any] = {"symbol": symbol}
 
-            # orderId 和 origClientOrderId 都传给币安 API（API 会自动识别）
+            # order_id 和 orig_client_order_id 都传给币安 API（API 会自动识别）
             if order_id:
-                query_payload["orderId"] = order_id
+                query_payload["order_id"] = order_id
             if orig_client_order_id:
-                query_payload["origClientOrderId"] = orig_client_order_id
+                query_payload["orig_client_order_id"] = orig_client_order_id
 
             task_id = await self._order_tasks_repo.create_order_task(
                 task_type="order.query",
@@ -1269,7 +1283,8 @@ class TaskRouter:
                 request_id=request_id,
             )
 
-        # 使用 orig_client_order_id 作为取消依据
+        # 使用 order_id 或 orig_client_order_id 作为取消依据（两者是 OR 关系）
+        order_id = validated_cancel.order_id
         orig_client_order_id = validated_cancel.orig_client_order_id
 
         try:
@@ -1281,13 +1296,14 @@ class TaskRouter:
             )
 
             logger.info(
-                f"Created cancel order task: id={task_id}, origClientOrderId={orig_client_order_id}"
+                f"Created cancel order task: id={task_id}, orderId={order_id}, origClientOrderId={orig_client_order_id}"
             )
 
             # 使用 OrderCancelResponseData 模型构建响应
             response_data = OrderCancelResponseData(
                 task_id=task_id,
                 status="PENDING",
+                order_id=str(order_id) if order_id else None,
                 orig_client_order_id=orig_client_order_id,
             )
 
@@ -1302,6 +1318,111 @@ class TaskRouter:
                 error_code="ORDER_CANCEL_FAILED",
                 error_message=f"Failed to cancel order: {str(e)}",
                 request_id=request_id,
+            )
+
+    async def _handle_modify_order(
+        self, client_id: str, data: dict[str, Any], request_id: str | None
+    ) -> None:
+        """处理修改订单请求
+
+        Args:
+            client_id: 客户端 ID
+            data: 请求数据
+            request_id: 请求 ID
+        """
+        if self._order_tasks_repo is None:
+            await self._client_manager.send(
+                client_id,
+                self._error_response(
+                    error_code="ORDER_REPO_NOT_INITIALIZED",
+                    error_message="Order tasks repository not initialized",
+                    request_id=request_id,
+                ),
+            )
+            return
+
+        # 解析 symbol 判断市场类型
+        raw_symbol = data.get("symbol", "")
+        if raw_symbol.upper().startswith("BINANCE:"):
+            clean_symbol = raw_symbol[len("BINANCE:") :]
+            if clean_symbol.upper().endswith(".PERP"):
+                market_type = "FUTURES"
+                symbol = clean_symbol[:-5]
+            else:
+                market_type = "SPOT"
+                symbol = clean_symbol
+        else:
+            # 无前缀，默认当作期货处理（向后兼容）
+            market_type = "FUTURES"
+            symbol = raw_symbol
+
+        # 根据市场类型选择验证模型
+        # 注意：期货和现货使用不同的 API
+        # - 期货: order.modify - 可修改价格和数量
+        # - 现货: order.amend.keepPriority - 只能减少数量
+        try:
+            if market_type == "FUTURES":
+                # 验证期货修改订单请求
+                validated_modify = FuturesModifyOrderRequest.model_validate(data)
+                # 添加 market_type 到 payload（用于后续路由）
+                payload = validated_modify.model_dump()
+                payload["market_type"] = market_type
+
+                # 提取 orig_client_order_id 用于响应
+                orig_client_order_id = (
+                    validated_modify.orig_client_order_id
+                    or validated_modify.new_client_order_id
+                )
+
+            else:
+                # 验证现货修改订单请求
+                validated_modify = SpotAmendOrderRequest.model_validate(data)
+                # 添加 market_type 到 payload（用于后续路由）
+                payload = validated_modify.model_dump()
+                payload["market_type"] = market_type
+
+                # 提取 orig_client_order_id 用于响应
+                orig_client_order_id = (
+                    validated_modify.orig_client_order_id
+                    or validated_modify.new_client_order_id
+                )
+
+        except Exception as e:
+            logger.error(f"验证修改订单请求失败: {e}")
+            await self._client_manager.send(
+                client_id,
+                self._error_response(
+                    error_code="ORDER_MODIFY_VALIDATION_FAILED",
+                    error_message=f"Invalid modify order request: {str(e)}",
+                    request_id=request_id,
+                ),
+            )
+            return
+
+        try:
+            # 创建修改订单任务（requestId 存为顶层字段，不是 payload）
+            task_id = await self._order_tasks_repo.create_order_task(
+                task_type="order.modify",
+                request_id=request_id,  # 顶层字段
+                payload=payload,  # payload 不含 requestId
+            )
+
+            logger.info(f"Created modify order task: id={task_id}, symbol={symbol}, market={market_type}")
+
+            # 注册任务与客户端的映射（用于订单完成后推送结果）
+            self._client_manager.register_task(task_id, client_id)
+
+            # 不发送响应，等待币安服务处理完成后的通知
+            # 最终响应由 _on_order_task_notification 发送
+        except Exception as e:
+            logger.error(f"创建修改订单任务失败: {e}")
+            await self._client_manager.send(
+                client_id,
+                self._error_response(
+                    error_code="ORDER_MODIFY_FAILED",
+                    error_message=f"Failed to modify order: {str(e)}",
+                    request_id=request_id,
+                ),
             )
 
     async def _handle_get_open_orders(

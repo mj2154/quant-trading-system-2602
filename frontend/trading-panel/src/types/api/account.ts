@@ -89,21 +89,14 @@ export interface SpotAccountData {
   account: SpotAccountDetail
 }
 
-/**
- * 现货账户信息（别名，保持向后兼容）
- *
- * @deprecated 请使用 SpotAccountDetail
- */
-export type SpotAccountInfo = SpotAccountDetail
-
 // ==================== 期货账户类型 ====================
 
 /**
  * 期货资产信息
  *
- * 对应后端 FuturesAsset
+ * 对应后端 FuturesAccountAsset
  */
-export interface FuturesAsset {
+export interface FuturesAccountAsset {
   /** 资产名称 */
   asset: string
   /** 钱包余额 */
@@ -137,9 +130,9 @@ export interface FuturesAsset {
 /**
  * 期货持仓信息
  *
- * 对应后端 FuturesPosition
+ * 对应后端 FuturesAccountPosition
  */
-export interface FuturesPosition {
+export interface FuturesAccountPosition {
   /** 交易对 */
   symbol: string
   /** 持仓方向: BOTH, LONG, SHORT */
@@ -202,9 +195,9 @@ export interface FuturesAccountDetail {
   /** 更新时间 */
   updateTime?: number
   /** 资产列表 */
-  assets: FuturesAsset[]
+  assets: FuturesAccountAsset[]
   /** 持仓列表 */
-  positions: FuturesPosition[]
+  positions: FuturesAccountPosition[]
   /** 速率限制信息 */
   rateLimits?: Record<string, unknown>[]
 }
@@ -222,141 +215,3 @@ export interface FuturesAccountData {
   account: FuturesAccountDetail
 }
 
-/**
- * 期货账户信息（别名，保持向后兼容）
- *
- * @deprecated 请使用 FuturesAccountDetail
- */
-export type FuturesAccountInfo = FuturesAccountDetail
-
-// ==================== 统一账户类型 ====================
-
-/**
- * 账户信息（统一格式）
- */
-export interface AccountInfo {
-  /** 账户类型 */
-  accountType: 'spot' | 'futures'
-  /** 账户信息数据 */
-  accountInfo: SpotAccountInfo | FuturesAccountInfo
-  /** 更新时间 */
-  updateTime?: number
-}
-
-/**
- * 账户请求响应
- */
-export interface AccountResponse {
-  /** 账户类型标识 */
-  type: string
-  /** 账户信息内容 */
-  content: SpotAccountInfo | FuturesAccountInfo
-  /** 更新时间 */
-  updateTime?: number
-}
-
-// ==================== 账户余额模型 ====================
-
-/**
- * 账户余额模型
- *
- * 对应后端 AccountBalance
- */
-export interface AccountBalance {
-  /** 资产名称 */
-  asset: string
-  /** 可用数量 */
-  free: number
-  /** 冻结数量 */
-  locked: number
-  /** 总数量 */
-  total: number
-}
-
-// ==================== 持仓信息模型 ====================
-
-/**
- * 持仓信息模型
- *
- * 对应后端 PositionInfo
- */
-export interface PositionInfo {
-  /** 交易对 */
-  symbol: string
-  /** 持仓方向: LONG, SHORT, BOTH */
-  positionSide: string
-  /** 持仓数量 */
-  positionAmount: number
-  /** 开仓价格 */
-  entryPrice: number
-  /** 标记价格 */
-  markPrice: number
-  /** 未实现盈亏 */
-  unrealizedPnl: number
-  /** 杠杆倍数 */
-  leverage: number
-  /** 保证金 */
-  margin: number
-  /** 盈亏百分比 */
-  pnlPercent: number
-}
-
-// ==================== 前端展示类型 ====================
-
-/**
- * 账户概览（用于展示）
- */
-export interface AccountOverview {
-  /** 账户类型 */
-  accountType: 'spot' | 'futures'
-  /** 总资产（USDT估值） */
-  totalAsset: string
-  /** 可用余额 */
-  availableBalance: string
-  /** 持仓数量 */
-  positionCount: number
-  /** 更新时间 */
-  updateTime: string
-}
-
-/**
- * 持仓项目（用于展示）
- */
-export interface PositionItem {
-  /** 交易对 */
-  symbol: string
-  /** 持仓方向 */
-  side: 'long' | 'short' | 'both'
-  /** 持仓数量 */
-  amount: string
-  /** 开仓价格 */
-  entryPrice: string
-  /** 标记价格 */
-  markPrice: string
-  /** 未实现盈亏 */
-  unrealizedPnl: string
-  /** 持仓保证金 */
-  margin: string
-  /** 强平价格 */
-  liquidationPrice?: string
-  /** 名义价值 */
-  notional?: string
-  /** 杠杆倍数 */
-  leverage?: string
-  /** 是否逐仓 */
-  isIsolated?: boolean
-}
-
-/**
- * 余额项目（用于展示）
- */
-export interface BalanceItem {
-  /** 资产 */
-  asset: string
-  /** 可用 */
-  free: string
-  /** 锁定 */
-  locked: string
-  /** 总计 */
-  total: string
-}

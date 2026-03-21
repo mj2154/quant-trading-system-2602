@@ -11,7 +11,6 @@ from typing import Optional
 from urllib.parse import urlencode
 
 from .base_http_client import BinanceHTTPClient
-from models.spot_account import SpotAccountInfo
 from utils.ed25519_signer import Ed25519Signer
 from utils.rsa_signer import RSASigner
 
@@ -183,7 +182,7 @@ class BinanceSpotPrivateHTTPClient(BinanceHTTPClient):
 
     async def get_account_info(
         self, recv_window: Optional[int] = None
-    ) -> SpotAccountInfo:
+    ) -> dict:
         """获取账户信息
 
         调用 GET /api/v3/account 获取账户详情。
@@ -192,7 +191,7 @@ class BinanceSpotPrivateHTTPClient(BinanceHTTPClient):
             recv_window: 接收窗口时间（毫秒），默认5000
 
         Returns:
-            账户信息模型
+            账户信息字典（待实现模型）
         """
         response = await self._signed_request(
             method="GET",
@@ -201,7 +200,7 @@ class BinanceSpotPrivateHTTPClient(BinanceHTTPClient):
             recv_window=recv_window or 5000,
         )
 
-        return SpotAccountInfo.model_validate(response)
+        return response
 
     async def get_order(
         self,

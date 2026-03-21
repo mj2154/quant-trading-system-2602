@@ -11,36 +11,19 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { dataService } from '../services/data-service/DataService'
-import type { SignalRecord } from '../types/api'
+import type {
+  SignalRecord,
+  AlertConfig,
+  CreateAlertConfigRequest,
+  UpdateAlertConfigRequest,
+} from '../types/api'
 import type { SignalRecordQueryParams } from '../types/api/signal'
-import type { AlertConfig } from '../types/api'
 
 // Re-export types for other components
 export type { SignalRecord }
 export type { AlertConfig }
-
-// 创建和更新告警配置的类型别名（保持向后兼容）
-export type AlertConfigCreate = {
-  name: string
-  description?: string
-  strategyType: string
-  symbol: string
-  interval: string
-  triggerType?: string
-  params?: Record<string, number | boolean>
-  isEnabled?: boolean
-}
-
-export type AlertConfigUpdate = {
-  name?: string
-  description?: string
-  strategyType?: string
-  symbol?: string
-  interval?: string
-  triggerType?: string
-  params?: Record<string, number | boolean>
-  isEnabled?: boolean
-}
+export type { CreateAlertConfigRequest }
+export type { UpdateAlertConfigRequest }
 
 // ==================== 常量定义 ====================
 
@@ -151,18 +134,8 @@ export const useAlertStore = defineStore('alert', () => {
     alertsLoading.value = true
     alertsError.value = null
     try {
-      const configs = await dataService.listAlertConfigs(1, 100)
-
-      alerts.value = configs.map((item) => ({
-        ...item,
-        // 确保所有必需字段都有默认值（使用 ?? 运算符，只有 null/undefined 时才使用默认值）
-        strategyType: item.strategyType ?? 'macd_resonance_v5',
-        symbol: item.symbol || '',
-        interval: item.interval || '60',
-        triggerType: item.triggerType || 'each_kline_close',
-        params: item.params || { ...DEFAULT_PARAMS },
-        isEnabled: item.isEnabled ?? true,
-      }))
+      // DataService 已完成所有数据转换（snake_case -> camelCase + 默认值填充）
+      alerts.value = await dataService.listAlertConfigs(1, 100)
 
       // 告警列表加载完成后，订阅这些告警的信号事件
       subscribeToAlertSignalEvents()
@@ -181,13 +154,8 @@ export const useAlertStore = defineStore('alert', () => {
     alertsLoading.value = true
     alertsError.value = null
     try {
-      const alert = await dataService.getAlert(id)
-      if (alert) {
-        currentAlert.value = {
-          ...alert,
-          strategyType: alert.strategyType || 'macd',
-        }
-      }
+      // DataService 已完成所有数据转换
+      currentAlert.value = await dataService.getAlert(id)
       return currentAlert.value
     } catch (error) {
       alertsError.value = error instanceof Error ? error.message : '获取告警详情失败'
@@ -507,6 +475,7 @@ export const useAlertStore = defineStore('alert', () => {
     const testSignal: SignalRecord = {
       id: Date.now(),
       alertId: 'test-alert',
+      name: '测试告警',
       strategyType: '测试策略',
       symbol: 'BTCUSDT',
       interval: '60',

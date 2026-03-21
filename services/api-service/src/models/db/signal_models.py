@@ -84,15 +84,3 @@ class SignalListResponse(CamelCaseModel):
     total: int = Field(..., description="总数量")
     page: int = Field(..., description="当前页码")
     page_size: int = Field(..., description="每页数量")
-
-
-class EnableDisableResponse(CamelCaseModel):
-    """启用/禁用响应模型
-
-    使用 CamelCaseModel 基类，序列化时自动将字段转换为 camelCase。
-    """
-
-    id: UUID = Field(..., description="配置ID")
-    name: str = Field(..., description="名称")
-    is_enabled: bool = Field(..., description="是否启用")
-    message: str = Field(..., description="操作结果消息")

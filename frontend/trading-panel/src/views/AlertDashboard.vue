@@ -143,8 +143,6 @@ import RealtimeAlerts from '../components/alert/RealtimeAlerts.vue'
 import {
   useAlertStore,
   type AlertConfig,
-  type AlertConfigCreate,
-  type AlertConfigUpdate,
 } from '../stores/alert-store'
 import { useAlertSettings, SOUND_TYPE_NAMES, type SoundType } from '../composables/useAlertSettings'
 
@@ -249,7 +247,7 @@ async function handleSubmitForm(data: AlertConfig) {
 
   if (editingAlert.value) {
     // 编辑模式
-    const updateData: AlertConfigUpdate = {
+    const updateData = {
       name: data.name,
       description: data.description ?? undefined,
       triggerType: data.triggerType,
@@ -268,7 +266,7 @@ async function handleSubmitForm(data: AlertConfig) {
     }
   } else {
     // 创建模式
-    const createData: AlertConfigCreate = {
+    const createData = {
       name: data.name,
       description: data.description ?? undefined,
       triggerType: data.triggerType,

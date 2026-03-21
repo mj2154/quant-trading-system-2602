@@ -16,6 +16,7 @@
         :rules="formRules"
         label-placement="top"
         require-mark-placement="right-hanging"
+        show-feedback
       >
         <!-- 基本信息 -->
         <n-form-item label="告警名称" path="name">
@@ -237,7 +238,11 @@ const strategyStore = useStrategyStore()
 onMounted(async () => {
   // 确保 DataService 已连接后再获取策略
   await store.initialize()
-  strategyStore.fetchStrategies()
+  await strategyStore.fetchStrategies()
+  // 策略加载完成后，确保 formData.strategyType 有有效值
+  if (!formData.strategyType && strategyStore.strategies.length > 0) {
+    formData.strategyType = strategyStore.strategies[0].type
+  }
 })
 
 // 监听策略列表加载完成，自动初始化当前策略的参数
@@ -306,7 +311,7 @@ const formRules: FormRules = {
   name: {
     required: true,
     message: '请输入告警名称',
-    trigger: 'blur',
+    trigger: ['blur', 'input'],
   },
   symbol: {
     required: true,
@@ -318,46 +323,15 @@ const formRules: FormRules = {
     message: '请选择K线周期',
     trigger: 'change',
   },
-  trigger_type: {
+  triggerType: {
     required: true,
     message: '请选择触发类型',
     trigger: 'change',
   },
-  'params.fast1': {
+  strategyType: {
     required: true,
-    type: 'number',
-    message: '请输入快速EMA',
-    trigger: 'blur',
-  },
-  'params.slow1': {
-    required: true,
-    type: 'number',
-    message: '请输入慢速EMA',
-    trigger: 'blur',
-  },
-  'params.signal1': {
-    required: true,
-    type: 'number',
-    message: '请输入信号线',
-    trigger: 'blur',
-  },
-  'params.fast2': {
-    required: true,
-    type: 'number',
-    message: '请输入快速EMA',
-    trigger: 'blur',
-  },
-  'params.slow2': {
-    required: true,
-    type: 'number',
-    message: '请输入慢速EMA',
-    trigger: 'blur',
-  },
-  'params.signal2': {
-    required: true,
-    type: 'number',
-    message: '请输入信号线',
-    trigger: 'blur',
+    message: '请选择策略类型',
+    trigger: 'change',
   },
 }
 
@@ -508,7 +482,23 @@ function resetForm() {
 async function handleSubmit() {
   try {
     await formRef.value?.validate()
-  } catch {
+  } catch (errors) {
+    // 表单验证失败，提示用户
+    console.warn('[AlertConfigForm] Validation failed:', errors)
+    return
+  }
+
+  // 检查关键必填字段
+  if (!formData.name?.trim()) {
+    console.warn('[AlertConfigForm] Name is required')
+    return
+  }
+  if (!formData.strategyType) {
+    console.warn('[AlertConfigForm] Strategy type is required')
+    return
+  }
+  if (!formData.symbol) {
+    console.warn('[AlertConfigForm] Symbol is required')
     return
   }
 
@@ -517,8 +507,8 @@ async function handleSubmit() {
   try {
     const submitData: AlertConfig = {
       id: props.alert?.id || '',
-      name: formData.name,
-      description: formData.description || undefined,
+      name: formData.name.trim(),
+      description: formData.description?.trim() || undefined,
       triggerType: formData.triggerType,
       symbol: formData.symbol,
       interval: formData.interval,

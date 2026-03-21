@@ -71,11 +71,6 @@ export type {
   OrderData,
   OrderListData,
   OrderUpdateData,
-  CreateOrderParams,
-  OrderFilters,
-  Order,
-  OrderListResponse,
-  OrderUpdate,
 } from './order'
 
 // ==================== 账户类型 ====================
@@ -85,19 +80,10 @@ export type {
   SpotCommissionRates,
   SpotAccountDetail,
   SpotAccountData,
-  SpotAccountInfo,
-  FuturesAsset,
-  FuturesPosition,
+  FuturesAccountAsset,
+  FuturesAccountPosition,
   FuturesAccountDetail,
   FuturesAccountData,
-  FuturesAccountInfo,
-  AccountInfo,
-  AccountResponse,
-  AccountBalance,
-  PositionInfo,
-  AccountOverview,
-  PositionItem,
-  BalanceItem,
 } from './account'
 
 // ==================== 信号类型 ====================
@@ -117,18 +103,13 @@ export type {
 export type {
   AlertTriggerType,
   AlertStrategyType,
-  CreateAlertSignalRequest,
-  UpdateAlertSignalRequest,
-  DeleteAlertSignalRequest,
-  EnableAlertSignalRequest,
-  ListAlertSignalsRequest,
-  AlertSignalResponse,
-  AlertSignalListResponse,
-  EnableDisableAlertResponse,
-  AlertConfig,
+  CreateAlertConfigRequest,
+  UpdateAlertConfigRequest,
+  DeleteAlertConfigRequest,
+  ListAlertConfigsRequest,
+  AlertConfigResponse,
   AlertConfigListResponse,
-  AlertMacdParams,
-  AlertParams,
+  AlertConfig,
   ALERT_TRIGGER_TYPE_OPTIONS,
   ALERT_STRATEGY_TYPE_OPTIONS,
   INTERVAL_OPTIONS,
@@ -139,7 +120,7 @@ export type {
 
 import type { KlineBar } from './kline'
 import type { SignalRecord } from './signal'
-import type { Order } from './order'
+import type { OrderData } from './order'
 import type { QuotesValue } from './quote'
 
 /**
@@ -193,7 +174,7 @@ export type SubscriptionData =
   | { type: 'trade'; data: TradeData; subscriptionKey: string }
   | { type: 'account'; data: AccountUpdate; subscriptionKey: string }
   | { type: 'signal'; data: SignalRecord; subscriptionKey: string }
-  | { type: 'order'; data: Order; subscriptionKey: string }
+  | { type: 'order'; data: OrderData; subscriptionKey: string }
 
 /**
  * 存储的订阅信息

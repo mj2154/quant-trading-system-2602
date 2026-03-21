@@ -18,10 +18,6 @@ import {
   type GetKlinesResponse,
   type GetQuotesResponse,
   type AccountDataResponse,
-  type OrderResponse,
-  type OrderListResponseData,
-  type AlertConfigResponse,
-  type AlertConfigOperationResponse,
   type SignalResponse,
   type StrategyMetadataListResponse,
   type StrategyMetadataResponse,
@@ -30,13 +26,14 @@ import type {
   GetKlinesParams,
   KlineBars,
   QuotesList,
-  SpotAccountInfo,
-  FuturesAccountInfo,
+  SpotAccountDetail,
+  FuturesAccountDetail,
   SpotAccountData,
   FuturesAccountData,
   AlertConfig,
+  AlertConfigListResponse,
   SignalRecord,
-  Order,
+  OrderData,
   OrderListData,
   SubscriptionOptions,
   SubscriptionInfo,
@@ -187,6 +184,7 @@ export class DataService {
           this.connected = true
           this.connecting = false
           this.onConnectCallback?.()
+          this.restoreSubscriptions()
           resolve()
         }
 
@@ -564,25 +562,25 @@ export class DataService {
   /**
    * 获取现货账户信息
    */
-  async getSpotAccount(): Promise<SpotAccountInfo> {
+  async getSpotAccount(): Promise<SpotAccountDetail> {
     await this.ensureConnected()
 
     const response = await this.request<AccountDataResponse>('GET_SPOT_ACCOUNT')
 
     // response.account 是 SpotAccountData，需取其内部的 account 字段
-    return (response.account as SpotAccountData).account as SpotAccountInfo
+    return (response.account as SpotAccountData).account as SpotAccountDetail
   }
 
   /**
    * 获取期货账户信息
    */
-  async getFuturesAccount(): Promise<FuturesAccountInfo> {
+  async getFuturesAccount(): Promise<FuturesAccountDetail> {
     await this.ensureConnected()
 
     const response = await this.request<AccountDataResponse>('GET_FUTURES_ACCOUNT')
 
     // response.account 是 FuturesAccountData，需取其内部的 account 字段
-    return (response.account as FuturesAccountData).account as FuturesAccountInfo
+    return (response.account as FuturesAccountData).account as FuturesAccountDetail
   }
 
   // ==================== 告警管理 ====================
@@ -593,7 +591,7 @@ export class DataService {
   async listAlertConfigs(page = 1, pageSize = 20): Promise<AlertConfig[]> {
     await this.ensureConnected()
 
-    const response = await this.request<AlertConfigResponse>('LIST_ALERT_CONFIGS', {
+    const response = await this.request<AlertConfigListResponse>('LIST_ALERT_CONFIGS', {
       page,
       pageSize,
     })
@@ -603,12 +601,21 @@ export class DataService {
       return {
         ...item,
         strategyType: (rawItem.strategyType as string) || (rawItem.strategy_type as string) || '',
-        triggerType: (rawItem.triggerType as string) || (rawItem.trigger_type as string) || '',
+        symbol: (rawItem.symbol as string) || '',
+        interval: (rawItem.interval as string) || '60',
+        triggerType: (rawItem.triggerType as string) || (rawItem.trigger_type as string) || 'each_kline_close',
+        params: this.convertParamsFromBackend(item.params) || {
+          macd1_fastperiod: 12,
+          macd1_slowperiod: 26,
+          macd1_signalperiod: 9,
+          macd2_fastperiod: 5,
+          macd2_slowperiod: 10,
+          macd2_signalperiod: 4,
+        },
         isEnabled: (rawItem.isEnabled as boolean) ?? (rawItem.is_enabled as boolean) ?? true,
         createdAt: (rawItem.createdAt as string) || (rawItem.created_at as string) || '',
         updatedAt: (rawItem.updatedAt as string) || (rawItem.updated_at as string) || '',
         createdBy: (rawItem.createdBy as string) || (rawItem.created_by as string) || undefined,
-        params: this.convertParamsFromBackend(item.params),
       }
     })
   }
@@ -619,7 +626,7 @@ export class DataService {
   async getAlert(id: string): Promise<AlertConfig | null> {
     await this.ensureConnected()
 
-    const response = await this.request<AlertConfigResponse>('LIST_ALERT_CONFIGS', {
+    const response = await this.request<AlertConfigListResponse>('LIST_ALERT_CONFIGS', {
       limit: 1,
       offset: 0,
     })
@@ -629,9 +636,25 @@ export class DataService {
     }
 
     const alert = response.items[0]
+    const rawItem = alert as unknown as Record<string, unknown>
     return {
       ...alert,
-      params: this.convertParamsFromBackend(alert.params),
+      strategyType: (rawItem.strategyType as string) || (rawItem.strategy_type as string) || '',
+      symbol: (rawItem.symbol as string) || '',
+      interval: (rawItem.interval as string) || '60',
+      triggerType: (rawItem.triggerType as string) || (rawItem.trigger_type as string) || 'each_kline_close',
+      params: this.convertParamsFromBackend(alert.params) || {
+        macd1_fastperiod: 12,
+        macd1_slowperiod: 26,
+        macd1_signalperiod: 9,
+        macd2_fastperiod: 5,
+        macd2_slowperiod: 10,
+        macd2_signalperiod: 4,
+      },
+      isEnabled: (rawItem.isEnabled as boolean) ?? (rawItem.is_enabled as boolean) ?? true,
+      createdAt: (rawItem.createdAt as string) || (rawItem.created_at as string) || '',
+      updatedAt: (rawItem.updatedAt as string) || (rawItem.updated_at as string) || '',
+      createdBy: (rawItem.createdBy as string) || (rawItem.created_by as string) || undefined,
     }
   }
 
@@ -652,7 +675,7 @@ export class DataService {
 
     const params = this.convertParamsToBackend(config.params)
 
-    const response = await this.request<AlertConfigOperationResponse>('CREATE_ALERT_CONFIG', {
+    const response = await this.request<AlertConfig>('CREATE_ALERT_CONFIG', {
       id: crypto.randomUUID().replace(/-/g, ''),
       name: config.name,
       description: config.description || '',
@@ -665,23 +688,10 @@ export class DataService {
       createdBy: 'local_user',
     })
 
-    if (!response.id) {
-      throw new Error('Failed to create alert')
-    }
-
     return {
-      id: response.id,
-      name: response.name || '',
-      description: response.description || '',
-      strategyType: response.strategyType || '',
-      symbol: response.symbol || '',
-      interval: response.interval || '',
-      triggerType: response.triggerType || 'each_kline_close',
+      ...response,
       params: this.convertParamsFromBackend(response.params),
-      isEnabled: response.isEnabled ?? true,
-      createdAt: response.createdAt,
-      updatedAt: response.updatedAt,
-    } as AlertConfig
+    }
   }
 
   /**
@@ -714,25 +724,12 @@ export class DataService {
     if (params !== undefined) requestData.params = params
     if (updates.isEnabled !== undefined) requestData.isEnabled = updates.isEnabled
 
-    const response = await this.request<AlertConfigOperationResponse>('UPDATE_ALERT_CONFIG', requestData)
-
-    if (!response.id) {
-      throw new Error('Failed to update alert')
-    }
+    const response = await this.request<AlertConfig>('UPDATE_ALERT_CONFIG', requestData)
 
     return {
-      id: response.id,
-      name: response.name || '',
-      description: response.description || '',
-      strategyType: response.strategyType || '',
-      symbol: response.symbol || '',
-      interval: response.interval || '',
-      triggerType: response.triggerType || 'each_kline_close',
+      ...response,
       params: this.convertParamsFromBackend(response.params),
-      isEnabled: response.isEnabled ?? true,
-      createdAt: response.createdAt,
-      updatedAt: response.updatedAt,
-    } as AlertConfig
+    }
   }
 
   /**
@@ -848,12 +845,9 @@ export class DataService {
   }): Promise<OrderListData> {
     await this.ensureConnected()
 
-    const response = await this.request<OrderListResponseData>('LIST_ORDERS', params || {})
+    const response = await this.request<OrderListData>('LIST_ORDERS', params || {})
 
-    return {
-      orders: response.orders || [],
-      count: response.count || 0,
-    }
+    return response
   }
 
   /**
@@ -863,12 +857,9 @@ export class DataService {
     await this.ensureConnected()
 
     const params = symbol ? { symbol } : {}
-    const response = await this.request<OrderListResponseData>('GET_OPEN_ORDERS', params)
+    const response = await this.request<OrderListData>('GET_OPEN_ORDERS', params)
 
-    return {
-      orders: response.orders || [],
-      count: response.count || 0,
-    }
+    return response
   }
 
   // ==================== 策略元数据 ====================
@@ -900,10 +891,10 @@ export class DataService {
   /**
    * 获取订单详情
    */
-  async getOrder(params: { symbol: string; orderId?: number; origClientOrderId?: string }): Promise<Order> {
+  async getOrder(params: { symbol: string; orderId?: number; origClientOrderId?: string }): Promise<OrderData> {
     await this.ensureConnected()
 
-    const response = await this.request<OrderResponse>('GET_ORDER', params)
+    const response = await this.request<{ order: OrderData }>('GET_ORDER', params)
 
     return response.order
   }
@@ -914,23 +905,42 @@ export class DataService {
   async createOrder(params: {
     symbol: string
     side: string
-    orderType: string
-    quantity?: string
-    quoteOrderQty?: string
-    price?: string
+    type: string
+    quantity?: number | string
+    quoteOrderQty?: number | string
+    price?: number | string
     timeInForce?: string
-    stopPrice?: string
+    stopPrice?: number | string
     reduceOnly?: boolean
     positionSide?: string
-    clientOrderId?: string
-  }): Promise<Order> {
+    newClientOrderId?: string
+    icebergQty?: number | string
+    trailingDelta?: number
+    strategyId?: number
+    strategyType?: number
+    selfTradePreventionMode?: string
+  }): Promise<OrderData> {
     await this.ensureConnected()
 
-    const clientOrderId = params.clientOrderId || crypto.randomUUID().replace(/-/g, '')
+    const clientOrderId = params.newClientOrderId || crypto.randomUUID().replace(/-/g, '')
 
-    const response = await this.request<OrderResponse>('CREATE_ORDER', {
-      ...params,
-      clientOrderId,
+    const response = await this.request<{ order: OrderData }>('CREATE_ORDER', {
+      symbol: params.symbol,
+      side: params.side,
+      type: params.type,
+      quantity: params.quantity?.toString(),
+      quoteOrderQty: params.quoteOrderQty?.toString(),
+      price: params.price?.toString(),
+      timeInForce: params.timeInForce,
+      stopPrice: params.stopPrice?.toString(),
+      reduceOnly: params.reduceOnly,
+      positionSide: params.positionSide,
+      newClientOrderId: clientOrderId,
+      icebergQty: params.icebergQty?.toString(),
+      trailingDelta: params.trailingDelta,
+      strategyId: params.strategyId,
+      strategyType: params.strategyType,
+      selfTradePreventionMode: params.selfTradePreventionMode,
     })
 
     return response.order
@@ -939,10 +949,10 @@ export class DataService {
   /**
    * 取消订单
    */
-  async cancelOrder(params: { symbol: string; orderId?: number; origClientOrderId?: string }): Promise<Order> {
+  async cancelOrder(params: { symbol: string; orderId?: number; origClientOrderId?: string }): Promise<OrderData> {
     await this.ensureConnected()
 
-    const response = await this.request<OrderResponse>('CANCEL_ORDER', params)
+    const response = await this.request<{ order: OrderData }>('CANCEL_ORDER', params)
 
     return response.order
   }

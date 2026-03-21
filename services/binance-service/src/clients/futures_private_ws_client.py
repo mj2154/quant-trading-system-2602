@@ -13,16 +13,13 @@ WebSocket端点：wss://testnet.binancefuture.com/ws-fapi/v1 (仅Testnet)
 4. 重连逻辑与公共WS客户端一致（无需重新认证）
 """
 
-import asyncio
 import json
 import logging
 import time
 from typing import Any, Awaitable, Callable, Optional
 
-from websockets.asyncio.client import connect
-
 from clients.base_ws_client import BaseWSClient
-from models.ws_trading_models import WSResponse
+from models.ws_message import WSResponse
 from utils.ed25519_signer import Ed25519Signer
 
 logger = logging.getLogger(__name__)
@@ -118,36 +115,8 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
         await self._send(request)
         logger.debug(f"[{self.CLIENT_ID}] 请求已发送: method={method}, id={request_id}")
 
-    async def connect(self) -> None:
-        """建立WebSocket连接
-
-        设计文档 8.10.10：无需连接级认证，每个请求都带签名
-        """
-        if self._state.connected:
-            return
-
-        logger.info(f"[{self.CLIENT_ID}] 正在连接...")
-        try:
-            connect_kwargs: dict[str, Any] = {}
-            if self._proxy_url:
-                connect_kwargs["proxy"] = self._proxy_url
-
-            self._websocket = await connect(self.WS_URI, **connect_kwargs)
-            self._state.connected = True
-            self._running = True
-            logger.info(f"[{self.CLIENT_ID}] 已连接")
-
-            # 启动接收循环
-            self._receive_task = asyncio.create_task(self._receive_loop())
-
-        except Exception as e:
-            logger.error(f"[{self.CLIENT_ID}] 连接失败: {e}")
-            self._state.connected = False
-            self._running = True
-            # 调度持续重连
-            if self._reconnect_task and not self._reconnect_task.done():
-                self._reconnect_task.cancel()
-            self._reconnect_task = asyncio.create_task(self._schedule_reconnect())
+    # connect() 使用基类实现，无需覆盖
+    # 基类包含 open_timeout、close_timeout 和连接过程中的状态检查
 
     def _create_ws_payload(self, params: dict) -> str:
         """创建WebSocket签名的payload
@@ -268,8 +237,7 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
 
         if order_id is not None:
             params["orderId"] = order_id
-
-        if orig_client_order_id is not None:
+        elif orig_client_order_id is not None:
             params["origClientOrderId"] = orig_client_order_id
 
         if recv_window is not None:
@@ -313,14 +281,89 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
 
         if order_id is not None:
             params["orderId"] = order_id
-
-        if orig_client_order_id is not None:
+        elif orig_client_order_id is not None:
             params["origClientOrderId"] = orig_client_order_id
 
         if recv_window is not None:
             params["recvWindow"] = recv_window
 
         # 设计文档 8.10.10：每个请求都带签名认证（apiKey + signature）
+        params["apiKey"] = self.api_key
+
+        # 生成签名（payload按键名字母顺序排序）
+        payload = self._create_ws_payload(params)
+        params["signature"] = self._signer.sign(payload)
+
+        return params
+
+    def _build_modify_order_params(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        price: float,
+        timestamp: int,
+        order_id: Optional[str] = None,
+        orig_client_order_id: Optional[str] = None,
+        new_client_order_id: Optional[str] = None,
+        position_side: Optional[str] = None,
+        price_match: Optional[str] = None,
+        recv_window: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """构建修改订单参数
+
+        期货 order.modify API - 可修改价格和数量，仅支持 LIMIT 订单
+
+        设计文档 8.10.10：每个请求都带签名认证
+
+        Args:
+            symbol: 交易对
+            side: 订单方向（BUY/SELL）
+            quantity: 新订单数量
+            price: 新订单价格
+            timestamp: 时间戳（毫秒）
+            order_id: 订单ID
+            orig_client_order_id: 客户端订单ID
+            new_client_order_id: 新客户端订单ID
+            position_side: 持仓方向
+            price_match: 价格匹配模式（与price不能同时使用）
+            recv_window: 接收窗口
+
+        Returns:
+            修改订单参数字典（包含apiKey和signature）
+
+        Note:
+            - priceMatch 与 price 不能同时使用
+            - 仅支持 LIMIT 订单修改
+            - 单个订单最多修改 10000 次
+        """
+        params: dict[str, Any] = {
+            "symbol": symbol.upper(),
+            "side": side.upper(),
+            "quantity": str(quantity),
+            "price": str(price),
+            "timestamp": timestamp,
+        }
+
+        # ID 优先级：orderId > origClientOrderId
+        if order_id is not None:
+            params["orderId"] = order_id
+        elif orig_client_order_id is not None:
+            params["origClientOrderId"] = orig_client_order_id
+
+        if new_client_order_id is not None:
+            params["newClientOrderId"] = new_client_order_id
+
+        if position_side is not None:
+            params["positionSide"] = position_side.upper()
+
+        if price_match is not None:
+            params["priceMatch"] = price_match
+
+        if recv_window is not None:
+            params["recvWindow"] = recv_window
+
+        # 每个请求都带签名认证（apiKey + signature）
         params["apiKey"] = self.api_key
 
         # 生成签名（payload按键名字母顺序排序）
@@ -365,73 +408,5 @@ class BinanceFuturesPrivateWSClient(BaseWSClient):
         # 处理其他消息（如用户数据流）- 暂时不实现
         logger.debug(f"[{self.CLIENT_ID}] 收到其他消息: {message.get('e', 'unknown')}")
 
-    async def _reconnect(self) -> None:
-        """断线重连
-
-        设计文档 8.10.10：重连逻辑与公共WS客户端一致，无需重新认证
-        """
-        if not self._running:
-            return
-
-        logger.info(f"[{self.CLIENT_ID}] 尝试重新连接...")
-
-        # 1. 正确关闭旧连接
-        old_websocket = self._websocket
-        self._websocket = None
-        self._state.connected = False
-
-        if old_websocket:
-            try:
-                await old_websocket.close()
-                logger.debug(f"[{self.CLIENT_ID}] 旧连接已关闭")
-            except Exception as e:
-                logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
-
-        # 2. 尝试创建新连接
-        success = await self._try_reconnect()
-
-        if not success and self._running:
-            # 调度持续重试任务
-            if self._reconnect_task and not self._reconnect_task.done():
-                self._reconnect_task.cancel()
-            self._reconnect_task = asyncio.create_task(self._schedule_reconnect())
-
-    async def _try_reconnect(self) -> bool:
-        """尝试重连，返回是否成功
-
-        设计文档 8.10.10：重连逻辑与公共WS客户端一致，无需重新认证
-        """
-        try:
-            # 关闭旧连接
-            old_websocket = self._websocket
-            self._websocket = None
-            self._state.connected = False
-
-            if old_websocket:
-                try:
-                    await old_websocket.close()
-                except Exception as e:
-                    logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
-
-            # 创建新连接
-            connect_kwargs = {}
-            if self._proxy_url:
-                connect_kwargs["proxy"] = self._proxy_url
-
-            self._websocket = await connect(self.WS_URI, **connect_kwargs)
-            self._state.connected = True
-            logger.info(f"[{self.CLIENT_ID}] 已重新连接")
-
-            # 设计文档 8.10.10：无需重新认证，每个请求都带签名
-
-            if self._reconnect_callback:
-                await self._reconnect_callback()
-
-            self._receive_task = asyncio.create_task(self._receive_loop())
-            self._reconnect_task = None
-            return True
-
-        except Exception as e:
-            logger.error(f"[{self.CLIENT_ID}] 重连失败: {e}")
-            self._state.connected = False
-            return False
+    # _reconnect 和 _try_reconnect 使用基类实现，无需覆盖
+    # 基类使用 self.WS_URI，子类已在 __init__ 中设置了正确的 URI

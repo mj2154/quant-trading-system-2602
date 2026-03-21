@@ -26,8 +26,8 @@ from typing import Optional
 from clients import BinanceSpotHTTPClient, BinanceFuturesHTTPClient
 from storage import ExchangeInfoRepository
 from models import (
-    ExchangeInfoResponseSpot,
-    ExchangeInfoResponseFutures,
+    BinanceSpotExchangeInfoGetModel,
+    BinanceFuturesExchangeInfoGetModel,
     ExchangeInfo,
     MarketType,
 )
@@ -111,7 +111,7 @@ class ExchangeInfoHandler:
             raw_info = await self._spot_http.get_exchange_info()
 
             # 使用现货专用 Pydantic 模型验证数据
-            info_response = ExchangeInfoResponseSpot.model_validate(raw_info)
+            info_response = BinanceSpotExchangeInfoGetModel.model_validate(raw_info)
 
             # 转换为 ExchangeInfo 模型并存储
             exchange_infos = []
@@ -142,7 +142,7 @@ class ExchangeInfoHandler:
             raw_info = await self._futures_http.get_exchange_info()
 
             # 使用期货专用 Pydantic 模型验证数据
-            info_response = ExchangeInfoResponseFutures.model_validate(raw_info)
+            info_response = BinanceFuturesExchangeInfoGetModel.model_validate(raw_info)
 
             # 转换为 ExchangeInfo 模型并存储
             exchange_infos = []

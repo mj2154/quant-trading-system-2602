@@ -12,6 +12,9 @@ from pydantic import Field
 # 使用本地基类进行命名转换
 from ..models.base import CamelCaseModel, SnakeCaseModel
 
+# 从 ws_payload 导入 AckData（统一使用，避免类型不一致）
+from ..models.protocol.ws_payload import AckData
+
 
 class WSRequest(SnakeCaseModel):
     """WebSocket请求消息
@@ -67,20 +70,6 @@ class ErrorData(CamelCaseModel):
 
     error_code: str
     error_message: str
-
-
-class AckData(CamelCaseModel):
-    """确认消息数据
-
-    严格遵循 07-websocket-protocol.md 规范：
-    - type 字段值为 "ACK"
-    - data 为空对象 {}
-
-    内部使用snake_case，序列化输出camelCase。
-    """
-
-    # 空数据对象，严格遵循协议文档
-    pass
 
 
 class MessageAck(CamelCaseModel):

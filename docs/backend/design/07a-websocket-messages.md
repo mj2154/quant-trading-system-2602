@@ -409,10 +409,15 @@
 
 #### 请求ID说明
 
-| 字段 | 说明 | 格式 |
-|------|------|------|
-| `requestId` | WS请求追踪ID | UUID v4 hex (32字符) |
-| `newClientOrderId` | 订单标识ID | UUID v4 hex (32字符) |
+| 字段 | 说明 | 格式 | 必填 |
+|------|------|------|------|
+| `requestId` | WS请求追踪ID | UUID v4 hex (32字符) | ✅ |
+| `newClientOrderId` | 订单标识ID（可选，币安自动生成） | UUID v4 hex (32字符) | ❌ |
+
+> **重要说明**：`newClientOrderId` 为**可选字段**，与币安官方 API 保持一致：
+> - 不传时，币安会自动生成订单标识
+> - 传入时，使用自定义订单标识便于追踪
+> - 订单响应中的 `orderId` 是更可靠的订单追踪标识（币安全局唯一）
 
 #### 创建订单（期货）
 
@@ -436,7 +441,10 @@
 }
 ```
 
-**必填字段**: `symbol`, `side`, `type`, `quantity`, `newClientOrderId`
+**必填字段**: `symbol`, `side`, `type`, `quantity`
+**可选字段**: `positionSide`, `price`, `timeInForce`, `reduceOnly`, `stopPrice`, `callbackRate`, `newOrderRespType`, `priceMatch`, `selfTradePreventionMode`, `goodTillDate`
+
+> **注意**：期货不支持 `closePosition`, `activationPrice`, `workingType`, `priceProtect`
 
 #### 创建订单（现货）
 
@@ -457,6 +465,11 @@
     }
 }
 ```
+
+**必填字段**: `symbol`, `side`, `type`, `quantity`
+**可选字段**: `price`, `timeInForce`, `quoteOrderQty`, `stopPrice`, `icebergQty`, `trailingDelta`, `strategyId`, `strategyType`, `newOrderRespType`, `selfTradePreventionMode`
+
+> **注意**：现货不支持 `positionSide`, `reduceOnly`
 
 #### 查询订单
 
@@ -503,6 +516,51 @@
     }
 }
 ```
+
+#### 修改订单（期货）
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "MODIFY_ORDER",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "quantity": 0.003,
+        "price": 51000.0,
+        "timestamp": 1703426755754,
+        "origClientOrderId": "660e8400e29b41d4a716446655440001",
+        "newClientOrderId": "770e8400e29b41d4a716446655440002",
+        "positionSide": "BOTH"
+    }
+}
+```
+
+**必填字段**: `symbol`, `side`, `quantity`, `price`, `timestamp`, `origClientOrderId` 或 `orderId`
+**限制**: 仅支持 LIMIT 订单修改
+
+#### 修改订单（现货）
+
+```json
+{
+    "protocolVersion": "2.0",
+    "type": "MODIFY_ORDER",
+    "requestId": "550e8400e29b41d4a716446655440000",
+    "timestamp": 1704067200000,
+    "data": {
+        "symbol": "BTCUSDT",
+        "timestamp": 1741922620419,
+        "origClientOrderId": "660e8400e29b41d4a716446655440001",
+        "newClientOrderId": "770e8400e29b41d4a716446655440002",
+        "newQty": 0.001
+    }
+}
+```
+
+**必填字段**: `symbol`, `timestamp`, `newQty`, `origClientOrderId` 或 `orderId`
+**限制**: `newQty` 必须大于0且小于原订单数量，只能减少数量
 
 #### 查询当前挂单
 
@@ -881,6 +939,7 @@
 | `LIST_ORDERS` | `ORDER_LIST_DATA` | 订单列表 |
 | `GET_OPEN_ORDERS` | `ORDER_LIST_DATA` | 当前挂单列表 |
 | `CANCEL_ORDER` | `ORDER_DATA` | 订单取消结果 |
+| `MODIFY_ORDER` | 响应模型见 08-api-models.md | 期货: `FuturesModifyOrderResponse`，现货: `SpotAmendOrderResponse` |
 
 ---
 

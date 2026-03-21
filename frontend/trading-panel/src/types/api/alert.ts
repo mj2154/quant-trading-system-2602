@@ -1,5 +1,5 @@
 /**
- * 告警类型 - 对应后端 alert_config_models.py
+ * 告警配置类型 - 对应后端 alert_config_models.py
  *
  * 使用 camelCase 与 WebSocket 协议保持一致
  * 后端使用 SnakeCaseModel 接收请求，CamelCaseModel 返回响应
@@ -35,11 +35,11 @@ export type AlertStrategyType =
 // ==================== 请求模型 ====================
 
 /**
- * 创建告警信号请求
+ * 创建告警配置请求
  *
- * 对应后端 AlertSignalCreate / CreateAlertSignalRequest
+ * 对应后端 AlertConfigCreate
  */
-export interface CreateAlertSignalRequest {
+export interface CreateAlertConfigRequest {
   /** 告警ID（UUID格式，由前端生成） */
   id: string
   /** 告警名称 */
@@ -53,7 +53,7 @@ export interface CreateAlertSignalRequest {
   /** K线周期 */
   interval: string
   /** 触发类型 */
-  triggerType: string
+  triggerType?: string
   /** 策略参数 */
   params?: Record<string, unknown>
   /** 是否启用（默认true） */
@@ -63,12 +63,12 @@ export interface CreateAlertSignalRequest {
 }
 
 /**
- * 更新告警信号请求
+ * 更新告警配置请求
  *
- * 对应后端 AlertSignalUpdate / UpdateAlertSignalRequest
+ * 对应后端 AlertConfigUpdate
  * 所有字段可选，用于部分更新
  */
-export interface UpdateAlertSignalRequest {
+export interface UpdateAlertConfigRequest {
   /** 告警名称 */
   name?: string
   /** 告警描述 */
@@ -88,37 +88,25 @@ export interface UpdateAlertSignalRequest {
 }
 
 /**
- * 删除告警信号请求
+ * 删除告警配置请求
  *
- * 对应后端 DeleteAlertSignalRequest
+ * 对应后端 DeleteAlertConfigRequest
  */
-export interface DeleteAlertSignalRequest {
-  /** 告警信号ID */
+export interface DeleteAlertConfigRequest {
+  /** 告警配置ID */
   id: string
-}
-
-/**
- * 启用/禁用告警请求
- *
- * 对应后端 EnableAlertSignalRequest
- */
-export interface EnableAlertSignalRequest {
-  /** 告警信号ID */
-  id: string
-  /** 是否启用 */
-  isEnabled: boolean
 }
 
 /**
  * 查询告警列表请求
  *
- * 对应后端 ListAlertSignalsRequest
+ * 对应后端 ListAlertConfigsRequest
  */
-export interface ListAlertSignalsRequest {
-  /** 最大记录数 */
-  limit?: number
-  /** 偏移量 */
-  offset?: number
+export interface ListAlertConfigsRequest {
+  /** 页码 */
+  page?: number
+  /** 每页数量 */
+  pageSize?: number
   /** 按启用状态筛选 */
   isEnabled?: boolean
   /** 按交易对筛选 */
@@ -130,12 +118,12 @@ export interface ListAlertSignalsRequest {
 // ==================== 响应模型 ====================
 
 /**
- * 告警信号响应
+ * 告警配置响应
  *
- * 对应后端 AlertSignalResponse
+ * 对应后端 AlertConfigData
  */
-export interface AlertSignalResponse {
-  /** 告警信号ID */
+export interface AlertConfigResponse {
+  /** 告警配置ID */
   id: string
   /** 告警名称 */
   name: string
@@ -162,13 +150,13 @@ export interface AlertSignalResponse {
 }
 
 /**
- * 告警信号列表响应
+ * 告警配置列表响应
  *
- * 对应后端 AlertSignalListResponse
+ * 对应后端 AlertConfigListData
  */
-export interface AlertSignalListResponse {
+export interface AlertConfigListResponse {
   /** 告警数组 */
-  items: AlertSignalResponse[]
+  items: AlertConfigResponse[]
   /** 总数 */
   total: number
   /** 当前页码 */
@@ -178,60 +166,10 @@ export interface AlertSignalListResponse {
 }
 
 /**
- * 启用/禁用响应
- *
- * 对应后端 EnableDisableResponse
+ * 告警配置类型（前端页面使用）
+ * 与 AlertConfigResponse 相同，作为前端统一的类型名称
  */
-export interface EnableDisableAlertResponse {
-  /** 告警信号ID */
-  id: string
-  /** 告警名称 */
-  name: string
-  /** 是否启用 */
-  isEnabled: boolean
-  /** 操作结果消息 */
-  message: string
-}
-
-// ==================== 兼容类型（前端展示用） ====================
-
-/**
- * 告警配置（兼容现有代码）
- */
-export interface AlertConfig extends AlertSignalResponse {}
-
-/**
- * 告警配置列表响应（兼容现有代码）
- */
-export interface AlertConfigListResponse extends AlertSignalListResponse {}
-
-/**
- * MACD 参数配置
- */
-export interface AlertMacdParams {
-  fast1: number
-  slow1: number
-  signal1: number
-  fast2: number
-  slow2: number
-  signal2: number
-}
-
-/**
- * 告警参数配置
- */
-export interface AlertParams {
-  /** MACD快速周期 */
-  fastPeriod?: number
-  /** MACD慢速周期 */
-  slowPeriod?: number
-  /** MACD信号线周期 */
-  signalPeriod?: number
-  /** 阈值设置 */
-  threshold?: number
-  /** 策略特定参数 */
-  [key: string]: unknown
-}
+export type AlertConfig = AlertConfigResponse
 
 // ==================== 常量定义 ====================
 

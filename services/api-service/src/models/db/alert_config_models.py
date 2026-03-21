@@ -117,52 +117,6 @@ class AlertConfigUpdate(SnakeCaseModel):
     )
 
 
-class AlertConfigResponse(CamelCaseModel):
-    """Alert config response model.
-
-    使用 CamelCaseModel 基类，序列化时自动将字段转换为 camelCase。
-    """
-
-    id: str = Field(..., description="Alert config ID")
-    name: str = Field(..., description="Alert name")
-    description: str | None = Field(None, description="Alert description")
-    strategy_type: str = Field(..., description="Strategy type")
-    symbol: str = Field(..., description="Trading pair symbol")
-    interval: str = Field(..., description="K-line interval")
-    trigger_type: str = Field(..., description="Trigger type")
-    params: dict[str, Any] = Field(..., description="Strategy parameters")
-    is_enabled: bool = Field(..., description="Whether alert is enabled")
-    created_at: datetime = Field(..., description="Creation time")
-    updated_at: datetime | None = Field(None, description="Last update time")
-    created_by: str | None = Field(None, description="Creator identifier")
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class AlertConfigListResponse(CamelCaseModel):
-    """Alert config list response model.
-
-    使用 CamelCaseModel 基类，序列化时自动将字段转换为 camelCase。
-    """
-
-    items: list[AlertConfigResponse] = Field(..., description="Alert config list")
-    total: int = Field(..., description="Total count")
-    page: int = Field(..., description="Current page number")
-    page_size: int = Field(..., description="Page size")
-
-
-class EnableDisableResponse(CamelCaseModel):
-    """Enable/disable alert response model.
-
-    使用 CamelCaseModel 基类，序列化时自动将字段转换为 camelCase。
-    """
-
-    id: UUID = Field(..., description="Alert signal ID")
-    name: str = Field(..., description="Alert name")
-    is_enabled: bool = Field(..., description="Whether alert is enabled")
-    message: str = Field(..., description="Operation result message")
-
-
 # ==================== WebSocket 响应数据载荷模型 ====================
 # 用于 WebSocket 响应的 data 字段，遵循"信封和信"的设计理念
 # data 是一个完整的数据模型，而非展开的字典

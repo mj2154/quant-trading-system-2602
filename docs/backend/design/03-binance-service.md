@@ -180,252 +180,22 @@ async def fetch_and_store_klines(
 
 ## 5. 交易所信息同步
 
-### 5.1 全量替换策略
+> **设计原则**：数据模型严格遵循币安官方文档的数据格式...
 
-交易所信息采用**全量替换**模式，确保数据库中的信息与币安API完全同步。
+**交易所信息数据模型已迁移至独立文档，详见：**
+**[09-binance-models.md](./09-binance-models.md)**
 
-**设计优势**：
-- 数据一致性：数据库信息与币安API完全同步
-- 自动清理：已移除的交易对会被自动删除
-- 状态准确：交易对状态变化会准确反映
+### 5.1 现货交易所信息
 
-### 5.2 现货与期货API差异
+**GET 模型**: `BinanceSpotExchangeInfoGetModel`
+**文档来源**: `binance_spot_docs/01_REST API/General endpoints.md`
 
-> **重要设计决策**：现货与期货使用**独立的解析模型**，而非统一的混合模型。
+### 5.2 期货交易所信息
 
-#### 5.2.1 API响应字段差异
+**GET 模型**: `BinanceFuturesExchangeInfoGetModel`
+**文档来源**: `binance_futures_docs/01_U本位合约/02_行情接口/03_REST API/获取交易规则和交易对.md`
 
-| 字段 | 现货 API | 期货 API | 说明 |
-|------|---------|---------|------|
-| `permissionSets` | `[["SPOT", "MARGIN"]]` 嵌套数组 | `["GRID", "COPY"]` 扁平数组 | **格式不同** |
-| `permissions` | `["SPOT", "MARGIN"]` 扁平数组 | `null` | 期货无此字段 |
-| `baseAsset` | ✅ 有 | ✅ 有 | 两者相同 |
-| `quoteAsset` | ✅ 有 | ✅ 有 | 两者相同 |
-| `contractType` | ❌ 无 | ✅ 有 | 期货特有 |
-| `deliveryDate` | ❌ 无 | ✅ 有 | 期货特有 |
-| `maintMarginPercent` | ❌ 无 | ✅ 有 | 期货特有 |
-| `marginAsset` | ❌ 无 | ✅ 有 | 期货特有 |
-| `underlyingType` | ❌ 无 | ✅ 有 | 期货特有 |
-
-#### 5.2.2 permissionSets 格式差异详解
-
-**现货格式**（嵌套数组）：
-```json
-"permissionSets": [["SPOT", "MARGIN"]]
-```
-含义：账户需要同时满足 **SPOT AND MARGIN** 权限才能交易
-
-**期货格式**（扁平数组）：
-```json
-"permissionSets": ["GRID", "COPY", "DCA", "PSB"]
-```
-含义：账户满足任一权限即可交易
-
-#### 5.2.3 模型设计
-
-采用**独立解析模型**策略：
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   币安 API 响应                         │
-├─────────────────────┬───────────────────────────────────┤
-│   现货 API         │           期货 API                 │
-│  /api/v3/exchangeInfo │      /fapi/v1/exchangeInfo     │
-└─────────┬───────────┴───────────────┬───────────────────┘
-          │                           │
-          ▼                           ▼
-┌─────────────────────┐     ┌─────────────────────────────┐
-│ ExchangeInfoSymbol  │     │ ExchangeInfoSymbolFutures  │
-│ (现货解析模型)      │     │ (期货解析模型)              │
-│ - permission_sets   │     │ - permission_sets: list[str]│
-│   : list[list[str]]│     │ (扁平数组)                  │
-│ - 无期货特有字段    │     │ - contract_type            │
-│                    │     │ - delivery_date            │
-└─────────┬───────────┘     │ - margin_asset             │
-          │                 └─────────────┬───────────────┘
-          │                               │
-          └───────────┬───────────────────┘
-                      ▼
-            ┌─────────────────┐
-            │  ExchangeInfo   │
-            │ (数据库模型)    │
-            │ 统一存储        │
-            └─────────────────┘
-```
-
-#### 5.2.4 代码实现要求
-
-```python
-# 现货解析模型 - permission_sets 为嵌套数组
-class ExchangeInfoSymbolSpot(SnakeCaseModel):
-    symbol: str
-    base_asset: str
-    quote_asset: str
-    permission_sets: list[list[str]]  # 嵌套数组 [["SPOT"]]
-    permissions: list[str]
-    # ... 其他现货字段
-
-# 期货解析模型 - permission_sets 为扁平数组
-class ExchangeInfoSymbolFutures(SnakeCaseModel):
-    symbol: str
-    base_asset: str
-    quote_asset: str
-    permission_sets: list[str]  # 扁平数组 ["GRID"]
-    contract_type: Optional[str]  # 期货特有
-    delivery_date: Optional[int]  # 期货特有
-    # ... 其他期货字段
-
-# 统一数据库模型
-class ExchangeInfo:
-    exchange: str
-    market_type: str  # SPOT 或 FUTURES
-    symbol: str
-    base_asset: str
-    quote_asset: str
-    # ... 其他统一字段
-```
-
-### 5.3 同步流程
-
-```mermaid
-sequenceDiagram
-    participant BN as 币安服务
-    participant API as 币安API
-    participant DB as 数据库
-
-    BN->>API: GET /api/v3/exchangeInfo?symbol=BTCUSDT
-    API-->>BN: 返回单个交易对信息
-
-    BN->>API: GET /api/v3/exchangeInfo
-    API-->>BN: 返回所有交易对信息
-
-    BN->>DB: DELETE FROM exchange_info WHERE exchange='BINANCE' AND market_type='SPOT'
-
-    BN->>DB: 批量 upsert_exchange_info()
-    DB->>DB: INSERT ... ON CONFLICT DO UPDATE
-
-    BN->>API: GET /api/v3/exchangeInfo?permissions=CONTRACT_TRADING
-    API-->>BN: 返回合约交易对信息
-
-    BN->>DB: DELETE FROM exchange_info WHERE exchange='BINANCE' AND market_type='FUTURES'
-
-    BN->>DB: 批量 upsert_exchange_info()
-    DB->>DB: 事务提交
-```
-
-### 5.3 同步时机
-
-| 触发方式 | 说明 |
-|---------|------|
-| **系统启动** | 执行一次全量替换，确保初始数据正确 |
-| **定时任务** | 每天凌晨执行（如02:00） |
-| **手动触发** | 通过API调用 |
-
-### 5.4 upsert_exchange_info() 存储过程
-
-```sql
-CREATE OR REPLACE FUNCTION upsert_exchange_info(
-    p_exchange VARCHAR,
-    p_market_type VARCHAR,
-    p_symbol VARCHAR,
-    p_base_asset VARCHAR,
-    p_quote_asset VARCHAR,
-    p_status VARCHAR,
-    p_base_asset_precision INTEGER DEFAULT 8,
-    p_quote_precision INTEGER DEFAULT 8,
-    p_quote_asset_precision INTEGER DEFAULT 8,
-    p_base_commission_precision INTEGER DEFAULT 8,
-    p_quote_commission_precision INTEGER DEFAULT 8,
-    p_filters JSONB,
-    p_order_types JSONB,
-    p_permissions JSONB,
-    p_iceberg_allowed BOOLEAN DEFAULT FALSE,
-    p_oco_allowed BOOLEAN DEFAULT FALSE,
-    p_oto_allowed BOOLEAN DEFAULT FALSE,
-    p_opo_allowed BOOLEAN DEFAULT FALSE,
-    p_quote_order_qty_market_allowed BOOLEAN DEFAULT FALSE,
-    p_allow_trailing_stop BOOLEAN DEFAULT FALSE,
-    p_cancel_replace_allowed BOOLEAN DEFAULT FALSE,
-    p_amend_allowed BOOLEAN DEFAULT FALSE,
-    p_peg_instructions_allowed BOOLEAN DEFAULT FALSE,
-    p_is_spot_trading_allowed BOOLEAN DEFAULT TRUE,
-    p_is_margin_trading_allowed BOOLEAN DEFAULT FALSE,
-    p_permission_sets JSONB DEFAULT '[]',
-    p_default_self_trade_prevention_mode VARCHAR DEFAULT 'NONE',
-    p_allowed_self_trade_prevention_modes JSONB DEFAULT '[]'
-) RETURNS BIGINT AS $$
-DECLARE
-    v_id BIGINT;
-BEGIN
-    INSERT INTO exchange_info (
-        exchange, market_type, symbol, base_asset, quote_asset, status,
-        base_asset_precision, quote_precision, quote_asset_precision,
-        base_commission_precision, quote_commission_precision,
-        filters, order_types, permissions,
-        iceberg_allowed, oco_allowed, oto_allowed, opo_allowed,
-        quote_order_qty_market_allowed, allow_trailing_stop,
-        cancel_replace_allowed, amend_allowed, peg_instructions_allowed,
-        is_spot_trading_allowed, is_margin_trading_allowed,
-        permission_sets,
-        default_self_trade_prevention_mode, allowed_self_trade_prevention_modes,
-        last_updated
-    ) VALUES (
-        p_exchange, p_market_type, p_symbol, p_base_asset, p_quote_asset, p_status,
-        COALESCE(p_base_asset_precision, 8), COALESCE(p_quote_precision, 8),
-        COALESCE(p_quote_asset_precision, 8), COALESCE(p_base_commission_precision, 8),
-        COALESCE(p_quote_commission_precision, 8),
-        p_filters, p_order_types, p_permissions,
-        p_iceberg_allowed, p_oco_allowed, p_oto_allowed, p_opo_allowed,
-        p_quote_order_qty_market_allowed, p_allow_trailing_stop,
-        p_cancel_replace_allowed, p_amend_allowed, p_peg_instructions_allowed,
-        p_is_spot_trading_allowed, p_is_margin_trading_allowed,
-        p_permission_sets,
-        p_default_self_trade_prevention_mode, p_allowed_self_trade_prevention_modes,
-        NOW()
-    )
-    ON CONFLICT (exchange, market_type, symbol) DO UPDATE SET
-        base_asset = p_base_asset,
-        quote_asset = p_quote_asset,
-        status = p_status,
-        base_asset_precision = COALESCE(p_base_asset_precision, 8),
-        quote_precision = COALESCE(p_quote_precision, 8),
-        quote_asset_precision = COALESCE(p_quote_asset_precision, 8),
-        base_commission_precision = COALESCE(p_base_commission_precision, 8),
-        quote_commission_precision = COALESCE(p_quote_commission_precision, 8),
-        filters = p_filters,
-        order_types = p_order_types,
-        permissions = p_permissions,
-        iceberg_allowed = p_iceberg_allowed,
-        oco_allowed = p_oco_allowed,
-        oto_allowed = p_oto_allowed,
-        opo_allowed = p_opo_allowed,
-        quote_order_qty_market_allowed = p_quote_order_qty_market_allowed,
-        allow_trailing_stop = p_allow_trailing_stop,
-        cancel_replace_allowed = p_cancel_replace_allowed,
-        amend_allowed = p_amend_allowed,
-        peg_instructions_allowed = p_peg_instructions_allowed,
-        is_spot_trading_allowed = p_is_spot_trading_allowed,
-        is_margin_trading_allowed = p_is_margin_trading_allowed,
-        permission_sets = p_permission_sets,
-        default_self_trade_prevention_mode = p_default_self_trade_prevention_mode,
-        allowed_self_trade_prevention_modes = p_allowed_self_trade_prevention_modes,
-        last_updated = NOW()
-    RETURNING id INTO v_id;
-
-    RETURN v_id;
-END;
-$$ LANGUAGE plpgsql;
-```
-
-### 5.5 对比：增量更新 vs 全量替换
-
-| 特性 | 增量更新 | 全量替换 |
-|------|----------|----------|
-| 数据一致性 | 可能保留过期数据 | 完全同步 |
-| 数据清理 | 需要手动清理 | 自动清理 |
-| 性能开销 | 较低 | 较高 |
-| 适用规模 | 数万级交易对 | 数千级交易对 |
-| 实现复杂度 | 简单 | 简单 |
+---
 
 ## 6. 订阅同步器
 
@@ -511,147 +281,23 @@ class SubscriptionSync:
 | 永续合约 | `BINANCE:BTCUSDT.PERP` |
 | 币安永续 | `BTCUSDT_PERP` |
 
-### 7.3 Pydantic 命名转换
+### 7.3 市场数据模型
 
-系统使用 Pydantic v2 的 `alias_generators` 实现自动命名转换：
+市场数据模型已迁移至独立文档，详见：
 
-#### 7.3.1 数据模型分层架构
+**[09-binance-models.md](./09-binance-models.md)** - 币安数据模型设计文档
 
-币安服务的数据模型分为**两层**，每层有明确的职责：
-
-| 层级 | 模型类型 | 用途 | 命名风格 | 基类 |
-|------|---------|------|----------|------|
-| L1 | **币安API模型** | 解析/验证币安API响应，camelCase→snake_case | snake_case | `SnakeCaseModel` |
-| L2 | **数据库模型** | 数据库写入 | snake_case | `SnakeCaseModel` |
-
-```
-币安API响应 (camelCase)
-    ↓ model_validate()
-[L1] 币安API模型 (SnakeCaseModel)
-    ↓ 字段映射
-[L2] 数据库模型 (SnakeCaseModel)
-    ↓
-数据库 (snake_case)
-```
-
-> **关键设计**：L1层使用`SnakeCaseModel`，不仅完成数据验证，同时将camelCase自动转换为snake_case。转换后得到的是一个**蛇形命名的Pydantic模型实例**，直接用于字段映射到L2层。
-
-#### 7.3.2 各数据类型模型对应关系
-
-| 数据类型 | L1 币安API模型 | L2 数据库模型 | 说明 |
-|---------|---------------|--------------|------|
-| K线(历史) | `KlineResponse` (SnakeCaseModel) | `KlineCreate` | HTTP响应 → 数据库 |
-| K线(实时) | `KlineWebSocket` (SnakeCaseModel) | `KlineCreate` | WS消息 → 数据库 |
-| 24hr行情 | `Ticker24hrSpot/Futures` (SnakeCaseModel) | `TickerCreate` | 验证后转换为前端格式模型 |
-| 交易所信息(现货) | `ExchangeInfoResponseSpot` (SnakeCaseModel) | `ExchangeInfo` | 解析 → 数据库 |
-| 交易所信息(期货) | `ExchangeInfoResponseFutures` (SnakeCaseModel) | `ExchangeInfo` | 解析 → 数据库 |
-| 账户资产 | `FuturesAsset/SpotBalance` (SnakeCaseModel) | `AccountAssetCreate` | 验证后转换为前端格式模型 |
-
-#### 7.3.3 模型命名规范
-
-| 场景 | 命名规则 | 示例 |
-|------|---------|------|
-| 币安API响应模型 | `{Entity}Response[Spot|Futures]` | `KlineResponse`, `ExchangeInfoResponseSpot` |
-| WebSocket模型 | `WebSocket{Entity}` | `WebSocketKline`, `WebSocketTicker` |
-| 数据库模型 | `{Entity}Create` | `KlineCreate`, `ExchangeInfo` |
-
-#### 命名约定
-
-| 模型类型 | 命名风格 | 说明 |
-|---------|----------|------|
-| 币安API模型 | snake_case | 使用SnakeCaseModel自动转换 |
-| 数据库模型 | snake_case | PostgreSQL 惯例 |
-
-#### 转换实现
-
-```python
-from pydantic import BaseModel, ConfigDict
-from pydantic.alias_generators import to_camel, to_snake
-
-# 请求模型基类（接收外部输入，自动将 camelCase 转为 snake_case）
-class SnakeCaseModel(BaseModel):
-    """请求模型基类 - 接收 camelCase 自动转为 snake_case"""
-    model_config = ConfigDict(
-        alias_generator=to_snake,
-        populate_by_name=True,
-    )
-
-
-# 响应模型基类（序列化时自动转为 camelCase）
-class CamelCaseModel(BaseModel):
-    """响应模型基类 - 序列化时自动转为 camelCase"""
-    model_config = ConfigDict(
-        alias_generator=to_camel,
-        populate_by_name=True,
-        by_alias=True,
-    )
-
-
-# 内部模型（使用 snake_case）
-class KlineData(SnakeCaseModel):
-    """K线数据 - 内部使用"""
-    open_time: int
-    open_price: float
-    high_price: float
-    low_price: float
-    close_price: float
-    volume: float
-
-
-# 币安API模型（使用 camelCase）
-class BinanceKline(CamelCaseModel):
-    """K线数据 - 币安API格式"""
-    open_time: int
-    open_price: float
-    high_price: float
-    low_price: float
-    close_price: float
-    volume: float
-```
-
-#### 数据流向
-
-```
-币安交易所 (camelCase)
-    ↓ 无转换
-币安客户端 (camelCase)
-    ↓ to_snake 转换
-币安服务 (snake_case)
-    ↓ 无转换
-数据库 (snake_case)
-```
-
-> **设计原则**：转换发生在服务边界，核心业务逻辑"不知道"转换的存在。
-> 见 [DATABASE_COORDINATED_ARCHITECTURE.md](./DATABASE_COORDINATED_ARCHITECTURE.md#44-数据命名规范)
-
-### 7.4 命名风格规范
-
-与API服务保持一致的命名风格：
-
-| 类型 | 命名风格 | 示例 |
-|------|----------|------|
-| K线类 | KlineXxx (l小写) | KlineData, KlineBar, KlineBars |
-| 报价类 | QuotesXxx | QuotesValue, QuotesData |
-| 账户类 | XxxAccountInfo | SpotAccountInfo, FuturesAccountInfo |
-| 文件名 | snake_case | kline_models.py, quote_models.py |
-
-> 注意：K线类统一使用 KlineXxx（小写l）风格。
-
-### 7.5 数据模型目录结构
-
-币安服务采用扁平化结构，根据数据来源划分：
-
-```
-models/
-├── __init__.py           # 统一导出
-├── base.py              # 基类定义（SnakeCaseModel, CamelCaseModel）
-├── kline_models.py      # K线数据模型（API响应 + 数据库）
-├── ticker_models.py     # 行情数据模型（API响应）
-├── account_models.py    # 账户数据模型（API响应 + 数据库）
-└── exchange_models.py   # 交易所信息模型（API响应 + 数据库）
-```
-
-> 说明：币安服务是数据采集服务，目录结构按数据类型扁平划分，无需API服务的 db/trading/protocol 分层。
+该文档包含：
+- 现货 K线 (GET/WS)
+- 现货 24hr Ticker (GET/WS)
+- 期货 K线 (GET/WS)
+- 期货 24hr Ticker (GET/WS)
+- 现货账户信息 (GET)
+- 现货订单执行报告 (WS)
+- 现货交易所信息 (GET)
+- 期货账户信息 (GET)
+- 期货订单成交更新 (WS)
+- 期货交易所信息 (GET)
 
 ## 8. 私有API认证
 
@@ -878,209 +524,19 @@ account = await client.get_account_info()
 | POST /api/v3/order | 下单 | TRADE |
 | DELETE /api/v3/order | 取消订单 | TRADE |
 
-### 8.7 数据模型
+### 8.7 账户信息数据模型设计
 
-#### 现货账户 (Spot)
+> **设计原则**：数据模型严格遵循币安官方文档的数据格式，不做主观扩展。所有字段名称、类型、含义均与官方保持一致。
 
-对应 API：**GET /api/v3/account**
+账户信息数据模型已迁移至独立文档，详见：
 
-官方文档：[账户信息 (USER_DATA)](https://developers.binance.com/zh-CN/simple-endpoints/account-endpoints/account-information)
+**[09-binance-models.md](./09-binance-models.md)** - 币安数据模型设计文档
 
-**BinanceAccountInfo 响应示例**：
-```json
-{
-    "makerCommission": 15,
-    "takerCommission": 15,
-    "buyerCommission": 0,
-    "sellerCommission": 0,
-    "commissionRates": {
-        "maker": "0.00150000",
-        "taker": "0.00150000",
-        "buyer": "0.00000000",
-        "seller": "0.00000000"
-    },
-    "canTrade": true,
-    "canWithdraw": true,
-    "canDeposit": true,
-    "brokered": false,
-    "requireSelfTradePrevention": false,
-    "preventSor": false,
-    "updateTime": 123456789,
-    "accountType": "SPOT",
-    "balances": [
-        {
-            "asset": "BTC",
-            "free": "4723846.89208129",
-            "locked": "0.00000000"
-        },
-        {
-            "asset": "LTC",
-            "free": "4763368.68006011",
-            "locked": "0.00000000"
-        }
-    ],
-    "permissions": ["SPOT"],
-    "uid": 354937868
-}
-```
-
-**字段说明**：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `makerCommission` | int | 挂单手续费率 |
-| `takerCommission` | int | 吃单手续费率 |
-| `buyerCommission` | int | 买入手续费率 |
-| `sellerCommission` | int | 卖出手续费率 |
-| `commissionRates` | object | 详细手续费率 |
-| `commissionRates.maker` | string | 挂单手续费率 |
-| `commissionRates.taker` | string | 吃单手续费率 |
-| `commissionRates.buyer` | string | 买入手续费率 |
-| `commissionRates.seller` | string | 卖出手续费率 |
-| `canTrade` | boolean | 是否可交易 |
-| `canWithdraw` | boolean | 是否可提现 |
-| `canDeposit` | boolean | 是否可充值 |
-| `brokered` | boolean | 是否经纪商 |
-| `requireSelfTradePrevention` | boolean | 是否需要自成交预防 |
-| `preventSor` | boolean | 是否阻止SOR订单 |
-| `updateTime` | long | 最后更新时间戳 |
-| `accountType` | string | 账户类型 |
-| `balances` | array | 余额列表 |
-| `balances[].asset` | string | 资产名称 |
-| `balances[].free` | string | 可用数量 |
-| `balances[].locked` | string | 锁定数量 |
-| `permissions` | array | 账户权限列表 |
-| `uid` | long | 用户ID |
-
-#### 期货账户 (Futures)
-
-对应 API：**GET /fapi/v3/account** (V3版本)
-
-官方文档：[账户信息V3 (USER_DATA)](https://developers.binance.com/docs/derivatives/usds-margined-futures/account/rest-api/Account-Information-V3)
-
-**重要说明**：系统使用V3版本的账户信息API，该版本返回核心的保证金相关字段。V3与V2版本的主要区别是V3不返回手续费等级、交易权限等字段。
-
-**FuturesAccountInfo 响应示例（单资产模式）**：
-```json
-{
-    "totalInitialMargin": "0.00000000",
-    "totalMaintMargin": "0.00000000",
-    "totalWalletBalance": "103.12345678",
-    "totalUnrealizedProfit": "0.00000000",
-    "totalMarginBalance": "103.12345678",
-    "totalPositionInitialMargin": "0.00000000",
-    "totalOpenOrderInitialMargin": "0.00000000",
-    "totalCrossWalletBalance": "103.12345678",
-    "totalCrossUnPnl": "0.00000000",
-    "availableBalance": "103.12345678",
-    "maxWithdrawAmount": "103.12345678",
-    "assets": [
-        {
-            "asset": "USDT",
-            "walletBalance": "23.72469206",
-            "unrealizedProfit": "0.00000000",
-            "marginBalance": "23.72469206",
-            "maintMargin": "0.00000000",
-            "initialMargin": "0.00000000",
-            "positionInitialMargin": "0.00000000",
-            "openOrderInitialMargin": "0.00000000",
-            "crossWalletBalance": "23.72469206",
-            "crossUnPnl": "0.00000000",
-            "availableBalance": "23.72469206",
-            "maxWithdrawAmount": "23.72469206",
-            "updateTime": 1625474304765
-        },
-        {
-            "asset": "USDC",
-            "walletBalance": "103.12345678",
-            "unrealizedProfit": "0.00000000",
-            "marginBalance": "103.12345678",
-            "maintMargin": "0.00000000",
-            "initialMargin": "0.00000000",
-            "positionInitialMargin": "0.00000000",
-            "openOrderInitialMargin": "0.00000000",
-            "crossWalletBalance": "103.12345678",
-            "crossUnPnl": "0.00000000",
-            "availableBalance": "126.72469206",
-            "maxWithdrawAmount": "103.12345678",
-            "updateTime": 1625474304765
-        }
-    ],
-    "positions": [
-        {
-            "symbol": "BTCUSDT",
-            "positionSide": "BOTH",
-            "positionAmt": "1.000",
-            "unrealizedProfit": "0.00000000",
-            "isolatedMargin": "0.00000000",
-            "notional": "0",
-            "isolatedWallet": "0",
-            "initialMargin": "0",
-            "maintMargin": "0",
-            "updateTime": 0
-        }
-    ]
-}
-```
-
-**字段说明**：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `totalInitialMargin` | string | 当前所需起始保证金总额（存在逐仓请忽略），仅计算USDT资产 |
-| `totalMaintMargin` | string | 维持保证金总额，仅计算USDT资产 |
-| `totalWalletBalance` | string | 账户总余额，仅计算USDT资产 |
-| `totalUnrealizedProfit` | string | 持仓未实现盈亏总额，仅计算USDT资产 |
-| `totalMarginBalance` | string | 保证金总余额，仅计算USDT资产 |
-| `totalPositionInitialMargin` | string | 持仓所需起始保证金（基于最新标记价格），仅计算USDT资产 |
-| `totalOpenOrderInitialMargin` | string | 当前挂单所需起始保证金（基于最新标记价格），仅计算USDT资产 |
-| `totalCrossWalletBalance` | string | 全仓账户余额，仅计算USDT资产 |
-| `totalCrossUnPnl` | string | 全仓持仓未实现盈亏总额，仅计算USDT资产 |
-| `availableBalance` | string | 可用余额，仅计算USDT资产 |
-| `maxWithdrawAmount` | string | 最大可转出余额，仅计算USDT资产 |
-| `assets` | array | 资产列表 |
-| `positions` | array | 持仓列表（仅返回有持仓或挂单的交易对） |
-
-**FuturesAsset 字段**（assets 数组元素）：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `asset` | string | 资产名称 |
-| `walletBalance` | string | 余额 |
-| `unrealizedProfit` | string | 未实现盈亏 |
-| `marginBalance` | string | 保证金余额 |
-| `maintMargin` | string | 维持保证金 |
-| `initialMargin` | string | 当前所需起始保证金 |
-| `positionInitialMargin` | string | 持仓所需起始保证金（基于最新标记价格） |
-| `openOrderInitialMargin` | string | 当前挂单所需起始保证金（基于最新标记价格） |
-| `crossWalletBalance` | string | 全仓账户余额 |
-| `crossUnPnl` | string | 全仓持仓未实现盈亏 |
-| `availableBalance` | string | 可用余额 |
-| `maxWithdrawAmount` | string | 最大可转出余额 |
-| `updateTime` | long | 更新时间 |
-
-**FuturesPosition 字段**（positions 数组元素）：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `symbol` | string | 交易对 |
-| `positionSide` | string | 持仓方向（BOTH/LONG/SHORT） |
-| `positionAmt` | string | 持仓数量 |
-| `unrealizedProfit` | string | 持仓未实现盈亏 |
-| `isolatedMargin` | string | 逐仓保证金 |
-| `notional` | string | 名义价值 |
-| `isolatedWallet` | string | 逐仓钱包余额 |
-| `initialMargin` | string | 持仓所需起始保证金（基于最新标记价格） |
-| `maintMargin` | string | 维持保证金 |
-| `updateTime` | long | 更新时间 |
-
-**注意**：期货V3 API不返回以下字段（这些是V2才有的）：
-- `feeTier` - 手续费等级
-- `feeBurn` - 手续费抵扣开关
-- `canTrade`、`canDeposit`、`canWithdraw` - 交易权限
-- `multiAssetsMargin` - 多资产保证金模式
-- `tradeGroupId` - 交易组ID
-- `updateTime`（账户顶层）- 保留字段，请忽略（更新时间在 assets/positions 中返回）
+该文档包含：
+- 现货账户信息 GET (`BinanceSpotAccountGetModel`)
+- 现货订单执行报告 WS (`BinanceSpotExecutionReportWSModel`)
+- 期货账户信息 GET (`BinanceFuturesAccountGetModel`)
+- 期货订单成交更新 WS (`BinanceFuturesOrderTradeUpdateWSModel`)
 
 ### 8.8 账户信息获取
 
@@ -1147,9 +603,9 @@ await accountStore.fetchSpotAccount()
 await accountStore.refreshAccounts()
 ```
 
-## 8.9 账户订阅服务
+## 8.10 账户订阅服务
 
-### 8.9.1 设计概述
+### 8.10.1 设计概述
 
 账户订阅服务通过 WebSocket 用户数据流实现账户信息的实时推送，采用"GET 完整 + 订阅增量"的策略确保数据一致性。
 
@@ -1158,14 +614,14 @@ await accountStore.refreshAccounts()
 - 增量更新通过 WebSocket 用户数据流推送，直接覆盖写入 `realtime_data` 表
 - 前端先 GET 初始化，再订阅增量更新
 
-### 8.9.2 订阅键格式
+### 8.10.2 订阅键格式
 
 | 账户类型 | 订阅键 | 数据来源 |
 |---------|--------|----------|
 | 现货账户 | `BINANCE:ACCOUNT@SPOT` | 用户数据流 (stream.binance.com) |
 | 期货账户 | `BINANCE:ACCOUNT@FUTURES` | 用户数据流 (fstream.binance.com) |
 
-### 8.9.3 数据更新策略
+### 8.10.3 数据更新策略
 
 ```mermaid
 flowchart LR
@@ -1189,9 +645,9 @@ flowchart LR
 **数据一致性保障**：
 1. **启动时**：获取完整快照（REST API）→ 写入 `account_info` 表
 2. **实时推送**：WebSocket 增量事件 → 直接覆盖写入 `realtime_data` 表
-3. **定期快照**：每隔 N 分钟调用 REST API 获取完整快照 → 覆盖写入 `realtime_data` 表（兜底）
+3. **前端主动**：前端通过 GET 请求获取完整快照（需要时由前端触发）
 
-### 8.9.4 币安 WebSocket 用户数据流
+### 8.10.4 币安 WebSocket 用户数据流
 
 账户订阅服务统一使用 **WebSocket API** 管理用户数据流，实现更优雅的连接管理。
 
@@ -1342,7 +798,7 @@ wss://fstream.binance.com/ws/<listenKey>
 
 **兼容性**：当前设计优先使用 WebSocket API，REST API 作为备用方案。
 
-### 8.9.5 增量数据说明
+### 8.10.5 增量数据说明
 
 **重要**：币安 WebSocket 用户数据流推送的是**增量数据**，而非完整数据：
 
@@ -1352,9 +808,8 @@ wss://fstream.binance.com/ws/<listenKey>
 因此：
 - `realtime_data` 表中的数据是**增量数据的直接覆盖**
 - 前端需要先 GET 完整数据（初始化），再通过订阅增量更新
-- 定期完整快照作为兜底机制，确保数据不会丢失
 
-### 8.9.6 实现组件
+### 8.10.6 实现组件
 
 **用户数据流客户端**：
 ```python
@@ -1388,18 +843,11 @@ service = AccountSubscriptionService(
     api_key=api_key,
     futures_api_key=futures_api_key,
     private_key_pem=private_key_pem,
-    snapshot_interval=300,  # 5分钟
 )
 await service.start()
 ```
 
-### 8.9.7 环境配置
-
-| 环境变量 | 说明 | 默认值 |
-|----------|------|--------|
-| `ACCOUNT_SNAPSHOT_INTERVAL` | 完整快照间隔（秒） | 300 |
-
-### 8.9.8 前端使用约定
+### 8.10.7 前端使用约定
 
 ```javascript
 // 前端正确用法
@@ -1416,9 +864,9 @@ async function init() {
 }
 ```
 
-## 8.10 交易功能设计
+## 8.11 交易功能设计
 
-### 8.10.1 设计概述
+### 8.11.1 设计概述
 
 交易功能通过私有API实现期货和现货的下单、撤单、查询等操作。采用任务驱动模式，参考 [04-trading-orders.md](./04-trading-orders.md) 详细设计。
 
@@ -1447,11 +895,11 @@ async function init() {
 | 价格限制 | 限价单价格不能超过市价约5% | 正常市价波动范围 |
 | 资金 | 虚拟资金，无实际风险 | 真实资金 |
 
-### 8.10.2 订单任务执行流程
+### 8.11.2 订单任务执行流程
 
 binance-service 监听 `order_tasks` 表的任务事件，执行实际的下单、撤单、查询操作。
 
-#### 8.10.2.1 订单创建流程
+#### 8.11.2.1 订单创建流程
 
 ```
 1. 前端发送 CREATE_ORDER 请求 → API服务
@@ -1465,7 +913,7 @@ binance-service 监听 `order_tasks` 表的任务事件，执行实际的下单�
 7. API服务推送结果给前端
 ```
 
-#### 8.10.2.2 订单状态查询流程
+#### 8.11.2.2 订单状态查询流程
 
 ```
 方式A: WebSocket订阅 (推荐)
@@ -1483,7 +931,7 @@ binance-service 监听 `order_tasks` 表的任务事件，执行实际的下单�
   6. 前端更新显示
 ```
 
-#### 8.10.2.3 撤销订单流程
+#### 8.11.2.3 撤销订单流程
 
 ```
 1. 前端发送 CANCEL_ORDER 请求 → API服务
@@ -1497,7 +945,7 @@ binance-service 监听 `order_tasks` 表的任务事件，执行实际的下单�
 7. API服务推送结果给前端
 ```
 
-#### 8.10.2.4 监听频道
+#### 8.11.2.4 监听频道
 
 binance-service 需要监听以下数据库通知频道：
 
@@ -1506,7 +954,7 @@ binance-service 需要监听以下数据库通知频道：
 | `order_task_new` | INSERT order_tasks | 读取任务，调用币安API执行 |
 | WebSocket用户数据流 | ORDER_TRADE_UPDATE | 实时推送订单状态（可选） |
 
-#### 8.10.2.5 任务状态说明
+#### 8.11.2.5 任务状态说明
 
 | order_tasks.status | 说明 |
 |-------------------|------|
@@ -1517,9 +965,9 @@ binance-service 需要监听以下数据库通知频道：
 
 **重要**：不再维护订单的"当前状态"，始终以交易所返回的信息为准。
 
-### 8.10.3 期货交易接口
+### 8.11.3 期货交易接口
 
-#### 8.10.2.1 创建订单 POST /fapi/v1/order
+#### 8.11.2.1 创建订单 POST /fapi/v1/order
 
 **HTTP请求**：`POST /fapi/v1/order`
 
@@ -1580,7 +1028,7 @@ binance-service 需要监听以下数据库通知频道：
 }
 ```
 
-#### 8.10.2.2 测试订单 POST /fapi/v1/order/test
+#### 8.11.2.2 测试订单 POST /fapi/v1/order/test
 
 用于测试订单参数是否正确，不会真正下单。
 
@@ -1588,7 +1036,7 @@ binance-service 需要监听以下数据库通知频道：
 
 **参数**：与创建订单相同
 
-#### 8.10.2.3 撤销订单 DELETE /fapi/v1/order
+#### 8.11.2.3 撤销订单 DELETE /fapi/v1/order
 
 **HTTP请求**：`DELETE /fapi/v1/order`
 
@@ -1602,7 +1050,7 @@ binance-service 需要监听以下数据库通知频道：
 | recvWindow | LONG | 否 | 接收窗口时间 |
 | timestamp | LONG | 是 | 时间戳 |
 
-#### 8.10.2.4 查询订单 GET /fapi/v1/order
+#### 8.11.2.4 查询订单 GET /fapi/v1/order
 
 **HTTP请求**：`GET /fapi/v1/order`
 
@@ -1616,9 +1064,9 @@ binance-service 需要监听以下数据库通知频道：
 | recvWindow | LONG | 否 | 接收窗口时间 |
 | timestamp | LONG | 是 | 时间戳 |
 
-### 8.10.3 现货交易接口
+### 8.11.3 现货交易接口
 
-#### 8.10.3.1 创建订单 POST /api/v3/order
+#### 8.11.3.1 创建订单 POST /api/v3/order
 
 **HTTP请求**：`POST /api/v3/order`
 
@@ -1658,7 +1106,7 @@ binance-service 需要监听以下数据库通知频道：
 | TAKE_PROFIT_LIMIT | timeInForce, quantity, price, stopPrice |
 | LIMIT_MAKER | quantity, price |
 
-#### 8.10.3.2 撤销订单 DELETE /api/v3/order
+#### 8.11.3.2 撤销订单 DELETE /api/v3/order
 
 **HTTP请求**：`DELETE /api/v3/order`
 
@@ -1672,9 +1120,9 @@ binance-service 需要监听以下数据库通知频道：
 | recvWindow | LONG | 否 | 接收窗口时间 |
 | timestamp | LONG | 是 | 时间戳 |
 
-### 8.10.4 订单参数详解
+### 8.11.4 订单参数详解
 
-#### 8.10.4.1 订单类型 (type)
+#### 8.11.4.1 订单类型 (type)
 
 > **重要**：期货和现货使用不同的订单类型命名，请勿混淆！
 
@@ -1702,7 +1150,7 @@ binance-service 需要监听以下数据库通知频道：
 | TAKE_PROFIT | 止盈单 | quantity, stopPrice 或 trailingDelta |
 | TAKE_PROFIT_LIMIT | 止盈限价单 | quantity, price, timeInForce, stopPrice 或 trailingDelta |
 
-#### 8.10.4.2 时间策略 (timeInForce)
+#### 8.11.4.2 时间策略 (timeInForce)
 
 | 值 | 说明 | 适用订单类型 |
 |----|------|-------------|
@@ -1713,7 +1161,7 @@ binance-service 需要监听以下数据库通知频道：
 | GTD | Good Till Date - 指定日期前有效 | 期货专用 |
 | RPI | Retail Price Improvement | 期货专用 |
 
-#### 8.10.4.3 持仓方向 (positionSide)
+#### 8.11.4.3 持仓方向 (positionSide)
 
 | 值 | 说明 | 适用场景 |
 |----|------|----------|
@@ -1725,7 +1173,7 @@ binance-service 需要监听以下数据库通知频道：
 - 单向持仓模式（BOTH）：默认模式，一个交易对只能有一个持仓
 - 对冲模式（HEDGE）：需要先调用API设置对冲模式，可同时持有多头和空头
 
-#### 8.10.4.4 响应类型 (newOrderRespType)
+#### 8.11.4.4 响应类型 (newOrderRespType)
 
 | 值 | 说明 | 响应内容 |
 |----|------|----------|
@@ -1733,107 +1181,23 @@ binance-service 需要监听以下数据库通知频道：
 | RESULT | 执行结果 | 返回订单执行结果（含价格、数量等） |
 | FULL | 完整信息 | 返回完整信息 + fills数组（包含每笔成交明细） |
 
-### 8.10.5 响应模型
+### 8.11.5 响应模型
 
-#### 8.10.5.1 期货订单响应 (FuturesOrderResponse)
+订单响应模型已迁移至独立文档，详见：
 
-```python
-class FuturesOrderResponse(BaseModel):
-    """期货订单响应"""
-    # 订单标识
-    order_id: int = Field(..., alias="orderId")
-    client_order_id: str = Field(..., alias="clientOrderId")
-    symbol: str
+**[09-binance-models.md](./09-binance-models.md)** - 币安数据模型设计文档
 
-    # 订单方向和类型
-    side: str  # BUY/SELL
-    position_side: Optional[str] = Field(None, alias="positionSide")
-    order_type: str = Field(..., alias="type")
-    orig_type: Optional[str] = Field(None, alias="origType")
+**新增 WebSocket 交易响应模型**：
 
-    # 数量和价格
-    orig_qty: str = Field(..., alias="origQty")
-    price: str
-    avg_price: str = Field(..., alias="avgPrice")
-    stop_price: Optional[str] = Field(None, alias="stopPrice")
+| 模型 | 说明 | 所在文件 |
+|------|------|---------|
+| `WSResponse` | WebSocket 通用响应模型 | `models/ws_message.py` |
+| `BinanceSpotOrderPlaceResult` | 现货订单下单响应 | `models/order_models.py` |
+| `BinanceSpotOrderAmendResult` | 现货订单修改响应 | `models/order_models.py` |
+| `BinanceFuturesOrderPlaceResult` | 期货订单下单响应 | `models/order_models.py` |
+| `BinanceFuturesModifyOrderResponse` | 期货订单修改响应 | `models/order_models.py` |
 
-    # 成交情况
-    executed_qty: str = Field(..., alias="executedQty")
-    cum_qty: str = Field(..., alias="cumQty")
-    cum_quote: str = Field(..., alias="cumQuote")
-
-    # 订单状态
-    status: str  # NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED/EXPIRED
-
-    # 时间策略
-    time_in_force: Optional[str] = Field(None, alias="timeInForce")
-
-    # 其他标志
-    reduce_only: bool = Field(..., alias="reduceOnly")
-    close_position: bool = Field(..., alias="closePosition")
-    working_type: str = Field(..., alias="workingType")
-    price_protect: bool = Field(..., alias="priceProtect")
-    price_match: Optional[str] = Field(None, alias="priceMatch")
-    self_trade_prevention_mode: Optional[str] = Field(None, alias="selfTradePreventionMode")
-    good_till_date: Optional[int] = Field(None, alias="goodTillDate")
-
-    # 时间戳
-    update_time: int = Field(..., alias="updateTime")
-```
-
-#### 8.10.5.2 现货订单响应 (SpotOrderResponse)
-
-```python
-class SpotOrderResponse(BaseModel):
-    """现货订单响应"""
-    # 订单标识
-    order_id: int = Field(..., alias="orderId")
-    client_order_id: str = Field(..., alias="clientOrderId")
-    symbol: str
-    transaction_time: int = Field(..., alias="transactionTime")
-
-    # 订单方向和类型
-    side: str
-    order_type: str = Field(..., alias="type")
-
-    # 数量和价格
-    orig_qty: str = Field(..., alias="origQty")
-    price: str
-    executed_qty: str = Field(..., alias="executedQty")
-    cummulative_quote_qty: str = Field(..., alias="cummulativeQuoteQty")
-
-    # 订单状态
-    status: str
-
-    # 时间策略
-    time_in_force: str = Field(..., alias="timeInForce")
-
-    # 冰山订单
-    iceberg_qty: Optional[str] = Field(None, alias="icebergQty")
-
-    # 时间戳
-    update_time: int = Field(..., alias="updateTime")
-    is_working: bool = Field(..., alias="isWorking")
-```
-
-#### 8.10.5.3 撤销订单响应 (CancelOrderResponse)
-
-```python
-class CancelOrderResponse(BaseModel):
-    """撤销订单响应"""
-    order_id: int = Field(..., alias="orderId")
-    client_order_id: str = Field(..., alias="clientOrderId")
-    symbol: str
-    side: str
-    order_type: str = Field(..., alias="type")
-    orig_qty: str = Field(..., alias="origQty")
-    executed_qty: str = Field(..., alias="executedQty")
-    price: str
-    status: str  # CANCELED
-    update_time: int = Field(..., alias="updateTime")
-```
-
-### 8.10.6 Demo网限制说明
+### 8.11.6 Demo网限制说明
 
 基于实际测试结果：
 
@@ -1867,11 +1231,19 @@ await client.create_order(
 )
 ```
 
-### 8.10.7 实现组件
+### 8.11.7 实现组件
 
-#### 8.10.7.1 订单数据模型
+#### 8.11.7.1 订单数据模型
 
-位于 `src/models/trading_order.py`：
+位于 `src/models/order_models.py`：
+
+
+> **注意**：订单相关数据模型已迁移至独立文档，详见：
+> **[09-binance-models.md](./09-binance-models.md)** - 币安数据模型设计文档
+>
+> 以下为订单类型、方向等枚举定义：
+
+
 
 ```python
 from dataclasses import dataclass
@@ -1938,7 +1310,7 @@ class OrderStatus(str, Enum):
     EXPIRED = "EXPIRED"
 ```
 
-#### 8.10.7.2 期货私有HTTP客户端
+#### 8.11.7.2 期货私有HTTP客户端
 
 位于 `src/clients/futures_private_http_client.py`：
 
@@ -1989,7 +1361,7 @@ class BinanceFuturesPrivateHTTPClient:
         """查询当前挂单"""
 ```
 
-#### 8.10.7.3 现货私有HTTP客户端
+#### 8.11.7.3 现货私有HTTP客户端
 
 位于 `src/clients/spot_private_http_client.py`：
 
@@ -2041,7 +1413,7 @@ class BinanceSpotPrivateHTTPClient:
         """查询当前挂单"""
 ```
 
-### 8.10.8 错误处理
+### 8.11.8 错误处理
 
 交易API错误响应格式：
 
@@ -2063,9 +1435,9 @@ class BinanceSpotPrivateHTTPClient:
 | -4028 | 无效 positionSide 参数 |
 | -4046 | 数量小于最小值 |
 
-### 8.10.9 测试用例
+### 8.11.9 测试用例
 
-#### 8.10.9.1 期货交易测试
+#### 8.11.9.1 期货交易测试
 
 位于 `test_trading_futures.py`：
 
@@ -2106,7 +1478,7 @@ async def test_cancel_order():
     print(f"撤销成功: {cancel_result.get('status')}")
 ```
 
-#### 8.10.9.2 现货交易测试
+#### 8.11.9.2 现货交易测试
 
 位于 `test_trading_spot.py`：
 
@@ -2128,9 +1500,9 @@ async def test_market_buy():
     print(f"成交数量: {result.get('executedQty')}")
 ```
 
-### 8.10.10 私有WebSocket客户端认证设计
+### 8.11.10 私有WebSocket客户端认证设计
 
-#### 8.10.10.1 设计背景
+#### 8.11.10.1 设计背景
 
 在生产环境中，网络代理（如Clash）可能不稳定，导致基于连接级认证的WebSocket客户端出现问题：
 
@@ -2140,7 +1512,7 @@ async def test_market_buy():
 
 因此，设计改为**每个请求都带签名**的认证方式，避免依赖连接级认证状态。
 
-#### 8.10.10.2 认证方式对比
+#### 8.11.10.2 认证方式对比
 
 | 认证方式 | 连接级认证 | 请求级认证（当前设计） |
 |---------|-----------|---------------------|
@@ -2149,7 +1521,7 @@ async def test_market_buy():
 | 缺点 | 依赖长连接稳定性 | 每个请求稍大 |
 | 适用场景 | 网络稳定环境 | 网络不稳定环境 |
 
-#### 8.10.10.3 币安官方文档参考
+#### 8.11.10.3 币安官方文档参考
 
 根据币安官方WebSocket API文档，每个请求都可以独立携带认证信息：
 
@@ -2161,7 +1533,7 @@ async def test_market_buy():
 - 每个请求都携带`apiKey`、`timestamp`、`signature`参数
 - 签名payload按键名字母顺序排序
 
-#### 8.10.10.4 实现方案
+#### 8.11.10.4 实现方案
 
 **期货WebSocket订单请求格式**：
 ```json
@@ -2202,7 +1574,7 @@ async def test_market_buy():
 apiKey=xxx&quantity=0.001&side=BUY&symbol=BTCUSDT&timestamp=1772915446000&type=MARKET
 ```
 
-#### 8.10.10.5 客户端组件
+#### 8.11.10.5 客户端组件
 
 | 组件 | 说明 |
 |------|------|
@@ -2214,7 +1586,7 @@ apiKey=xxx&quantity=0.001&side=BUY&symbol=BTCUSDT&timestamp=1772915446000&type=M
 - 不依赖`session.logon`连接认证
 - 认证失败不影响连接状态，可直接重试
 
-#### 8.10.10.6 重连策略
+#### 8.11.10.6 重连策略
 
 由于采用请求级签名，重连逻辑简化：
 
@@ -2233,5 +1605,5 @@ apiKey=xxx&quantity=0.001&side=BUY&symbol=BTCUSDT&timestamp=1772915446000&type=M
 
 ---
 
-**版本**：v2.4
-**更新**：2026-03-08 - 私有WebSocket改为请求级签名认证（8.10.10节），解决网络不稳定导致的认证问题
+**版本**：v2.5
+**更新**：2026-03-21 - 新增 WebSocket 交易响应模型（WSResponse 等），修复模型文件引用路径

@@ -40,6 +40,7 @@ class OrderTasksRepository:
             task_id: 任务ID
             result: 任务结果（会自动序列化为JSON字符串存入JSONB字段）
         """
+        # 序列化result为JSON字符串（asyncpg需要字符串传给JSONB类型）
         result_json = json.dumps(result) if result is not None else None
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -51,10 +52,12 @@ class OrderTasksRepository:
 
     async def fail(self, task_id: int, error: str) -> None:
         """标记任务失败"""
+        # 序列化error为JSON字符串（asyncpg需要字符串传给JSONB类型）
+        error_result = json.dumps({"error": error})
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE order_tasks SET status = 'failed', result = $1, updated_at = $2 WHERE id = $3",
-                json.dumps({"error": error}),
+                error_result,
                 datetime.now(timezone.utc),
                 task_id,
             )

@@ -1,45 +1,58 @@
 """
-现货用户数据流客户端
+现货用户数据流客户端 (WebSocket API 方式)
 
-管理现货账户的 listenKey 创建、续期和 WebSocket 连接。
-接收现货账户更新事件（outboundAccountPosition, balanceUpdate, executionReport）。
+设计原则（与 BaseWSClient 一致）：
+- WS客户端只负责连接和接收数据
+- 收到数据后立即打包为 WSDataPackage，发送给币安服务
+- 不维护任何回调或订阅状态
+- 所有数据处理由币安服务统一完成
 
-API文档: https://binance-docs.github.io/apidocs/spot/cn/#user-data-stream
+特殊流程：
+1. 连接 WebSocket API
+2. session.logon 认证（Ed25519 签名，建立会话）
+3. userDataStream.subscribe 订阅账户数据流
+4. 接收事件并打包发送
+
+端点: wss://demo-ws-api.binance.com/ws-api/v3 (仅 Demo 模式)
+
+文档: https://docs.binance.com/binance-spot-api-docs/websocket-api/user-data-stream-requests
 """
 
 import asyncio
 import json
 import logging
-from typing import Any, Callable, Awaitable, Optional
+import time
+from typing import Any, Optional
 
-import httpx
+from websockets.asyncio.client import connect
+
+from clients.base_ws_client import BaseWSClient, WSDataPackage
+from utils.ed25519_signer import Ed25519Signer
 
 logger = logging.getLogger(__name__)
 
 
-class SpotUserStreamClient:
-    """现货用户数据流客户端
+class SpotUserStreamClient(BaseWSClient):
+    """现货用户数据流客户端 (WebSocket API 方式)
 
-    职责：
-    1. 管理 listenKey 的创建、续期和关闭
-    2. 建立 WebSocket 连接接收账户更新事件
-    3. 将接收到的数据通过回调传递给调用方
+    继承 BaseWSClient，统一客户端模式：
+    - connect() -> 建立连接
+    - disconnect() -> 断开连接
+    - 接收数据 -> 打包为 WSDataPackage -> 调用 _data_callback
 
-    数据流程：
-    1. start() -> 创建 listenKey -> 建立 WebSocket 连接
-    2. 接收事件 -> 解析事件 -> 调用 _data_callback
-    3. stop() -> 关闭 WebSocket -> 关闭 listenKey
+    特殊流程：
+    - session.logon 认证（Ed25519 签名）
+    - userDataStream.subscribe 订阅账户数据流
 
-    事件类型：
-    - outboundAccountPosition: 账户余额变化
-    - balanceUpdate: 充值/提取/划转
-    - executionReport: 订单更新
+    会话级认证特点：
+    - 无需每个请求都签名
+    - 无需 listenKey
+    - 无需续期
     """
 
-    # listenKey 有效期（毫秒）
-    LISTEN_KEY_EXPIRY_MS = 60 * 60 * 1000  # 60分钟
-    # 续期间隔（秒），提前5分钟续期
-    RENEW_INTERVAL_SEC = (LISTEN_KEY_EXPIRY_MS / 1000) - 5 * 60
+    # 现货 WebSocket API 端点 - 仅 Demo 模式
+    WS_URI = "wss://demo-ws-api.binance.com/ws-api/v3"
+    CLIENT_ID = "binance-spot-user-stream-001"
 
     def __init__(
         self,
@@ -48,336 +61,248 @@ class SpotUserStreamClient:
         signature_type: str = "ed25519",
         proxy_url: Optional[str] = None,
     ) -> None:
-        """初始化客户端
+        """初始化现货用户数据流客户端
 
         Args:
             api_key: 币安 API Key
-            private_key_pem: 私钥 PEM 格式
-            signature_type: 签名类型 ("ed25519" 或 "rsa")
+            private_key_pem: Ed25519 私钥（PEM 格式）
+            signature_type: 签名类型（仅支持 ed25519）
             proxy_url: 可选的代理 URL
         """
+        super().__init__(proxy_url=proxy_url)
+
         self._api_key = api_key
-        self._private_key_pem = private_key_pem
+        self._signer = Ed25519Signer(private_key_pem)
         self._signature_type = signature_type
-        self._proxy_url = proxy_url
 
-        self._listen_key: Optional[str] = None
-        self._ws_connection: Optional[Any] = None
-        self._running = False
-        self._receive_task: Optional[asyncio.Task] = None
-        self._renew_task: Optional[asyncio.Task] = None
-        self._data_callback: Optional[Callable[[dict], Awaitable[None]]] = None
+        # 请求 ID 计数器
+        self._request_id_counter = 1000
 
-    @property
-    def is_connected(self) -> bool:
-        """检查是否已连接"""
-        return self._running and self._ws_connection is not None
+        # 订阅 ID（用于追踪订阅）
+        self._subscription_id: Optional[int] = None
 
-    def set_data_callback(self, callback: Callable[[dict], Awaitable[None]]) -> None:
-        """设置数据回调
+    def _next_request_id(self) -> str:
+        """生成下一个请求 ID"""
+        self._request_id_counter += 1
+        return str(self._request_id_counter)
 
-        Args:
-            callback: 异步回调函数，接收解析后的账户数据
+    async def connect(self) -> None:
+        """建立 WebSocket 连接并完成认证
+
+        流程：
+        1. 连接 WebSocket API
+        2. session.logon 认证
+        3. userDataStream.subscribe 订阅
         """
-        self._data_callback = callback
+        if self._state.connected:
+            logger.info(f"[{self.CLIENT_ID}] 已连接，跳过")
+            return
 
-    async def start(self) -> bool:
-        """启动客户端
-
-        Returns:
-            是否成功启动
-        """
-        if self._running:
-            logger.warning("现货用户数据流客户端已在运行")
-            return True
-
+        logger.info(f"[{self.CLIENT_ID}] 正在连接...")
         try:
-            # 1. 创建 listenKey
-            self._listen_key = await self._create_listen_key()
-            if not self._listen_key:
-                logger.error("创建 listenKey 失败")
-                return False
-
-            logger.info(f"现货 listenKey 已创建: {self._listen_key[:10]}...")
-
-            # 2. 建立 WebSocket 连接
-            from websockets.asyncio.client import connect
-
-            ws_url = f"wss://stream.binance.com:9443/ws/{self._listen_key}"
-            connect_kwargs: dict[str, str] = {}
+            connect_kwargs: dict[str, Any] = {}
             if self._proxy_url:
                 connect_kwargs["proxy"] = self._proxy_url
 
-            self._ws_connection = await connect(ws_url, **connect_kwargs)
+            self._websocket = await connect(self.WS_URI, **connect_kwargs)
+            self._state.connected = True
             self._running = True
+            logger.info(f"[{self.CLIENT_ID}] WebSocket 连接已建立")
 
-            logger.info("现货用户数据流 WebSocket 已连接")
-
-            # 3. 启动接收循环
+            # 启动接收循环
             self._receive_task = asyncio.create_task(self._receive_loop())
 
-            # 4. 启动续期任务
-            self._renew_task = asyncio.create_task(self._renew_loop())
+            # session.logon 认证
+            await self._session_logon()
 
-            return True
+            # userDataStream.subscribe 订阅
+            await self._subscribe_user_data_stream()
 
         except Exception as e:
-            logger.error(f"启动现货用户数据流客户端失败: {e}")
-            await self.stop()
-            return False
+            logger.error(f"[{self.CLIENT_ID}] 连接失败: {e}")
+            self._state.connected = False
+            self._running = True
+            # 调度持续重连
+            if self._reconnect_task and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
+            self._reconnect_task = asyncio.create_task(self._schedule_reconnect())
 
-    async def stop(self) -> None:
-        """停止客户端"""
-        if not self._running:
-            return
+    async def _session_logon(self) -> None:
+        """执行 session.logon 认证
 
-        logger.info("停止现货用户数据流客户端...")
-        self._running = False
+        Ed25519 签名 payload 格式：apiKey=xxx&timestamp=xxx（按键名字母排序）
+        """
+        timestamp = int(time.time() * 1000)
 
-        # 取消续期任务
-        if self._renew_task:
-            self._renew_task.cancel()
-            try:
-                await self._renew_task
-            except asyncio.CancelledError:
-                pass
-            self._renew_task = None
+        # 构建签名 payload：按键名字母顺序排序后用 & 连接
+        auth_params = {
+            "apiKey": self._api_key,
+            "timestamp": timestamp,
+        }
+        sorted_params = dict(sorted(auth_params.items()))
+        payload = "&".join(f"{k}={v}" for k, v in sorted_params.items())
 
-        # 取消接收任务
-        if self._receive_task:
-            self._receive_task.cancel()
-            try:
-                await self._receive_task
-            except asyncio.CancelledError:
-                pass
-            self._receive_task = None
+        # Ed25519 签名
+        signature = self._signer.sign(payload)
 
-        # 关闭 WebSocket
-        if self._ws_connection:
-            try:
-                await self._ws_connection.close()
-            except Exception as e:
-                logger.warning(f"关闭 WebSocket 时出错: {e}")
-            self._ws_connection = None
+        # 构建认证请求
+        auth_request = {
+            "id": self._next_request_id(),
+            "method": "session.logon",
+            "params": {
+                "apiKey": self._api_key,
+                "timestamp": timestamp,
+                "signature": signature,
+            },
+        }
 
-        # 关闭 listenKey
-        if self._listen_key:
-            await self._close_listen_key(self._listen_key)
-            self._listen_key = None
+        logger.info(f"[{self.CLIENT_ID}] 正在执行 session.logon 认证...")
+        await self._send(auth_request)
 
-        logger.info("现货用户数据流客户端已停止")
+        # 注意：BaseWSClient 的 _receive_loop 会处理响应
+        # 响应会通过 _handle_message 处理
+        logger.info(f"[{self.CLIENT_ID}] session.logon 请求已发送")
 
-    async def _receive_loop(self) -> None:
-        """接收数据循环"""
-        logger.info("现货用户数据流接收循环启动")
+    async def _subscribe_user_data_stream(self) -> None:
+        """订阅用户数据流"""
+        subscribe_request = {
+            "id": self._next_request_id(),
+            "method": "userDataStream.subscribe",
+            "params": {},
+        }
 
-        try:
-            async for message in self._ws_connection:
-                if not self._running:
-                    break
-
-                try:
-                    data = json.loads(message)
-                    await self._handle_message(data)
-                except json.JSONDecodeError:
-                    logger.warning("收到无效的 JSON 消息")
-                except Exception as e:
-                    logger.error(f"处理现货用户数据流消息时出错: {e}")
-
-        except asyncio.CancelledError:
-            logger.info("现货用户数据流接收循环已取消")
-        except Exception as e:
-            logger.error(f"现货用户数据流接收循环异常: {e}")
-        finally:
-            if self._running:
-                # 尝试重新连接
-                logger.info("现货用户数据流断开，尝试重新连接...")
-                await self._reconnect()
+        logger.info(f"[{self.CLIENT_ID}] 正在订阅 userDataStream...")
+        await self._send(subscribe_request)
+        logger.info(f"[{self.CLIENT_ID}] userDataStream.subscribe 请求已发送")
 
     async def _handle_message(self, message: dict) -> None:
         """处理接收到的消息
 
-        Args:
-            message: WebSocket 消息
+        BaseWSClient 模式：
+        - 收到数据后立即打包为 WSDataPackage
+        - 调用 _data_callback 发送给币安服务
+        - 不做任何数据解析
         """
-        event_type = message.get("e", "unknown")
+        # 识别 ACK 确认消息 {"result": null, "id": xxx}
+        if "result" in message and "id" in message:
+            result = message.get("result")
+            request_id = message.get("id")
+            logger.debug(
+                f"[{self.CLIENT_ID}] 收到 ACK 确认: result={result}, id={request_id}"
+            )
 
-        logger.debug(f"收到现货账户事件: {event_type}")
+            # 如果是订阅响应，记录 subscriptionId
+            if isinstance(result, dict) and "subscriptionId" in result:
+                self._subscription_id = result.get("subscriptionId")
+                logger.info(
+                    f"[{self.CLIENT_ID}] 订阅成功: subscriptionId={self._subscription_id}"
+                )
+            return
 
-        # 解析事件数据
-        if event_type == "outboundAccountPosition":
-            # 账户余额变化
-            processed_data = {
-                "source": "websocket",
-                "event_type": event_type,
-                "update_time": message.get("u"),  # 事件结束时间
-                "balances": message.get("B", []),
-            }
-        elif event_type == "balanceUpdate":
-            # 充值/提取/划转
-            processed_data = {
-                "source": "websocket",
-                "event_type": event_type,
-                "update_time": message.get("u"),
-                "asset": message.get("a"),
-                "balance_delta": message.get("d"),
-                "clear_time": message.get("T"),
-            }
-        elif event_type == "executionReport":
-            # 订单更新
-            processed_data = {
-                "source": "websocket",
-                "event_type": event_type,
-                "update_time": message.get("T"),
-                "symbol": message.get("s"),
-                "side": message.get("S"),
-                "order_type": message.get("o"),
-                "order_status": message.get("X"),
-                "order_id": message.get("i"),
-                "client_order_id": message.get("c"),
-                "price": message.get("p"),
-                "quantity": message.get("q"),
-                "accumulated_quantity": message.get("z"),
-            }
-        else:
-            # 未知事件类型
-            logger.warning(f"未知的现货账户事件类型: {event_type}")
-            processed_data = {
-                "source": "websocket",
-                "event_type": event_type,
-                "raw": message,
-            }
+        # 识别错误消息
+        if "status" in message and message.get("status") != 200:
+            error_code = message.get("error", {}).get("code", "unknown")
+            error_msg = message.get("error", {}).get("msg", "unknown")
+            logger.error(f"[{self.CLIENT_ID}] WebSocket 错误: code={error_code}, msg={error_msg}")
+            return
 
-        # 调用回调
-        if self._data_callback:
-            try:
-                await self._data_callback(processed_data)
-            except Exception as e:
-                logger.error(f"调用数据回调失败: {e}")
+        # 识别会话状态消息
+        if "sessionId" in message or "status" in message:
+            logger.debug(f"[{self.CLIENT_ID}] 会话状态消息: {message}")
+            return
 
-    async def _renew_loop(self) -> None:
-        """续期循环
+        # 业务事件消息（outboundAccountPosition, balanceUpdate, executionReport 等）
+        # 格式：{"subscriptionId": 0, "event": {...}}
+        if "subscriptionId" in message and "event" in message:
+            event_data = message.get("event", {})
+            event_type = event_data.get("e", "unknown")
+            logger.debug(f"[{self.CLIENT_ID}] 收到业务事件: {event_type}")
 
-        每隔 RENEW_INTERVAL_SEC 秒续期一次 listenKey
-        """
-        logger.info("现货用户数据流续期循环启动")
+            # 打包数据并发送给币安服务（不解析）
+            package = WSDataPackage(
+                client_id=self.CLIENT_ID,
+                data=message,  # 发送原始消息，不解析
+                timestamp=int(time.time() * 1000),
+            )
 
-        while self._running:
-            try:
-                await asyncio.sleep(self.RENEW_INTERVAL_SEC)
-                if not self._running:
-                    break
+            if self._data_callback:
+                await self._data_callback(package)
+            return
 
-                # 续期 listenKey
-                success = await self._renew_listen_key()
-                if success:
-                    logger.debug("现货 listenKey 续期成功")
-                else:
-                    logger.warning("现货 listenKey 续期失败")
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"现货 listenKey 续期循环异常: {e}")
-
-        logger.info("现货用户数据流续期循环结束")
+        # 其他消息类型
+        logger.debug(f"[{self.CLIENT_ID}] 收到其他消息: {message}")
 
     async def _reconnect(self) -> None:
-        """重新连接"""
+        """断线重连
+
+        重连后需要重新：
+        1. 连接 WebSocket
+        2. session.logon 认证
+        3. userDataStream.subscribe 订阅
+        """
         if not self._running:
             return
 
-        # 关闭旧连接
-        if self._ws_connection:
+        logger.info(f"[{self.CLIENT_ID}] 尝试重新连接...")
+
+        # 1. 正确关闭旧连接
+        old_websocket = self._websocket
+        self._websocket = None
+        self._state.connected = False
+        self._subscription_id = None
+
+        if old_websocket:
             try:
-                await self._ws_connection.close()
+                await old_websocket.close()
+                logger.debug(f"[{self.CLIENT_ID}] 旧连接已关闭")
             except Exception as e:
-                logger.warning(f"关闭WebSocket连接失败: {e}")
-            self._ws_connection = None
+                logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
 
-        # 等待后重试
-        for attempt in range(5):
-            if not self._running:
-                return
+        # 2. 尝试创建新连接
+        success = await self._try_reconnect()
 
-            logger.info(f"尝试重新连接现货用户数据流 (尝试 {attempt + 1}/5)...")
-            await asyncio.sleep(5)
+        if success and self._running:
+            # 重新认证和订阅
+            await self._session_logon()
+            await self._subscribe_user_data_stream()
 
-            success = await self.start()
-            if success:
-                logger.info("现货用户数据流重连成功")
-                return
+            # 通知上层重连完成
+            if self._reconnect_callback:
+                await self._reconnect_callback()
+        elif not success and self._running:
+            # 调度持续重试任务
+            if self._reconnect_task and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
+            self._reconnect_task = asyncio.create_task(self._schedule_reconnect())
 
-        logger.error("现货用户数据流重连失败，停止客户端")
-        await self.stop()
-
-    # ========== listenKey 管理 ==========
-
-    async def _create_listen_key(self) -> Optional[str]:
-        """创建 listenKey
-
-        Returns:
-            listenKey 字符串，失败返回 None
-        """
+    async def _try_reconnect(self) -> bool:
+        """尝试重连，返回是否成功"""
         try:
-            url = "https://demo-api.binance.com/api/v3/userDataStream"
+            # 关闭旧连接
+            old_websocket = self._websocket
+            self._websocket = None
+            self._state.connected = False
 
-            headers = {"X-MBX-APIKEY": self._api_key}
+            if old_websocket:
+                try:
+                    await old_websocket.close()
+                except Exception as e:
+                    logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
 
-            async with httpx.AsyncClient(proxy=self._proxy_url) as client:
-                response = await client.post(url, headers=headers, timeout=10.0)
-                response.raise_for_status()
-                data = response.json()
-                return data.get("listenKey")
+            # 创建新连接
+            connect_kwargs: dict[str, Any] = {}
+            if self._proxy_url:
+                connect_kwargs["proxy"] = self._proxy_url
+
+            self._websocket = await connect(self.WS_URI, **connect_kwargs)
+            self._state.connected = True
+            logger.info(f"[{self.CLIENT_ID}] 已重新连接")
+
+            self._receive_task = asyncio.create_task(self._receive_loop())
+            self._reconnect_task = None
+            return True
 
         except Exception as e:
-            logger.error(f"创建现货 listenKey 失败: {e}")
-            return None
-
-    async def _renew_listen_key(self) -> bool:
-        """续期 listenKey
-
-        Returns:
-            是否成功
-        """
-        if not self._listen_key:
+            logger.error(f"[{self.CLIENT_ID}] 重连失败: {e}")
+            self._state.connected = False
             return False
-
-        try:
-            url = "https://demo-api.binance.com/api/v3/userDataStream"
-
-            headers = {"X-MBX-APIKEY": self._api_key}
-            params = {"listenKey": self._listen_key}
-
-            async with httpx.AsyncClient(proxy=self._proxy_url) as client:
-                response = await client.put(
-                    url, headers=headers, params=params, timeout=10.0
-                )
-                response.raise_for_status()
-                return True
-
-        except Exception as e:
-            logger.error(f"续期现货 listenKey 失败: {e}")
-            return False
-
-    async def _close_listen_key(self, listen_key: str) -> None:
-        """关闭 listenKey
-
-        Args:
-            listen_key: 要关闭的 listenKey
-        """
-        try:
-            url = "https://demo-api.binance.com/api/v3/userDataStream"
-
-            headers = {"X-MBX-APIKEY": self._api_key}
-            params = {"listenKey": listen_key}
-
-            async with httpx.AsyncClient(proxy=self._proxy_url) as client:
-                response = await client.delete(
-                    url, headers=headers, params=params, timeout=10.0
-                )
-                response.raise_for_status()
-                logger.info(f"现货 listenKey 已关闭: {listen_key[:10]}...")
-
-        except Exception as e:
-            logger.warning(f"关闭现货 listenKey 失败: {e}")

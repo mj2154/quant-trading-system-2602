@@ -1,5 +1,5 @@
 """
-WS订阅管理器
+WS订阅管理器（统一版）
 
 职责：
 1. 【核心】监听数据库订阅通知 (subscription_add/remove/clean)
@@ -8,20 +8,15 @@ WS订阅管理器
 4. 【核心】统一将数据写入数据库
 5. WS客户端生命周期管理（连接/断连/重连）
 
-订阅键格式 (QUANT_TRADING_SYSTEM_ARCHITECTURE.md):
-- {EXCHANGE}:{SYMBOL}[.{产品后缀}]@{DATA_TYPE}[_{RESOLUTION}]
-- 示例: BINANCE:BTCUSDT@KLINE_1, BINANCE:BTCUSDT.PERP@KLINE_60
+支持的数据类型：
+- 市场数据：KLINE, QUOTES, TRADE - 通过公共WS流订阅
+- 账户数据：ACCOUNT - 通过用户数据流订阅
 
-分辨率格式 (TradingView API规范):
-- TV格式: "1", "60", "D", "W", "M"
-- 币安格式: "1m", "1h", "1d", "1w", "1M"
-- 系统内部统一使用TV格式
-
-数据流:
-1. 监听数据库 subscription_add/remove/clean 通知
-2. 批处理后执行 WS 订阅/取消
-3. 接收 WS 数据包，解析并写入 realtime_data 表
-4. 触发 realtime_update 通知
+订阅键格式：
+- 市场数据: BINANCE:{SYMBOL}[.后缀]@{DATA_TYPE}[_{RESOLUTION}]
+  - 示例: BINANCE:BTCUSDT@KLINE_1, BINANCE:BTCUSDT.PERP@KLINE_60
+- 账户数据: BINANCE:{ACCOUNT_TYPE}@ACCOUNT
+  - 示例: BINANCE:SPOT@ACCOUNT, BINANCE:FUTURES@ACCOUNT
 """
 
 import asyncio
@@ -33,14 +28,33 @@ from typing import Optional
 import asyncpg
 
 from clients.base_ws_client import BaseWSClient, WSDataPackage
+from constants.binance import BinanceAccountSubscriptionKey
 from db.realtime_data_repository import RealtimeDataRepository
+from models import WSSubscribeRequest, WSUnsubscribeRequest
+from models.kline_models import (
+    BinanceSpotKlineWSModel,
+    BinanceFuturesKlineWSModel,
+)
+from models.ticker_models import (
+    BinanceSpotTicker24hrWSModel,
+    BinanceFuturesTicker24hrWSModel,
+)
+from models.ws_account_models import (
+    BinanceSpotOutboundAccountPositionWSModel,
+    BinanceSpotBalanceUpdateWSModel,
+    BinanceFuturesAccountUpdateWSModel,
+)
+from models.order_models import (
+    BinanceSpotExecutionReportWSModel,
+    BinanceFuturesOrderTradeUpdateWSModel,
+)
 from utils import interval_to_resolution
 
 logger = logging.getLogger(__name__)
 
 
 class WSSubscriptionManager:
-    """WS订阅管理器（币安服务专用）- 订阅管理核心
+    """WS订阅管理器（统一版）
 
     职责:
     1. 【核心】监听数据库订阅通知 (subscription_add/remove/clean)
@@ -48,7 +62,15 @@ class WSSubscriptionManager:
     3. 【核心】接收所有WS客户端的数据包
     4. 【核心】统一将数据写入数据库
     5. WS客户端生命周期管理（连接/断连/重连）
+
+    支持的数据类型：
+    - 市场数据 (KLINE, QUOTES, TRADE): 通过公共WS流订阅
+    - 账户数据 (ACCOUNT): 通过用户数据流订阅，无需符号订阅
     """
+
+    # 用户数据流客户端 ID
+    SPOT_USER_STREAM_ID = "binance-spot-user-stream-001"
+    FUTURES_USER_STREAM_ID = "binance-futures-user-stream-001"
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         """初始化订阅管理器
@@ -61,6 +83,12 @@ class WSSubscriptionManager:
 
         # WS客户端管理: client_id -> client
         self._ws_clients: dict[str, BaseWSClient] = {}
+
+        # 账户订阅状态
+        self._account_subscriptions: set[str] = set()  # 当前已订阅的账户键
+
+        # 用户数据流客户端（账户订阅）- 不参与批量订阅
+        self._user_stream_clients: dict[str, BaseWSClient] = {}
 
         # 批处理队列
         self._pending_subscribes: set[str] = set()
@@ -76,7 +104,7 @@ class WSSubscriptionManager:
     # ========== WS客户端注册 ==========
 
     def register_client(self, client_id: str, client: BaseWSClient) -> None:
-        """注册WS客户端
+        """注册市场数据WS客户端
 
         Args:
             client_id: 客户端唯一标识，如 "binance-spot-ws-001"
@@ -85,7 +113,23 @@ class WSSubscriptionManager:
         self._ws_clients[client_id] = client
         # 设置数据回调，接收 WSDataPackage
         client.set_data_callback(self._handle_data_package)
-        logger.info(f"已注册WS客户端: {client_id}")
+        logger.info(f"已注册市场数据WS客户端: {client_id}")
+
+    def register_user_stream_client(self, client_id: str, client: BaseWSClient) -> None:
+        """注册用户数据流客户端（用于账户订阅）
+
+        用户数据流客户端与市场数据客户端不同：
+        - 不参与批量订阅/取消
+        - 在 start() 时自动连接和订阅
+        - 通过 client_id 区分数据类型
+
+        Args:
+            client_id: 客户端唯一标识，如 "binance-spot-user-stream-001"
+            client: WS客户端实例
+        """
+        self._user_stream_clients[client_id] = client
+        client.set_data_callback(self._handle_data_package)
+        logger.info(f"已注册用户数据流客户端: {client_id}")
 
     # ========== 生命周期管理 ==========
 
@@ -106,13 +150,21 @@ class WSSubscriptionManager:
         # 启动监听任务
         self._listener_task = asyncio.create_task(self._listen_notifications())
 
-        # 启动所有WS客户端连接
+        # 启动市场数据WS客户端
         for client_id, client in self._ws_clients.items():
             try:
                 await client.connect()
-                logger.info(f"WS客户端已启动: {client_id}")
+                logger.info(f"市场数据WS客户端已启动: {client_id}")
             except Exception as e:
-                logger.error(f"WS客户端启动失败: {client_id}, {e}")
+                logger.error(f"市场数据WS客户端启动失败: {client_id}, {e}")
+
+        # 启动用户数据流客户端（账户订阅）
+        for client_id, client in self._user_stream_clients.items():
+            try:
+                await client.connect()
+                logger.info(f"用户数据流客户端已启动: {client_id}")
+            except Exception as e:
+                logger.error(f"用户数据流客户端启动失败: {client_id}, {e}")
 
         # 启动时执行全量同步，恢复所有已存在的订阅
         await self.full_sync()
@@ -146,9 +198,17 @@ class WSSubscriptionManager:
         for client_id, client in self._ws_clients.items():
             try:
                 await client.disconnect()
-                logger.info(f"WS客户端已停止: {client_id}")
+                logger.info(f"市场数据WS客户端已停止: {client_id}")
             except Exception as e:
-                logger.error(f"WS客户端停止失败: {client_id}, {e}")
+                logger.error(f"市场数据WS客户端停止失败: {client_id}, {e}")
+
+        # 断开用户数据流客户端
+        for client_id, client in self._user_stream_clients.items():
+            try:
+                await client.disconnect()
+                logger.info(f"用户数据流客户端已停止: {client_id}")
+            except Exception as e:
+                logger.error(f"用户数据流客户端停止失败: {client_id}, {e}")
 
         logger.info("WSSubscriptionManager已停止")
 
@@ -157,49 +217,188 @@ class WSSubscriptionManager:
     async def _handle_data_package(self, package: WSDataPackage) -> None:
         """处理WS数据包（统一入口）
 
-        解析数据包，统一写入数据库
+        根据 client_id 路由到不同的处理函数：
+        - 用户数据流客户端 -> 账户数据处理
+        - 公共数据流客户端 -> 市场数据处理
+        """
+        logger.debug(f"[WS_DATA] 收到数据包: client={package.client_id}")
 
-        币安WS消息格式:
+        # 判断是否为用户数据流客户端
+        if package.client_id in (self.SPOT_USER_STREAM_ID, self.FUTURES_USER_STREAM_ID):
+            await self._handle_account_data(package)
+            return
+
+        # 市场数据处理
+        # binance-spot-ws-001 -> 现货，无后缀
+        # binance-futures-ws-001 -> 期货，添加 .PERP 后缀
+        is_futures = "futures" in package.client_id.lower()
+
+        # 从数据中提取流名称并验证数据
+        event_type = package.data.get("e", "")
+
+        if event_type == "kline":
+            await self._handle_kline_data(package.data, is_futures)
+        elif event_type in ("24hrTicker", "BOOK_TICKER"):
+            await self._handle_ticker_data(package.data, is_futures)
+        else:
+            # 其他类型，直接写入原始数据
+            stream = self._extract_stream(package.data)
+            if not stream:
+                logger.warning(
+                    f"[WS_DATA] 无法识别的数据格式: {event_type}"
+                )
+                return
+            subscription_key = self._binance_stream_to_key(stream, is_futures)
+            await self._write_realtime_data(subscription_key, package.data)
+
+    async def _handle_kline_data(self, data: dict, is_futures: bool) -> None:
+        """处理 K线数据
+
+        使用 BinanceSpotKlineWSModel 或 BinanceFuturesKlineWSModel 验证数据，
+        然后写入数据库。
+
+        Args:
+            data: 币安原始 WS 消息
+            is_futures: 是否为期货数据
+        """
+        # 选择对应的模型
+        kline_model_class = (
+            BinanceFuturesKlineWSModel if is_futures else BinanceSpotKlineWSModel
+        )
+
+        try:
+            # 使用 Pydantic 模型验证数据
+            validated_model = kline_model_class.model_validate(data)
+
+            # 提取流名称
+            stream = self._extract_stream(data)
+            if not stream:
+                logger.warning("[WS_DATA] 无法从 kline 数据中提取流名称")
+                return
+
+            subscription_key = self._binance_stream_to_key(stream, is_futures)
+
+            # 将验证后的数据写入数据库
+            # 使用 model_dump(by_alias=True, mode='json') 获取验证后的字典数据：
+            # - by_alias=True: 输出币安别名格式 (c, h, l, o 等)，而非 Pydantic 字段名 (close_price, high_price 等)
+            # - mode='json': 自动处理 Decimal/ datetime 序列化为 JSON 兼容格式
+            await self._write_realtime_data(
+                subscription_key, validated_model.model_dump(by_alias=True, mode='json')
+            )
+            logger.debug(
+                f"[WS_DATA] K线数据已验证并写入: {subscription_key}"
+            )
+        except Exception as e:
+            logger.error(f"K线数据验证失败: {e}, data={data}")
+
+    async def _handle_ticker_data(self, data: dict, is_futures: bool) -> None:
+        """处理 Ticker 数据
+
+        使用 BinanceSpotTicker24hrWSModel 或 BinanceFuturesTicker24hrWSModel 验证数据，
+        然后写入数据库。
+
+        Args:
+            data: 币安原始 WS 消息
+            is_futures: 是否为期货数据
+        """
+        # 选择对应的模型
+        ticker_model_class = (
+            BinanceFuturesTicker24hrWSModel
+            if is_futures
+            else BinanceSpotTicker24hrWSModel
+        )
+
+        try:
+            # 使用 Pydantic 模型验证数据
+            validated_model = ticker_model_class.model_validate(data)
+
+            # 提取流名称
+            stream = self._extract_stream(data)
+            if not stream:
+                logger.warning("[WS_DATA] 无法从 ticker 数据中提取流名称")
+                return
+
+            subscription_key = self._binance_stream_to_key(stream, is_futures)
+
+            # 将验证后的数据写入数据库
+            # 使用 model_dump(by_alias=True, mode='json') 获取验证后的字典数据：
+            # - by_alias=True: 输出币安别名格式 (c, h, l, o 等)，而非 Pydantic 字段名 (close_price, high_price 等)
+            # - mode='json': 自动处理 Decimal/ datetime 序列化为 JSON 兼容格式
+            await self._write_realtime_data(
+                subscription_key, validated_model.model_dump(by_alias=True, mode='json')
+            )
+            logger.debug(
+                f"[WS_DATA] Ticker数据已验证并写入: {subscription_key}"
+            )
+        except Exception as e:
+            logger.error(f"Ticker数据验证失败: {e}, data={data}")
+
+    # ========== 账户数据处理 ==========
+
+    async def _handle_account_data(self, package: WSDataPackage) -> None:
+        """处理账户数据（用户数据流）
+
+        用户数据流消息格式：
         {
-            "e": "kline",           // 事件类型
-            "s": "BTCUSDT",          // 交易对
-            "k": {
-                "i": "1m",           // K线间隔
-                "o": "50000.00",    // 开盘价
+            "subscriptionId": 0,
+            "event": {
+                "e": "outboundAccountPosition",  // 事件类型
                 ...
             }
         }
 
-        说明：
-        - 现货和期货K线都使用相同的 stream 格式：btcusdt@kline_1m
-        - 通过 package.client_id 区分数据来源，添加正确的后缀
+        Args:
+            package: WS数据包
         """
-        logger.debug(f"[WS_DATA] 收到数据包: client={package.client_id}")
-
-        # 从数据中提取流名称
-        stream = self._extract_stream(package.data)
-        if not stream:
-            logger.warning(
-                f"[WS_DATA] 无法识别的数据格式: {package.data.get('e', 'unknown')}"
-            )
-            return
-
-        # 通过 client_id 判断数据来源，添加正确的后缀
-        # binance-spot-ws-001 -> 现货，无后缀
-        # binance-futures-ws-001 -> 期货，添加 .PERP 后缀
-        is_futures = "futures" in package.client_id.lower()
-        subscription_key = self._binance_stream_to_key(stream, is_futures)
+        is_spot = package.client_id == self.SPOT_USER_STREAM_ID
+        subscription_key = (
+            BinanceAccountSubscriptionKey.SPOT if is_spot
+            else BinanceAccountSubscriptionKey.FUTURES
+        )
 
         try:
-            # 写入 realtime_data 表
+            message = package.data
+            event_data = message.get("event", {})
+            event_type = event_data.get("e", "unknown")
+
+            if event_type == "outboundAccountPosition":
+                ws_event = BinanceSpotOutboundAccountPositionWSModel.model_validate(event_data)
+                processed_data = ws_event.model_dump(by_alias=True, mode='json')
+            elif event_type == "balanceUpdate":
+                ws_event = BinanceSpotBalanceUpdateWSModel.model_validate(event_data)
+                processed_data = ws_event.model_dump(by_alias=True, mode='json')
+            elif event_type == "executionReport":
+                ws_event = BinanceSpotExecutionReportWSModel.model_validate(event_data)
+                processed_data = ws_event.model_dump(by_alias=True, mode='json')
+            elif event_type == "ACCOUNT_UPDATE":
+                ws_event = BinanceFuturesAccountUpdateWSModel.model_validate(event_data)
+                processed_data = ws_event.model_dump(by_alias=True, mode='json')
+            elif event_type == "ORDER_TRADE_UPDATE":
+                ws_event = BinanceFuturesOrderTradeUpdateWSModel.model_validate(event_data)
+                processed_data = ws_event.model_dump(by_alias=True, mode='json')
+            else:
+                processed_data = event_data
+
+            await self._write_realtime_data(subscription_key, processed_data)
+            logger.debug(f"[WS_DATA] 账户数据已更新: {event_type}")
+
+        except Exception as e:
+            logger.error(f"处理账户数据失败: {e}")
+
+    async def _write_realtime_data(self, subscription_key: str, data: dict) -> None:
+        """写入实时数据到数据库
+
+        Args:
+            subscription_key: 订阅键
+            data: 已验证的数据字典
+        """
+        try:
             await self._repository.update_data(
                 subscription_key=subscription_key,
-                data=package.data,
+                data=data,
                 event_time=datetime.now(timezone.utc),
             )
-            logger.debug(
-                f"[WS_DATA] 写入数据: {subscription_key} from {package.client_id}"
-            )
+            logger.debug(f"[WS_DATA] 写入数据: {subscription_key}")
         except Exception as e:
             logger.error(f"写入实时数据失败: {subscription_key}, {e}")
 
@@ -413,14 +612,23 @@ class WSSubscriptionManager:
         流程:
         1. 按 WS 客户端分组订阅键
         2. 每个客户端批量发送一个订阅请求
+
+        账户订阅（BinanceAccountSubscriptionKey）使用用户数据流，无需符号订阅。
         """
         logger.info(f"[EXEC_SUB] 开始执行批量订阅: {len(subscription_keys)} 个订阅")
 
         # 按客户端分组订阅键
         spot_streams: list[str] = []
         futures_streams: list[str] = []
+        account_subscriptions: list[str] = []
 
         for key in subscription_keys:
+            # 检查是否为账户订阅
+            if key in (BinanceAccountSubscriptionKey.SPOT, BinanceAccountSubscriptionKey.FUTURES):
+                account_subscriptions.append(key)
+                continue
+
+            # 市场数据订阅
             try:
                 stream, is_futures = (
                     self._repository.subscription_key_to_binance_stream(key)
@@ -432,12 +640,19 @@ class WSSubscriptionManager:
             except Exception as e:
                 logger.error(f"[EXEC_SUB] 解析订阅键失败: key={key}, error={e}")
 
+        # 处理账户订阅
+        if account_subscriptions:
+            for sub_key in account_subscriptions:
+                self._account_subscriptions.add(sub_key)
+            logger.info(f"[EXEC_SUB] 账户订阅已激活: {account_subscriptions}")
+
         # 现货客户端批量订阅
         if spot_streams:
             client = self._ws_clients.get("binance-spot-ws-001")
             if client:
                 try:
-                    await client.subscribe(spot_streams)
+                    request = WSSubscribeRequest(params=spot_streams, id=id(self))
+                    await client.subscribe(request)
                     logger.info(
                         f"[EXEC_SUB] 现货批量订阅成功: {len(spot_streams)} 个流"
                     )
@@ -451,7 +666,8 @@ class WSSubscriptionManager:
             client = self._ws_clients.get("binance-futures-ws-001")
             if client:
                 try:
-                    await client.subscribe(futures_streams)
+                    request = WSSubscribeRequest(params=futures_streams, id=id(self))
+                    await client.subscribe(request)
                     logger.info(
                         f"[EXEC_SUB] 期货批量订阅成功: {len(futures_streams)} 个流"
                     )
@@ -469,8 +685,15 @@ class WSSubscriptionManager:
         # 按客户端分组订阅键
         spot_streams: list[str] = []
         futures_streams: list[str] = []
+        account_subscriptions: list[str] = []
 
         for key in subscription_keys:
+            # 检查是否为账户订阅
+            if key in (BinanceAccountSubscriptionKey.SPOT, BinanceAccountSubscriptionKey.FUTURES):
+                account_subscriptions.append(key)
+                continue
+
+            # 市场数据取消订阅
             try:
                 stream, is_futures = (
                     self._repository.subscription_key_to_binance_stream(key)
@@ -482,12 +705,19 @@ class WSSubscriptionManager:
             except Exception as e:
                 logger.error(f"[EXEC_UNSUB] 解析订阅键失败: key={key}, error={e}")
 
+        # 处理账户取消订阅
+        if account_subscriptions:
+            for sub_key in account_subscriptions:
+                self._account_subscriptions.discard(sub_key)
+            logger.info(f"[EXEC_UNSUB] 账户订阅已移除: {account_subscriptions}")
+
         # 现货客户端批量取消订阅
         if spot_streams:
             client = self._ws_clients.get("binance-spot-ws-001")
             if client:
                 try:
-                    await client.unsubscribe(spot_streams)
+                    request = WSUnsubscribeRequest(params=spot_streams, id=id(self))
+                    await client.unsubscribe(request)
                     logger.info(
                         f"[EXEC_UNSUB] 现货批量取消订阅成功: {len(spot_streams)} 个流"
                     )
@@ -499,7 +729,8 @@ class WSSubscriptionManager:
             client = self._ws_clients.get("binance-futures-ws-001")
             if client:
                 try:
-                    await client.unsubscribe(futures_streams)
+                    request = WSUnsubscribeRequest(params=futures_streams, id=id(self))
+                    await client.unsubscribe(request)
                     logger.info(
                         f"[EXEC_UNSUB] 期货批量取消订阅成功: {len(futures_streams)} 个流"
                     )
@@ -518,6 +749,8 @@ class WSSubscriptionManager:
         """全量同步：从数据库读取所有订阅并执行订阅
 
         用于断线重连后恢复订阅。
+        注意：账户订阅（BinanceAccountSubscriptionKey）不需要全量同步，
+        因为用户数据流客户端自己管理连接和订阅。
         """
         logger.info("执行全量同步...")
         try:
@@ -528,12 +761,38 @@ class WSSubscriptionManager:
                 )
 
             if rows:
-                subscription_keys = [row["subscription_key"] for row in rows]
-                data_types = [row["data_type"] for row in rows]
+                # 过滤掉账户订阅，只处理市场数据订阅
+                market_subscription_keys = [
+                    row["subscription_key"] for row in rows
+                    if row["subscription_key"] not in (
+                        BinanceAccountSubscriptionKey.SPOT,
+                        BinanceAccountSubscriptionKey.FUTURES,
+                    )
+                ]
+                data_types = [
+                    row["data_type"] for row in rows
+                    if row["subscription_key"] not in (
+                        BinanceAccountSubscriptionKey.SPOT,
+                        BinanceAccountSubscriptionKey.FUTURES,
+                    )
+                ]
+
+                # 恢复账户订阅状态
+                for row in rows:
+                    if row["subscription_key"] in (
+                        BinanceAccountSubscriptionKey.SPOT,
+                        BinanceAccountSubscriptionKey.FUTURES,
+                    ):
+                        self._account_subscriptions.add(row["subscription_key"])
+
                 logger.info(
-                    f"全量同步：发现 {len(subscription_keys)} 个订阅: {data_types}"
+                    f"全量同步：发现 {len(market_subscription_keys)} 个市场订阅: {data_types}"
                 )
-                await self._execute_batch_subscribe(subscription_keys)
+                if self._account_subscriptions:
+                    logger.info(
+                        f"全量同步：账户订阅已激活: {list(self._account_subscriptions)}"
+                    )
+                await self._execute_batch_subscribe(market_subscription_keys)
             else:
                 logger.info("全量同步：无订阅")
 

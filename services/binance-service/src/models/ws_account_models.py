@@ -1,337 +1,232 @@
 """
-WebSocket账户信息模型
+币安 WebSocket 账户数据模型
 
-用于私有WebSocket API的账户信息数据结构。
-期货账户信息V2和现货账户信息模型。
-使用camelCase与币安API保持一致。
+严格遵循文档: docs/backend/design/09-binance-models.md
+
+包含:
+- 现货账户持仓变化 WS (outboundAccountPosition)
+- 现货余额更新 WS (balanceUpdate)
+- 现货事件流终止 WS (eventStreamTerminated)
+- 期货账户更新 WS (ACCOUNT_UPDATE)
 """
 
-from typing import Any, Optional
+from decimal import Decimal
 
-from pydantic import BaseModel, Field
-
-from .base import SnakeCaseModel
-
-# =============================================================================
-# 期货账户信息模型
-# =============================================================================
-
-
-class FuturesAssetV2(SnakeCaseModel):
-    """期货账户资产V2
-
-    WebSocket API v2/account.status 返回的资产信息。
-
-    字段说明：
-    - account_alias: 账户别名
-    - asset: 资产名称
-    - balance: 钱包余额 (account.balance响应)
-    - wallet_balance: 钱包余额 (v2/account.status响应)
-    - unrealized_profit: 未实现盈亏
-    - margin_balance: 保证金余额
-    - maint_margin: 维持保证金
-    - initial_margin: 起始保证金
-    - position_initial_margin: 持仓起始保证金
-    - open_order_initial_margin: 挂单起始保证金
-    - cross_wallet_balance: 全仓钱包余额
-    - cross_un_pnl: 全仓未实现盈亏
-    - available_balance: 可用余额
-    - max_withdraw_amount: 最大可转出金额
-    - margin_available: 是否可用作保证金（多资产模式）
-    - update_time: 更新时间
-    """
-
-    # account.balance 响应字段
-    account_alias: Optional[str] = Field(default=None, alias="accountAlias")
-    asset: str = Field(..., alias="asset")
-    balance: Optional[str] = Field(default="0", alias="balance")
-
-    # v2/account.status 响应字段
-    wallet_balance: Optional[str] = Field(default="0", alias="walletBalance")
-    unrealized_profit: str = Field(default="0", alias="unrealizedProfit")
-    margin_balance: str = Field(default="0", alias="marginBalance")
-    maint_margin: str = Field(default="0", alias="maintMargin")
-    initial_margin: str = Field(default="0", alias="initialMargin")
-    position_initial_margin: str = Field(default="0", alias="positionInitialMargin")
-    open_order_initial_margin: str = Field(default="0", alias="openOrderInitialMargin")
-    cross_wallet_balance: str = Field(default="0", alias="crossWalletBalance")
-    cross_un_pnl: str = Field(default="0", alias="crossUnPnl")
-    available_balance: str = Field(default="0", alias="availableBalance")
-    max_withdraw_amount: str = Field(default="0", alias="maxWithdrawAmount")
-    margin_available: Optional[bool] = Field(default=None, alias="marginAvailable")
-    update_time: int = Field(default=0, alias="updateTime")
-
-    model_config = {"populate_by_name": True}
-
-
-class FuturesPositionV2(SnakeCaseModel):
-    """期货持仓V2
-
-    WebSocket API v2/account.status 返回的持仓信息。
-
-    字段说明：
-    - symbol: 交易对
-    - position_side: 持仓方向（LONG/SHORT/BOTH）
-    - position_amt: 持仓数量
-    - unrealized_profit: 未实现盈亏
-    - isolated_margin: 逐仓保证金
-    - notional: 名义价值
-    - isolated_wallet: 逐仓钱包余额
-    - initial_margin: 起始保证金
-    - maint_margin: 维持保证金
-    - update_time: 更新时间
-    """
-
-    symbol: str = Field(..., alias="symbol")
-    position_side: str = Field(default="BOTH", alias="positionSide")
-    position_amt: str = Field(default="0", alias="positionAmt")
-    unrealized_profit: str = Field(default="0", alias="unrealizedProfit")
-    isolated_margin: str = Field(default="0", alias="isolatedMargin")
-    notional: str = Field(default="0", alias="notional")
-    isolated_wallet: str = Field(default="0", alias="isolatedWallet")
-    initial_margin: str = Field(default="0", alias="initialMargin")
-    maint_margin: str = Field(default="0", alias="maintMargin")
-    update_time: int = Field(default=0, alias="updateTime")
-
-    model_config = {"populate_by_name": True}
-
-
-class FuturesAccountInfoV2WS(SnakeCaseModel):
-    """期货账户信息V2 (WebSocket API)
-
-    通过WebSocket API的v2/account.status接口返回。
-    包含完整的账户信息和持仓数据。
-
-    字段说明：
-    - total_initial_margin: 总起始保证金
-    - total_maint_margin: 总维持保证金
-    - total_wallet_balance: 总钱包余额
-    - total_unrealized_profit: 总未实现盈亏
-    - total_margin_balance: 总保证金余额
-    - total_position_initial_margin: 持仓起始保证金总额
-    - total_open_order_initial_margin: 挂单起始保证金总额
-    - total_cross_wallet_balance: 全仓钱包余额
-    - total_cross_un_pnl: 全仓未实现盈亏
-    - available_balance: 可用余额
-    - max_withdraw_amount: 最大可转出金额
-    - assets: 资产列表
-    - positions: 持仓列表
-    """
-
-    total_initial_margin: str = Field(default="0", alias="totalInitialMargin")
-    total_maint_margin: str = Field(default="0", alias="totalMaintMargin")
-    total_wallet_balance: str = Field(default="0", alias="totalWalletBalance")
-    total_unrealized_profit: str = Field(default="0", alias="totalUnrealizedProfit")
-    total_margin_balance: str = Field(default="0", alias="totalMarginBalance")
-    total_position_initial_margin: str = Field(
-        default="0", alias="totalPositionInitialMargin"
-    )
-    total_open_order_initial_margin: str = Field(
-        default="0", alias="totalOpenOrderInitialMargin"
-    )
-    total_cross_wallet_balance: str = Field(
-        default="0", alias="totalCrossWalletBalance"
-    )
-    total_cross_un_pnl: str = Field(default="0", alias="totalCrossUnPnl")
-    available_balance: str = Field(default="0", alias="availableBalance")
-    max_withdraw_amount: str = Field(default="0", alias="maxWithdrawAmount")
-    assets: list[FuturesAssetV2] = Field(default_factory=list, alias="assets")
-    positions: list[FuturesPositionV2] = Field(default_factory=list, alias="positions")
-
-    model_config = {"populate_by_name": True}
-
-
-class FuturesAsset(SnakeCaseModel):
-    """期货账户资产
-
-    字段说明：
-    - asset: 资产名称
-    - margin_balance: 保证金余额
-    - wallet_balance: 钱包余额
-    - available_balance: 可用余额
-    - initial_margin: 起始保证金
-    - maintenance_margin: 维持保证金
-    - unrealized_pnl: 未实现盈亏
-    """
-
-    asset: str = Field(..., alias="a")
-    margin_balance: str = Field(..., alias="mb")
-    wallet_balance: str = Field(..., alias="wb")
-    available_balance: str = Field(..., alias="ab")
-    initial_margin: str = Field(..., alias="im")
-    maintenance_margin: str = Field(..., alias="mm")
-    unrealized_pnl: str = Field(..., alias="up")
-
-    model_config = {"populate_by_name": True}
-
-
-class FuturesPosition(SnakeCaseModel):
-    """期货持仓
-
-    字段说明：
-    - symbol: 交易对
-    - position_side: 持仓方向（LONG/SHORT/BOTH）
-    - position_side_value: 持仓方向数值（1=long, 2=short, 3=both）
-    - quantity: 持仓数量
-    - entry_price: 开仓价格
-    - mark_price: 标记价格
-    - unrealized_pnl: 未实现盈亏
-    - margin_balance: 保证金余额
-    - isolated_margin: 逐仓保证金
-    - is_auto_add_margin: 是否自动追加保证金
-    """
-
-    symbol: str = Field(..., alias="s")
-    position_side: str = Field(..., alias="ps")
-    position_side_value: int = Field(..., alias="psb")
-    quantity: str = Field(..., alias="pa")
-    entry_price: str = Field(..., alias="ep")
-    mark_price: str = Field(..., alias="mp")
-    unrealized_pnl: str = Field(..., alias="up")
-    margin_balance: str = Field(..., alias="mb")
-    isolated_margin: Optional[str] = Field(default=None, alias="im")
-    is_auto_add_margin: bool = Field(..., alias="aaf")
-
-    model_config = {"populate_by_name": True}
-
-
-class FuturesAccountInfoV2(SnakeCaseModel):
-    """期货账户信息V2
-
-    通过WebSocket API的account.getBalance接口返回。
-    包含完整的账户信息和持仓数据。
-
-    字段说明：
-    - fee_broker_bnb: 手续费BNB结算 Broker
-    - can_deposit: 是否可以充值
-    - can_trade: 是否可以交易
-    - can_withdraw: 是否可以提现
-    - fee_bnb: 手续费BNB抵扣
-    - total_balance: 总余额
-    - total_margin_balance: 总保证金余额
-    - total_available_balance: 总可用余额
-    - total_initial_margin: 总起始保证金
-    - total_maintenance_margin: 总维持保证金
-    - total_unrealized_pnl: 总未实现盈亏
-    - assets: 资产列表
-    - positions: 持仓列表
-    """
-
-    fee_broker_bnb: str = Field(..., alias="fb")
-    can_deposit: bool = Field(..., alias="d")
-    can_trade: bool = Field(..., alias="t")
-    can_withdraw: bool = Field(..., alias="w")
-    fee_bnb: str = Field(..., alias="f")
-    total_balance: str = Field(..., alias="tb")
-    total_margin_balance: str = Field(..., alias="tmb")
-    total_available_balance: str = Field(..., alias="tab")
-    total_initial_margin: str = Field(..., alias="tim")
-    total_maintenance_margin: str = Field(..., alias="tmm")
-    total_unrealized_pnl: str = Field(..., alias="tup")
-    assets: list[FuturesAsset] = Field(default_factory=list, alias="B")
-    positions: list[FuturesPosition] = Field(default_factory=list, alias="P")
-
-    model_config = {"populate_by_name": True}
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # =============================================================================
-# 现货账户信息模型
+# 现货（SPOT）账户持仓变化 WS 模型
 # =============================================================================
 
 
-class CommissionRates(SnakeCaseModel):
-    """现货手续费率
+class BinanceSpotAccountPositionBalanceModel(BaseModel):
+    """现货账户持仓 - 余额子模型
 
-    字段说明：
-    - maker_commission: 挂单手续费率
-    - taker_commission: 吃单手续费率
+    文档来源: binance_spot_docs/User Data Stream.md
     """
 
-    maker_commission: str = Field(..., alias="makerCommission")
-    taker_commission: str = Field(..., alias="takerCommission")
+    asset: str = Field(alias="a", description="资产名称")
+    free: Decimal = Field(alias="f", description="可用余额")
+    locked: Decimal = Field(alias="l", description="锁定余额")
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True)
 
 
-class SpotBalance(SnakeCaseModel):
-    """现货余额
+class BinanceSpotOutboundAccountPositionEvent(BaseModel):
+    """现货账户持仓变化事件内容模型
 
-    字段说明：
-    - asset: 资产名称
-    - free: 可用余额
-    - locked: 锁定余额
+    文档来源: binance_spot_docs/User Data Stream.md
     """
 
-    asset: str = Field(..., alias="a")
-    free: str = Field(..., alias="f")
-    locked: str = Field(..., alias="l")
-
-    model_config = {"populate_by_name": True}
-
-
-class SpotAccountInfo(SnakeCaseModel):
-    """现货账户信息
-
-    通过WebSocket API的account.getInfo接口返回。
-    包含完整的账户信息和余额数据。
-
-    字段说明：
-    - maker_commission: 挂单手续费率（千分比）
-    - taker_commission: 吃单手续费率（千分比）
-    - buyer_commission: 买家手续费率（千分比）
-    - seller_commission: 卖家手续费率（千分比）
-    - can_trade: 是否可以交易
-    - can_withdraw: 是否可以提现
-    - can_deposit: 是否可以充值
-    - update_time: 更新时间（毫秒时间戳）
-    - account_type: 账户类型
-    - balances: 余额列表（解析后的对象）
-    - balances_raw: 余额列表（原始数据）
-    - commission_rates: 手续费率
-    """
-
-    maker_commission: int = Field(..., alias="makerCommission")
-    taker_commission: int = Field(..., alias="takerCommission")
-    buyer_commission: int = Field(..., alias="buyerCommission")
-    seller_commission: int = Field(..., alias="sellerCommission")
-    can_trade: bool = Field(..., alias="canTrade")
-    can_withdraw: bool = Field(..., alias="canWithdraw")
-    can_deposit: bool = Field(..., alias="canDeposit")
-    update_time: int = Field(..., alias="updateTime")
-    account_type: str = Field(..., alias="accountType")
-    balances: list[SpotBalance] = Field(default_factory=list, alias="balances")
-    balances_raw: list[dict[str, Any]] = Field(default_factory=list, alias="balances")
-    commission_rates: Optional[CommissionRates] = Field(
-        default=None, alias="commissionRates"
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: int = Field(alias="E", description="事件时间")
+    last_update_time: int = Field(alias="u", description="最后更新时间")
+    balances: list[BinanceSpotAccountPositionBalanceModel] = Field(
+        alias="B", description="余额列表"
     )
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BinanceSpotOutboundAccountPositionWSModel(BaseModel):
+    """现货账户持仓变化 WS 事件模型
+
+    Stream: User Data Stream outboundAccountPosition 事件
+    文档来源: binance_spot_docs/User Data Stream.md
+    """
+
+    subscription_id: int = Field(alias="subscriptionId", description="订阅 ID")
+    event: BinanceSpotOutboundAccountPositionEvent = Field(description="事件内容")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 # =============================================================================
-# 辅助函数
+# 现货（SPOT）余额更新 WS 模型
 # =============================================================================
 
 
-def parse_futures_account_info_v2(data: dict[str, Any]) -> FuturesAccountInfoV2:
-    """解析期货账户信息V2
+class BinanceSpotBalanceUpdateEvent(BaseModel):
+    """现货余额更新事件内容模型
 
-    Args:
-        data: 原始API响应数据
-
-    Returns:
-        FuturesAccountInfoV2对象
+    文档来源: binance_spot_docs/User Data Stream.md
     """
-    return FuturesAccountInfoV2.model_validate(data)
+
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: int = Field(alias="E", description="事件时间")
+    asset: str = Field(alias="a", description="资产名称")
+    balance_delta: Decimal = Field(alias="d", description="余额变动")
+    clear_time: int = Field(alias="T", description="清算时间")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
-def parse_spot_account_info(data: dict[str, Any]) -> SpotAccountInfo:
-    """解析现货账户信息
+class BinanceSpotBalanceUpdateWSModel(BaseModel):
+    """现货余额更新 WS 事件模型
 
-    Args:
-        data: 原始API响应数据
-
-    Returns:
-        SpotAccountInfo对象
+    Stream: User Data Stream balanceUpdate 事件
+    文档来源: binance_spot_docs/User Data Stream.md
     """
-    return SpotAccountInfo.model_validate(data)
+
+    subscription_id: int = Field(alias="subscriptionId", description="订阅 ID")
+    event: BinanceSpotBalanceUpdateEvent = Field(description="事件内容")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# =============================================================================
+# 现货（SPOT）事件流终止 WS 模型
+# =============================================================================
+
+
+class BinanceSpotEventStreamTerminatedEvent(BaseModel):
+    """现货事件流终止事件内容模型
+
+    文档来源: binance_spot_docs/User Data Stream.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: int = Field(alias="E", description="事件时间")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BinanceSpotEventStreamTerminatedWSModel(BaseModel):
+    """现货事件流终止 WS 事件模型
+
+    Stream: User Data Stream eventStreamTerminated 事件
+    文档来源: binance_spot_docs/User Data Stream.md
+    """
+
+    subscription_id: int = Field(alias="subscriptionId", description="订阅 ID")
+    event: BinanceSpotEventStreamTerminatedEvent = Field(description="事件内容")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# =============================================================================
+# 现货（SPOT）外部锁定更新 WS 模型
+# =============================================================================
+
+
+class BinanceSpotExternalLockUpdateEvent(BaseModel):
+    """现货外部锁定更新事件内容模型
+
+    文档来源: binance_spot_docs/User Data Stream.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: int = Field(alias="E", description="事件时间")
+    asset: str = Field(alias="a", description="资产名称")
+    delta: Decimal = Field(alias="d", description="变动数量")
+    transaction_time: int = Field(alias="T", description="交易时间")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BinanceSpotExternalLockUpdateWSModel(BaseModel):
+    """现货外部锁定更新 WS 事件模型
+
+    Stream: User Data Stream externalLockUpdate 事件
+    文档来源: binance_spot_docs/User Data Stream.md
+    """
+
+    subscription_id: int = Field(alias="subscriptionId", description="订阅 ID")
+    event: BinanceSpotExternalLockUpdateEvent = Field(description="事件内容")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# =============================================================================
+# 期货（FUTURES）账户更新 WS 模型
+# =============================================================================
+
+
+class BinanceFuturesAccountUpdateBalanceModel(BaseModel):
+    """期货账户更新 - 余额子模型
+
+    文档来源: binance_futures_docs/01_U本位合约/02_Websocket账户信息推送/Balance和Position更新推送.md
+    """
+
+    asset: str = Field(alias="a", description="资产名称")
+    wallet_balance: Decimal = Field(alias="wb", description="钱包余额")
+    cross_wallet_balance: Decimal = Field(alias="cw", description="跨账户钱包余额")
+    balance_change: Decimal = Field(alias="bc", description="余额变动（不含盈亏和手续费）")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BinanceFuturesAccountUpdatePositionModel(BaseModel):
+    """期货账户更新 - 持仓子模型
+
+    文档来源: binance_futures_docs/01_U本位合约/02_Websocket账户信息推送/Balance和Position更新推送.md
+    """
+
+    symbol: str = Field(alias="s", description="交易对")
+    position_amt: Decimal = Field(alias="pa", description="持仓数量")
+    entry_price: Decimal = Field(alias="ep", description="入场价格")
+    break_even_price: Decimal = Field(alias="bep", description="盈亏平衡价格")
+    accumulated_realized: Decimal = Field(
+        alias="cr", description="累计已实现盈亏（费前）"
+    )
+    unrealized_profit: Decimal = Field(alias="up", description="未实现盈亏")
+    margin_type: str = Field(alias="mt", description="保证金类型")
+    isolated_wallet: Decimal = Field(alias="iw", description="逐仓钱包余额")
+    position_side: str = Field(alias="ps", description="持仓方向")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BinanceFuturesAccountUpdateDataModel(BaseModel):
+    """期货账户更新 - 更新数据子模型
+
+    文档来源: binance_futures_docs/01_U本位合约/02_Websocket账户信息推送/Balance和Position更新推送.md
+    """
+
+    update_reason: str = Field(alias="m", description="更新原因类型")
+    balances: list[BinanceFuturesAccountUpdateBalanceModel] = Field(
+        alias="B", description="余额列表"
+    )
+    positions: list[BinanceFuturesAccountUpdatePositionModel] = Field(
+        alias="P", description="持仓列表"
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BinanceFuturesAccountUpdateWSModel(BaseModel):
+    """期货账户更新 WS 事件模型
+
+    Stream: User Data Stream ACCOUNT_UPDATE 事件
+    文档来源: binance_futures_docs/01_U本位合约/02_Websocket账户信息推送/Balance和Position更新推送.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: int = Field(alias="E", description="事件时间")
+    transaction_time: int = Field(alias="T", description="交易时间")
+    update_data: BinanceFuturesAccountUpdateDataModel = Field(
+        alias="a", description="更新数据"
+    )
+
+    model_config = ConfigDict(populate_by_name=True)

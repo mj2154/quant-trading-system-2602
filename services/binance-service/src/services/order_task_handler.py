@@ -17,9 +17,11 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import ValidationError
 
-from models.trading_order import (
-    SpotWsOrderRequest,
-    FuturesWsOrderRequest,
+from models.order_models import (
+    BinanceSpotWsOrderRequest,
+    BinanceFuturesWsOrderRequest,
+    BinanceFuturesModifyOrderResult,
+    BinanceSpotOrderAmendResult,
 )
 
 if TYPE_CHECKING:
@@ -156,6 +158,8 @@ class OrderTaskHandler:
                 await self._handle_create_order(task_id, params, request_id)
             elif task_type == "order.cancel":
                 await self._handle_cancel_order(task_id, params, request_id)
+            elif task_type == "order.modify":
+                await self._handle_modify_order(task_id, params, request_id)
             elif task_type == "order.query":
                 await self._handle_query_order(task_id, params, request_id)
             else:
@@ -188,17 +192,17 @@ class OrderTaskHandler:
         try:
             if market_type == "SPOT":
                 # 现货订单模型验证
-                order_request = SpotWsOrderRequest.model_validate(params)
+                order_request = BinanceSpotWsOrderRequest.model_validate(params)
             else:
                 # 期货订单模型验证
-                order_request = FuturesWsOrderRequest.model_validate(params)
+                order_request = BinanceFuturesWsOrderRequest.model_validate(params)
         except ValidationError as e:
             await self._repo.fail(task_id, f"参数验证失败: {e}")
             return
 
         # 从验证后的模型中提取参数（通用字段）
         side = order_request.side
-        order_type = order_request.type
+        order_type = order_request.order_type
         quantity = order_request.quantity
         price = order_request.price
         time_in_force = order_request.time_in_force
@@ -253,26 +257,9 @@ class OrderTaskHandler:
                     return
                 except Exception as e:
                     logger.error(f"期货WS客户端发送请求失败: {e}")
-                    # 降级到HTTP客户端
-
-            # 使用HTTP客户端或旧版WS客户端（等待响应）
-            client = self._get_futures_client()
-            if not client:
-                await self._repo.fail(task_id, "期货客户端未初始化")
-                return
-
-            await client.create_order(
-                symbol=symbol,
-                side=side,
-                order_type=order_type,
-                quantity=quantity,
-                price=price,
-                time_in_force=time_in_force,
-                stop_price=stop_price,
-                reduce_only=reduce_only,
-                position_side=position_side,
-                new_client_order_id=new_client_order_id,
-            )
+                    # WS 失败时直接报错，不降级到 HTTP 客户端
+                    await self._repo.fail(task_id, f"WS客户端发送失败: {e}")
+                    return
         elif market_type == "SPOT":
             # 现货 - 必须使用WS客户端
             if not self._spot_ws_client:
@@ -318,13 +305,13 @@ class OrderTaskHandler:
             params: 取消参数
             request_id: 请求ID（从数据库顶层字段获取）
         """
-        # 验证必需字段
+        # 验证必需字段 (order_id 和 orig_client_order_id 是 OR 关系，有一个就行)
         if not params.get("symbol"):
             await self._repo.fail(task_id, "Missing required field: symbol")
             return
-        if not params.get("orderId") and not params.get("clientOrderId"):
+        if not params.get("order_id") and not params.get("orig_client_order_id"):
             await self._repo.fail(
-                task_id, "Missing required field: orderId or clientOrderId"
+                task_id, "Missing required field: order_id or orig_client_order_id"
             )
             return
 
@@ -332,11 +319,11 @@ class OrderTaskHandler:
         raw_symbol = params.get("symbol", "")
         symbol, market_type = self._parse_symbol(raw_symbol)
 
-        order_id = params.get("orderId")
-        client_order_id = params.get("origClientOrderId") or params.get("clientOrderId")
+        order_id = params.get("order_id")
+        client_order_id = params.get("orig_client_order_id")
 
         logger.info(
-            f"取消订单: {symbol} orderId={order_id} clientOrderId={client_order_id} market={market_type}"
+            f"取消订单: {symbol} order_id={order_id} orig_client_order_id={client_order_id} market={market_type}"
         )
 
         # 使用requestId关联请求和响应（从任务记录的顶层request_id字段获取）
@@ -405,6 +392,166 @@ class OrderTaskHandler:
         await self._repo.complete(task_id, result)
         logger.info(f"订单取消成功: {result.get('orderId')}")
 
+    async def _handle_modify_order(
+        self, task_id: int, params: dict[str, Any], request_id: str | None = None
+    ) -> None:
+        """处理订单修改任务
+
+        Args:
+            task_id: 任务ID
+            params: 修改参数
+            request_id: 请求ID（从数据库顶层字段获取）
+        """
+        # 验证必需字段
+        if not params.get("symbol"):
+            await self._repo.fail(task_id, "Missing required field: symbol")
+            return
+        if not params.get("order_id") and not params.get("orig_client_order_id"):
+            await self._repo.fail(
+                task_id, "Missing required field: order_id or orig_client_order_id"
+            )
+            return
+
+        # 解析语义化symbol，根据前缀自动判断市场类型
+        raw_symbol = params.get("symbol", "")
+        symbol, market_type = self._parse_symbol(raw_symbol)
+
+        order_id = params.get("order_id")
+        client_order_id = params.get("orig_client_order_id")
+
+        logger.info(
+            f"修改订单: {symbol} orderId={order_id} clientOrderId={client_order_id} market={market_type}"
+        )
+
+        # 使用requestId关联请求和响应（从任务记录的顶层request_id字段获取）
+        if not request_id:
+            request_id = str(task_id)
+
+        if market_type == "FUTURES":
+            # 期货 order.modify - 可修改价格和数量
+            # 验证必填字段
+            if not params.get("side"):
+                await self._repo.fail(task_id, "Missing required field: side")
+                return
+            if not params.get("quantity"):
+                await self._repo.fail(task_id, "Missing required field: quantity")
+                return
+            if not params.get("price"):
+                await self._repo.fail(task_id, "Missing required field: price")
+                return
+            if not params.get("timestamp"):
+                await self._repo.fail(task_id, "Missing required field: timestamp")
+                return
+
+            side = params.get("side")
+            quantity = params.get("quantity")
+            price = params.get("price")
+            timestamp = params.get("timestamp")
+            new_client_order_id = params.get("new_client_order_id")
+            position_side = params.get("position_side")
+            price_match = params.get("price_match")
+            recv_window = params.get("recv_window")
+
+            # 优先使用WS客户端回调模式
+            if self._futures_ws_client:
+                try:
+                    modify_params = self._futures_ws_client._build_modify_order_params(
+                        symbol=symbol,
+                        side=side,
+                        quantity=float(quantity),
+                        price=float(price),
+                        timestamp=int(timestamp),
+                        order_id=str(order_id) if order_id else None,
+                        orig_client_order_id=client_order_id,
+                        new_client_order_id=new_client_order_id,
+                        position_side=position_side,
+                        price_match=price_match,
+                        recv_window=recv_window,
+                    )
+                    await self._futures_ws_client.send_request(
+                        "order.modify", modify_params, request_id
+                    )
+                    logger.info(f"修改订单请求已发送: requestId={request_id}")
+                    return
+                except Exception as e:
+                    logger.error(f"期货WS客户端发送请求失败: {e}")
+
+            # 使用HTTP客户端
+            client = self._get_futures_client()
+            if not client:
+                await self._repo.fail(task_id, "期货客户端未初始化")
+                return
+
+            result = await client.modify_order(
+                symbol=symbol,
+                side=side,
+                quantity=float(quantity),
+                price=float(price),
+                timestamp=int(timestamp),
+                order_id=str(order_id) if order_id else None,
+                orig_client_order_id=client_order_id,
+                new_client_order_id=new_client_order_id,
+                position_side=position_side,
+                price_match=price_match,
+                recv_window=recv_window,
+            )
+
+        else:
+            # 现货 order.amend.keepPriority - 只能减少数量
+            # 验证必填字段
+            if not params.get("new_qty"):
+                await self._repo.fail(task_id, "Missing required field: new_qty")
+                return
+            if not params.get("timestamp"):
+                await self._repo.fail(task_id, "Missing required field: timestamp")
+                return
+
+            new_qty = params.get("new_qty")
+            timestamp = params.get("timestamp")
+            new_client_order_id = params.get("new_client_order_id")
+            recv_window = params.get("recv_window")
+
+            # 优先使用WS客户端回调模式
+            if self._spot_ws_client:
+                try:
+                    amend_params = self._spot_ws_client._build_amend_order_params(
+                        symbol=symbol,
+                        new_qty=float(new_qty),
+                        timestamp=int(timestamp),
+                        order_id=str(order_id) if order_id else None,
+                        orig_client_order_id=client_order_id,
+                        new_client_order_id=new_client_order_id,
+                        recv_window=recv_window,
+                    )
+                    await self._spot_ws_client.send_request(
+                        "order.amend.keepPriority", amend_params, request_id
+                    )
+                    logger.info(f"修改订单请求已发送(现货): requestId={request_id}")
+                    return
+                except Exception as e:
+                    logger.error(f"现货WS客户端发送请求失败: {e}")
+                    await self._repo.fail(task_id, f"现货WS客户端发送请求失败: {e}")
+                    return
+
+            # 使用HTTP客户端
+            client = self._get_spot_client()
+            if not client:
+                await self._repo.fail(task_id, "现货客户端未初始化")
+                return
+
+            result = await client.amend_order(
+                symbol=symbol,
+                new_qty=float(new_qty),
+                timestamp=int(timestamp),
+                order_id=str(order_id) if order_id else None,
+                orig_client_order_id=client_order_id,
+                new_client_order_id=new_client_order_id,
+                recv_window=recv_window,
+            )
+
+        await self._repo.complete(task_id, result)
+        logger.info(f"订单修改成功: {result.get('orderId')}")
+
     async def _handle_query_order(
         self, task_id: int, params: dict[str, Any], request_id: str | None = None
     ) -> None:
@@ -415,13 +562,13 @@ class OrderTaskHandler:
             params: 查询参数
             request_id: 请求ID（从数据库顶层字段获取）
         """
-        # 验证必需字段
+        # 验证必需字段 (order_id 和 orig_client_order_id 是 OR 关系，有一个就行)
         if not params.get("symbol"):
             await self._repo.fail(task_id, "Missing required field: symbol")
             return
-        if not params.get("orderId") and not params.get("clientOrderId"):
+        if not params.get("order_id") and not params.get("orig_client_order_id"):
             await self._repo.fail(
-                task_id, "Missing required field: orderId or clientOrderId"
+                task_id, "Missing required field: order_id or orig_client_order_id"
             )
             return
 
@@ -429,11 +576,11 @@ class OrderTaskHandler:
         raw_symbol = params.get("symbol", "")
         symbol, market_type = self._parse_symbol(raw_symbol)
 
-        order_id = params.get("orderId")
-        client_order_id = params.get("origClientOrderId") or params.get("clientOrderId")
+        order_id = params.get("order_id")
+        client_order_id = params.get("orig_client_order_id")
 
         logger.info(
-            f"查询订单: {symbol} orderId={order_id} clientOrderId={client_order_id} market={market_type}"
+            f"查询订单: {symbol} order_id={order_id} orig_client_order_id={client_order_id} market={market_type}"
         )
 
         # 使用requestId关联请求和响应（从任务记录的顶层request_id字段获取）
@@ -511,7 +658,12 @@ class OrderTaskHandler:
             request_id: 请求ID
             response: 响应数据
         """
-        logger.info(f"[期货回调] 收到响应: requestId={request_id}, response={response}")
+        # 调试日志：检查参数类型
+        logger.info(f"[期货回调] 收到响应: requestId={request_id} (type={type(request_id).__name__}), response={response}")
+
+        # 调试日志：确认 request_id 的实际值
+        if not isinstance(request_id, str):
+            logger.error(f"[期货回调] CRITICAL: request_id 不是字符串! 值={request_id}, type={type(request_id)}")
 
         # 1. 根据requestId查找任务
         task = await self._repo.find_by_request_id(request_id)
@@ -520,11 +672,26 @@ class OrderTaskHandler:
             return
 
         task_id = task["id"]
+        task_type = task.get("type", "")
 
         # 2. 根据响应状态更新任务
         status = response.get("status", response.get("result", {}).get("status", 200))
         if status == 200:
             result = response.get("result", {})
+
+            # 对于 order.modify 响应，使用模型验证
+            if task_type == "order.modify" and result:
+                try:
+                    validated = BinanceFuturesModifyOrderResult.model_validate(result)
+                    # 转换为字典存储，使用 mode='json' 确保所有类型可序列化
+                    result = validated.model_dump(mode='json', by_alias=True, exclude_none=True)
+                    logger.info(
+                        f"[期货回调] 订单修改响应已验证: taskId={task_id}, "
+                        f"orderId={validated.order_id}, status={validated.status}"
+                    )
+                except ValidationError as e:
+                    logger.warning(f"[期货回调] 响应模型验证失败: {e}")
+
             await self._repo.complete(task_id, result)
             logger.info(
                 f"[期货回调] 任务完成: taskId={task_id}, orderId={result.get('orderId')}"
@@ -546,7 +713,12 @@ class OrderTaskHandler:
             request_id: 请求ID
             response: 响应数据
         """
-        logger.info(f"[现货回调] 收到响应: requestId={request_id}, response={response}")
+        # 调试日志：检查参数类型
+        logger.info(f"[现货回调] 收到响应: requestId={request_id} (type={type(request_id).__name__}), response={response}")
+
+        # 调试日志：确认 request_id 的实际值
+        if not isinstance(request_id, str):
+            logger.error(f"[现货回调] CRITICAL: request_id 不是字符串! 值={request_id}, type={type(request_id)}")
 
         # 1. 根据requestId查找任务
         task = await self._repo.find_by_request_id(request_id)
@@ -555,11 +727,27 @@ class OrderTaskHandler:
             return
 
         task_id = task["id"]
+        task_type = task.get("type", "")
 
         # 2. 根据响应状态更新任务
         status = response.get("status", response.get("result", {}).get("status", 200))
         if status == 200:
             result = response.get("result", {})
+
+            # 对于 order.amend.keepPriority 响应，使用模型验证
+            if task_type == "order.modify" and result:
+                try:
+                    validated = BinanceSpotOrderAmendResult.model_validate(result)
+                    # 转换为字典存储，使用 mode='json' 确保所有类型可序列化
+                    result = validated.model_dump(mode='json', by_alias=True, exclude_none=True)
+                    logger.info(
+                        f"[现货回调] 订单修改响应已验证: taskId={task_id}, "
+                        f"orderId={validated.amended_order.order_id}, "
+                        f"transactTime={validated.transact_time}"
+                    )
+                except ValidationError as e:
+                    logger.warning(f"[现货回调] 响应模型验证失败: {e}")
+
             await self._repo.complete(task_id, result)
             logger.info(
                 f"[现货回调] 任务完成: taskId={task_id}, orderId={result.get('orderId')}"

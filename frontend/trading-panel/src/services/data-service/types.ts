@@ -6,15 +6,15 @@
  */
 
 import type {
-  SpotAccountInfo,
-  FuturesAccountInfo,
+  SpotAccountDetail,
+  FuturesAccountDetail,
   SpotAccountData,
   FuturesAccountData,
   AlertConfig,
   SignalRecord,
-  Order,
-  OrderListResponse,
-  CreateOrderParams,
+  OrderData,
+  OrderListData,
+  CreateOrderRequest,
 } from '../../types/api'
 
 // ==================== 协议基础类型 ====================
@@ -201,43 +201,6 @@ export interface AccountDataResponse {
   accountType: 'spot' | 'futures'
 }
 
-/** 订单响应 */
-export interface OrderResponse {
-  order: Order
-}
-
-/** 订单列表响应 */
-export interface OrderListResponseData {
-  orders: Order[]
-  count: number
-}
-
-/** 告警配置响应 - 对应后端 handle_list_alert_configs 返回的 data 字段（后端使用 CamelCaseModel 自动转换） */
-export interface AlertConfigResponse {
-  type: string
-  items: AlertConfig[]
-  total: number
-  page: number
-  pageSize: number
-}
-
-/** 告警配置操作响应 - 对应后端 create/update/delete/enable/disable 操作返回的 data 字段（后端使用 CamelCaseModel 自动转换） */
-export interface AlertConfigOperationResponse {
-  type: string
-  id: string
-  message?: string
-  name?: string
-  description?: string
-  strategyType?: string
-  symbol?: string
-  interval?: string
-  triggerType?: string
-  params?: Record<string, unknown>
-  isEnabled?: boolean
-  createdAt?: string
-  updatedAt?: string
-}
-
 /** 信号响应 - 对应后端 handle_list_signals 返回的 data 字段（后端使用 CamelCaseModel 自动转换） */
 export interface SignalResponse {
   type: string
@@ -389,20 +352,20 @@ export interface WSClientAPI {
   getFuturesAccount: () => Promise<AccountDataResponse>
 
   // 交易操作
-  createOrder: (params: CreateOrderParams) => Promise<OrderResponse>
-  getOrder: (params: { symbol: string; orderId?: number; origClientOrderId?: string }) => Promise<OrderResponse>
-  listOrders: (filters?: Record<string, unknown>) => Promise<OrderListResponseData>
-  cancelOrder: (params: { symbol: string; orderId?: number; origClientOrderId?: string }) => Promise<OrderResponse>
-  getOpenOrders: (symbol?: string) => Promise<OrderResponse>
+  createOrder: (params: CreateOrderRequest) => Promise<OrderData>
+  getOrder: (params: { symbol: string; orderId?: number; origClientOrderId?: string }) => Promise<OrderData>
+  listOrders: (filters?: Record<string, unknown>) => Promise<OrderListData>
+  cancelOrder: (params: { symbol: string; orderId?: number; origClientOrderId?: string }) => Promise<OrderData>
+  getOpenOrders: (symbol?: string) => Promise<OrderListData>
 
   // 告警管理
-  listAlertConfigs: (page?: number, pageSize?: number) => Promise<AlertConfigResponse>
-  getAlertConfig: (id: string) => Promise<AlertConfigResponse>
-  createAlertConfig: (config: Record<string, unknown>) => Promise<AlertConfigResponse>
-  updateAlertConfig: (id: string, updates: Record<string, unknown>) => Promise<AlertConfigResponse>
-  deleteAlertConfig: (id: string) => Promise<void>
-  enableAlertConfig: (id: string) => Promise<AlertConfigResponse>
-  disableAlertConfig: (id: string) => Promise<AlertConfigResponse>
+  listAlertConfigs: (page?: number, pageSize?: number) => Promise<AlertConfig[]>
+  getAlertConfig: (id: string) => Promise<AlertConfig | null>
+  createAlertConfig: (config: Record<string, unknown>) => Promise<AlertConfig>
+  updateAlertConfig: (id: string, updates: Record<string, unknown>) => Promise<AlertConfig>
+  deleteAlertConfig: (id: string) => Promise<boolean>
+  enableAlertConfig: (id: string) => Promise<{ id: string; isEnabled: boolean }>
+  disableAlertConfig: (id: string) => Promise<{ id: string; isEnabled: boolean }>
 
   // 信号
   listSignals: (filters?: Record<string, unknown>) => Promise<SignalResponse>

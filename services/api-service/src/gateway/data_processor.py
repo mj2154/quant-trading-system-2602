@@ -830,22 +830,101 @@ class DataProcessor:
 
             # 构建响应消息 - 使用模型确保符合协议规范
             if status == "completed":
-                # 订单创建成功 - 使用 OrderResponseData 模型
-                from ..models.protocol.ws_payload import OrderResponseData
+                # 根据 task_type 选择正确的响应模型
+                if task_type == "order.modify":
+                    # 修改订单：根据 market_type 使用不同的响应模型
+                    from ..models.trading.order_models import (
+                        FuturesModifyOrderResponseData,
+                        SpotAmendOrderResponseData,
+                    )
 
-                message = MessageSuccess(
-                    type="ORDER_DATA",
-                    request_id=request_id or "",
-                    protocol_version=PROTOCOL_VERSION,
-                    timestamp=self._timestamp_ms(),
-                    data=OrderResponseData(
-                        type="order",
-                        status="COMPLETED",
-                        task_id=task_id,
-                        result=result,
-                        payload=payload_data,
-                    ),
-                )
+                    market_type = payload_data.get("market_type", "FUTURES") if payload_data else "FUTURES"
+
+                    if market_type == "FUTURES":
+                        # 期货修改订单响应 - 直接返回订单字段
+                        futures_response = FuturesModifyOrderResponseData(
+                            task_id=task_id,
+                            status="COMPLETED",
+                            orig_client_order_id=payload_data.get("orig_client_order_id") if payload_data else None,
+                        )
+                        # 填充订单信息（如果有 result）
+                        if result:
+                            futures_response.order_id = result.get("order_id") or result.get("orderId")
+                            futures_response.symbol = result.get("symbol")
+                            futures_response.price = result.get("price")
+                            futures_response.avg_price = result.get("avg_price") or result.get("avgPrice")
+                            futures_response.orig_qty = result.get("orig_qty") or result.get("origQty")
+                            futures_response.executed_qty = result.get("executed_qty") or result.get("executedQty")
+                            futures_response.order_type = result.get("type")
+                            futures_response.side = result.get("side")
+                            futures_response.position_side = result.get("position_side") or result.get("positionSide")
+                            futures_response.stop_price = result.get("stop_price") or result.get("stopPrice")
+                            futures_response.time_in_force = result.get("time_in_force") or result.get("timeInForce")
+                            futures_response.update_time = result.get("update_time") or result.get("updateTime")
+
+                        message = MessageSuccess(
+                            type="ORDER_DATA",
+                            request_id=request_id or "",
+                            protocol_version=PROTOCOL_VERSION,
+                            timestamp=self._timestamp_ms(),
+                            data=futures_response,
+                        )
+                    else:
+                        # 现货修改订单响应 - 包含执行信息和 amendedOrder
+                        spot_response = SpotAmendOrderResponseData(
+                            task_id=task_id,
+                            status="COMPLETED",
+                            orig_client_order_id=payload_data.get("orig_client_order_id") if payload_data else None,
+                        )
+                        # 填充执行信息（如果有 result）
+                        if result:
+                            spot_response.transact_time = result.get("transact_time") or result.get("transactTime")
+                            spot_response.execution_id = result.get("execution_id") or result.get("executionId")
+                            # amendedOrder 订单数据
+                            amended = result.get("amendedOrder", {})
+                            spot_response.amended_order_id = amended.get("order_id") or amended.get("orderId")
+                            spot_response.amended_symbol = amended.get("symbol")
+                            spot_response.amended_price = amended.get("price")
+                            spot_response.amended_qty = amended.get("qty")
+                            spot_response.amended_executed_qty = amended.get("executed_qty") or amended.get("executedQty")
+                            spot_response.amended_status = amended.get("status")
+                            spot_response.amended_order_type = amended.get("type")
+                            spot_response.amended_side = amended.get("side")
+                            spot_response.amended_time_in_force = amended.get("time_in_force") or amended.get("timeInForce")
+
+                        message = MessageSuccess(
+                            type="ORDER_DATA",
+                            request_id=request_id or "",
+                            protocol_version=PROTOCOL_VERSION,
+                            timestamp=self._timestamp_ms(),
+                            data=spot_response,
+                        )
+                else:
+                    # order.create 或其他任务类型 - 使用通用 OrderResponseData 模型
+                    from ..models.protocol.ws_payload import (
+                        OrderResponseData,
+                        OrderResultData,
+                        OrderPayloadData,
+                    )
+
+                    # 转换 result 和 payload 为具体模型（确保 snake_case -> camelCase 转换）
+                    # CamelCaseModel 配置了 alias_generator=to_camel，会自动转换
+                    order_result = OrderResultData(**result) if result else None
+                    order_payload = OrderPayloadData(**payload_data) if payload_data else None
+
+                    message = MessageSuccess(
+                        type="ORDER_DATA",
+                        request_id=request_id or "",
+                        protocol_version=PROTOCOL_VERSION,
+                        timestamp=self._timestamp_ms(),
+                        data=OrderResponseData(
+                            type="order",
+                            status="COMPLETED",
+                            task_id=task_id,
+                            result=order_result,
+                            payload=order_payload,
+                        ),
+                    )
             else:
                 # 订单失败
                 error_message = (

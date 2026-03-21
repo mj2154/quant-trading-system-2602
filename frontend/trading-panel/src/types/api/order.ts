@@ -4,11 +4,15 @@
  * 使用 camelCase 与 WebSocket 协议保持一致
  * 后端使用 SnakeCaseModel 接收请求，CamelCaseModel 返回响应
  *
+ * 设计原则：
+ * - 前端不区分期货/现货创建订单请求，通过 symbol 前缀自动识别
+ * - 后端根据 symbol 前缀区分期货/现货，使用对应的请求模型验证
+ * - 响应数据统一格式
+ *
  * v2.0 设计变更：
  * - 移除 marketType 字段，通过 symbol 前缀区分市场类型
  *   - 现货：BINANCE:BTCUSDT
  *   - 期货：BINANCE:BTCUSDT.PERP
- * - OrderType 区分期货和现货
  */
 
 // ==================== 枚举类型 ====================
@@ -16,7 +20,10 @@
 /** 订单方向 */
 export type OrderSide = 'BUY' | 'SELL'
 
-/** 订单类型（期货） */
+/** 订单类型（期货）
+ *
+ * LIMIT, MARKET, STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET
+ */
 export type FuturesOrderType =
   | 'LIMIT'
   | 'MARKET'
@@ -26,7 +33,10 @@ export type FuturesOrderType =
   | 'TAKE_PROFIT_MARKET'
   | 'TRAILING_STOP_MARKET'
 
-/** 订单类型（现货） */
+/** 订单类型（现货）
+ *
+ * LIMIT, MARKET, LIMIT_MAKER, STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT, TAKE_PROFIT_LIMIT, TRAILING_STOP_MARKET
+ */
 export type SpotOrderType =
   | 'LIMIT'
   | 'MARKET'
@@ -35,9 +45,7 @@ export type SpotOrderType =
   | 'STOP_LOSS_LIMIT'
   | 'TAKE_PROFIT'
   | 'TAKE_PROFIT_LIMIT'
-
-/** 订单类型（通用） */
-export type OrderType = FuturesOrderType | SpotOrderType
+  | 'TRAILING_STOP_MARKET'
 
 /** 订单有效时间
  *
@@ -58,71 +66,127 @@ export type OrderStatus =
 /** 持仓方向（仅期货） */
 export type PositionSide = 'BOTH' | 'LONG' | 'SHORT'
 
-// ==================== 请求模型 ====================
+/** 订单类型（通用） */
+export type OrderType = FuturesOrderType | SpotOrderType
+
+// ==================== 期货订单请求模型 ====================
 
 /**
- * 创建订单请求
+ * 期货创建订单请求
  *
- * 对应后端 CreateOrderRequest
- * 前端发送 camelCase，后端自动转换为 snake_case
+ * 对应后端 FuturesCreateOrderRequest
+ * 严格遵循官方期货 API 文档设计
  *
- * 注意：通过 symbol 前缀区分市场类型
- * - 现货：BINANCE:BTCUSDT
- * - 期货：BINANCE:BTCUSDT.PERP
+ * 注意：
+ * - 期货不支持：activationPrice, workingType, priceProtect, closePosition
+ * - 期货支持：position_side, reduce_only, callback_rate, price_match, good_till_date
  */
-export interface CreateOrderRequest {
-  /** 交易对符号（必填），通过前缀区分市场类型 */
+export interface FuturesCreateOrderRequest {
+  /** 交易对符号（必填），如 BTCUSDT */
   symbol: string
   /** 订单方向：BUY 或 SELL */
   side: OrderSide
   /** 订单类型 */
-  type: OrderType
+  type: FuturesOrderType
   /** 订单数量，必须大于0 */
   quantity: number
-  /** 客户端订单ID（UUID格式，必填） */
-  newClientOrderId: string
-  /** 限价价格 */
-  price?: number
-  /** 订单有效时间：GTC, IOC, FOK */
-  timeInForce?: OrderTimeInForce
-  /** 持仓方向：BOTH, LONG, SHORT（仅期货） */
+  /** 客户端订单ID（可选，币安自动生成） */
+  newClientOrderId?: string
+  /** 持仓方向：BOTH, LONG, SHORT（对冲模式必填） */
   positionSide?: PositionSide
-  /** 是否只减仓（仅期货） */
+  /** 限价价格（LIMIT 订单必填） */
+  price?: number
+  /** 订单有效时间：GTC, IOC, FOK, GTD（LIMIT 订单必填） */
+  timeInForce?: OrderTimeInForce
+  /** 是否只减仓 */
   reduceOnly?: boolean
-  /** 止损价格 */
+  /** 止损/止盈价格 */
   stopPrice?: number
-  /** 触发价格（追踪止损） */
-  activationPrice?: number
-  /** 回调比例（0.1-10） */
+  /** 回调比例（0.1-10，仅追踪止损） */
   callbackRate?: number
-  /** 触发价格类型 */
-  workingType?: string
-  /** 价格保护 */
-  priceProtect?: boolean
-  /** 是否全平仓（仅期货） */
-  closePosition?: boolean
-  /** 价格匹配（仅期货） */
+  /** 响应格式：ACK, RESULT */
+  newOrderRespType?: string
+  /** 价格匹配模式 */
   priceMatch?: string
-  /** 报价数量（市价买单时指定支付金额，仅现货） */
-  quoteOrderQty?: number
-  /** 冰山订单数量（仅现货） */
-  icebergQty?: number
-  /** 自成交防止模式（仅现货） */
+  /** 自成交防止模式 */
   selfTradePreventionMode?: string
+  /** GTD 订单过期时间 */
+  goodTillDate?: number
+}
+
+// ==================== 现货订单请求模型 ====================
+
+/**
+ * 现货创建订单请求
+ *
+ * 对应后端 SpotCreateOrderRequest
+ * 严格遵循官方现货 API 文档设计
+ *
+ * 注意：
+ * - 现货不支持：position_side, reduce_only, callback_rate, price_match, good_till_date, activation_price, working_type, price_protect, close_position
+ * - 现货支持：quote_order_qty, iceberg_qty, trailing_delta, strategy_id, strategy_type
+ */
+export interface SpotCreateOrderRequest {
+  /** 交易对符号（必填），如 BTCUSDT */
+  symbol: string
+  /** 订单方向：BUY 或 SELL */
+  side: OrderSide
+  /** 订单类型 */
+  type: SpotOrderType
+  /** 订单数量，必须大于0 */
+  quantity?: number
+  /** 客户端订单ID（可选，币安自动生成） */
+  newClientOrderId?: string
+  /** 限价价格（LIMIT/LIMIT_MAKER 订单必填） */
+  price?: number
+  /** 订单有效时间：GTC, IOC, FOK（LIMIT 订单必填） */
+  timeInForce?: OrderTimeInForce
+  /** 报价数量（市价买单时指定支付金额） */
+  quoteOrderQty?: number
+  /** 止损价格（止损单必需） */
+  stopPrice?: number
+  /** 冰山订单数量 */
+  icebergQty?: number
+  /** 追踪止损 delta */
+  trailingDelta?: number
+  /** 策略 ID */
+  strategyId?: number
+  /** 策略类型（值不能小于 1000000） */
+  strategyType?: number
   /** 响应格式：ACK, RESULT, FULL */
   newOrderRespType?: string
+  /** 自成交防止模式 */
+  selfTradePreventionMode?: string
 }
+
+// ==================== 通用请求模型 ====================
+
+/**
+ * 创建订单请求
+ *
+ * 对应后端 FuturesCreateOrderRequest 或 SpotCreateOrderRequest
+ * 通过 symbol 前缀区分市场类型：
+ * - 现货：BINANCE:BTCUSDT
+ * - 期货：BINANCE:BTCUSDT.PERP
+ *
+ * 注意：
+ * - 前端应使用 FuturesCreateOrderRequest 或 SpotCreateOrderRequest 类型
+ * - 此类型仅用于通用场景，实际推荐使用具体类型
+ */
+export type CreateOrderRequest = FuturesCreateOrderRequest | SpotCreateOrderRequest
 
 /**
  * 查询订单请求
  *
  * 对应后端 GetOrderRequest
  * 至少需要提供 orderId 或 origClientOrderId 之一
+ *
+ * ID 优先级：orderId（币安生成的订单ID） > origClientOrderId（客户端自定义ID）
  */
 export interface GetOrderRequest {
   /** 交易对符号 */
   symbol: string
-  /** 币安订单ID */
+  /** 币安订单ID（优先使用） */
   orderId?: number | string
   /** 客户端自定义订单ID */
   origClientOrderId?: string
@@ -151,17 +215,19 @@ export interface ListOrdersRequest {
  *
  * 对应后端 CancelOrderRequest
  * 至少需要提供 orderId 或 origClientOrderId 之一
+ *
+ * ID 优先级：orderId（币安生成的订单ID） > origClientOrderId（客户端自定义ID）
  */
 export interface CancelOrderRequest {
   /** 交易对符号 */
   symbol: string
-  /** 币安订单ID */
+  /** 币安订单ID（优先使用） */
   orderId?: number | string
   /** 客户端自定义订单ID */
   origClientOrderId?: string
   /** 用于唯一标识此次取消操作（仅现货支持） */
   newClientOrderId?: string
-  /** 取消限制条件（仅现货支持） */
+  /** 取消限制条件：ONLY_NEW, ONLY_PARTIALLY_FILLED（仅现货支持） */
   cancelRestrictions?: string
 }
 
@@ -175,6 +241,66 @@ export interface GetOpenOrdersRequest {
   symbol?: string
 }
 
+// ==================== 订单修改请求模型 ====================
+
+/**
+ * 期货修改订单请求
+ *
+ * 对应后端 FuturesModifyOrderRequest
+ * 期货 order.modify API - 可修改价格和数量，仅支持 LIMIT 订单
+ *
+ * ID 优先级：orderId（币安生成的订单ID） > origClientOrderId（客户端自定义ID）
+ */
+export interface FuturesModifyOrderRequest {
+  /** 交易对符号 */
+  symbol: string
+  /** 订单方向：BUY 或 SELL */
+  side: OrderSide
+  /** 新订单数量 */
+  quantity: number
+  /** 新订单价格 */
+  price: number
+  /** 时间戳（毫秒） */
+  timestamp: number
+  /** 币安订单ID（优先使用） */
+  orderId?: number | string
+  /** 客户端自定义订单ID */
+  origClientOrderId?: string
+  /** 新客户端订单ID（用于标识此次修改） */
+  newClientOrderId?: string
+  /** 持仓方向：BOTH, LONG, SHORT */
+  positionSide?: PositionSide
+  /** 价格匹配模式（与 price 不能同时使用） */
+  priceMatch?: string
+  /** 接收窗口时间 */
+  recvWindow?: number
+}
+
+/**
+ * 现货修改订单请求
+ *
+ * 对应后端 SpotAmendOrderRequest
+ * 现货 order.amend.keepPriority API - 只能减少数量
+ *
+ * ID 优先级：orderId（币安生成的订单ID） > origClientOrderId（客户端自定义ID）
+ */
+export interface SpotAmendOrderRequest {
+  /** 交易对符号 */
+  symbol: string
+  /** 新订单数量（必须小于原订单数量） */
+  newQty: number
+  /** 时间戳（毫秒） */
+  timestamp: number
+  /** 币安订单ID（优先使用） */
+  orderId?: number | string
+  /** 客户端自定义订单ID */
+  origClientOrderId?: string
+  /** 新客户端订单ID（用于标识此次修改） */
+  newClientOrderId?: string
+  /** 接收窗口时间（最大60000） */
+  recvWindow?: number
+}
+
 // ==================== 响应模型 ====================
 
 /**
@@ -182,22 +308,40 @@ export interface GetOpenOrdersRequest {
  *
  * 对应后端 OrderData
  * 包含订单的完整信息
- *
- * 注意：查询/取消订单时，至少需要提供 orderId 或 origClientOrderId 之一
  */
 export interface OrderData {
-  /** 客户端订单ID（前端生成，必填） */
-  clientOrderId: string
-  /** 币安订单ID（创建成功后有值） */
-  binanceOrderId?: number
-  /** 市场类型通过 symbol 区分：BINANCE:BTCUSDT（现货），BINANCE:BTCUSDT.PERP（期货） */
+  /** 客户端订单ID */
+  clientOrderId?: string
+  /** 币安订单ID */
+  orderId?: number
+  /** 交易对 */
   symbol: string
   /** 订单状态 */
   status?: OrderStatus
   /** 订单方向 */
   side?: OrderSide
   /** 订单类型 */
-  type?: OrderType
+  type?: string
+  /** 订单价格 */
+  price?: string
+  /** 原始数量 */
+  origQty?: string
+  /** 已执行数量 */
+  executedQty?: string
+  /** 平均成交价格 */
+  avgPrice?: string
+  /** 订单有效时间 */
+  timeInForce?: string
+  /** 持仓方向（仅期货） */
+  positionSide?: PositionSide
+  /** 止损价格 */
+  stopPrice?: string
+  /** 是否只减仓（仅期货） */
+  reduceOnly?: boolean
+  /** 创建时间（毫秒） */
+  createTime?: number
+  /** 更新时间（毫秒） */
+  updateTime?: number
   /** 币安API原始数据 */
   data?: Record<string, unknown>
   /** 创建时间 */
@@ -229,93 +373,60 @@ export interface OrderUpdateData extends OrderData {
   updateTime?: number
 }
 
-// ==================== 前端展示类型 ====================
-
 /**
- * 创建订单参数（前端使用）
+ * 取消订单响应数据
  *
- * 注意：通过 symbol 前缀区分市场类型
- * - 现货：BINANCE:BTCUSDT
- * - 期货：BINANCE:BTCUSDT.PERP
+ * 对应后端 OrderCancelResponseData
  */
-export interface CreateOrderParams {
-  /** 交易对（必填），通过前缀区分市场类型 */
-  symbol: string
-  side: OrderSide
-  orderType: OrderType
-  quantity?: number
-  quoteOrderQty?: number
-  price?: number
-  timeInForce?: OrderTimeInForce
-  stopPrice?: number
-  reduceOnly?: boolean
-  positionSide?: PositionSide
-  newClientOrderId?: string
-  newOrderRespType?: string
-  selfTradePreventionMode?: string
-  icebergQty?: number
-  trailingDelta?: number
-  strategyId?: number
-  strategyType?: number
-  priceMatch?: string
-  goodTillDate?: number
+export interface OrderCancelResponseData {
+  taskId?: number
+  status: string
+  orderId?: string
+  origClientOrderId?: string
 }
 
 /**
- * 订单过滤选项
+ * 期货修改订单响应数据
  *
- * 注意：通过 symbol 区分市场类型
+ * 对应后端 FuturesModifyOrderResponseData
  */
-export interface OrderFilters {
-  /** 交易对 */
+export interface FuturesModifyOrderResponseData {
+  taskId?: number
+  status: string
+  origClientOrderId?: string
+  orderId?: number
   symbol?: string
-  status?: OrderStatus
-  side?: OrderSide
-  startTime?: string
-  endTime?: string
-  limit?: number
+  price?: string
+  avgPrice?: string
+  origQty?: string
+  executedQty?: string
+  type?: string
+  side?: string
+  positionSide?: string
+  stopPrice?: string
+  timeInForce?: string
+  updateTime?: number
 }
 
 /**
- * 订单实体（前端展示用）
+ * 现货修改订单响应数据
  *
- * 注意：市场类型通过 symbol 区分
+ * 对应后端 SpotAmendOrderResponseData
  */
-export interface Order {
-  /** 客户端订单ID（前端生成，必填） */
-  clientOrderId: string
-  /** 币安订单ID（创建成功后有值） */
-  binanceOrderId?: number
-  /** 市场类型通过 symbol 区分：BINANCE:BTCUSDT（现货），BINANCE:BTCUSDT.PERP（期货） */
-  symbol: string
-  side: OrderSide
-  orderType: OrderType
-  status: OrderStatus
-  data: Record<string, unknown>
-  createdAt: string
-  updatedAt: string
+export interface SpotAmendOrderResponseData {
+  taskId?: number
+  status: string
+  origClientOrderId?: string
+  transactTime?: number
+  executionId?: number
+  amendedOrderId?: number
+  amendedSymbol?: string
+  amendedPrice?: string
+  amendedQty?: string
+  amendedExecutedQty?: string
+  amendedStatus?: string
+  amendedOrderType?: string
+  amendedSide?: string
+  amendedTimeInForce?: string
 }
 
-/**
- * 订单列表响应
- */
-export interface OrderListResponse {
-  orders: Order[]
-  count: number
-}
-
-/**
- * 订单更新（WebSocket推送）
- *
- * 注意：市场类型通过 symbol 区分
- */
-export interface OrderUpdate {
-  clientOrderId: string
-  binanceOrderId?: number
-  symbol: string
-  side: OrderSide
-  orderType: OrderType
-  status: OrderStatus
-  data: Record<string, unknown>
-  updatedAt: string
-}

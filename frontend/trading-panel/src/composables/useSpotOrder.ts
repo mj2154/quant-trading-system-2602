@@ -7,7 +7,7 @@
 
 import { ref } from 'vue'
 import { dataService } from '../services/data-service/DataService'
-import type { Order, OrderListResponse, SpotOrderType, OrderTimeInForce } from '../types/api'
+import type { OrderData, OrderListData, SpotOrderType, OrderTimeInForce } from '../types/api'
 
 // Create spot order params (使用统一的 types/api 定义)
 export interface CreateSpotOrderParams {
@@ -123,7 +123,7 @@ export function useSpotOrder() {
   /**
    * Create a spot order
    */
-  async function createSpotOrder(params: CreateSpotOrderParams): Promise<Order> {
+  async function createSpotOrder(params: CreateSpotOrderParams): Promise<OrderData> {
     isLoading.value = true
     error.value = null
 
@@ -138,8 +138,8 @@ export function useSpotOrder() {
       const order = await dataService.createOrder({
         symbol: formatSymbolForSpot(params.symbol),
         side: params.side,
-        orderType: params.type,
-        clientOrderId: newClientOrderId,
+        type: params.type,
+        newClientOrderId: newClientOrderId,
         quantity: params.quantity?.toString(),
         quoteOrderQty: params.quoteOrderQty?.toString(),
         price: params.price?.toString(),
@@ -168,7 +168,7 @@ export function useSpotOrder() {
     symbol: string,
     orderId?: number,
     origClientOrderId?: string
-  ): Promise<Order | null> {
+  ): Promise<OrderData | null> {
     isLoading.value = true
     error.value = null
 
@@ -195,7 +195,7 @@ export function useSpotOrder() {
     symbol: string,
     orderId?: number,
     origClientOrderId?: string
-  ): Promise<Order | null> {
+  ): Promise<OrderData | null> {
     isLoading.value = true
     error.value = null
 
@@ -218,7 +218,7 @@ export function useSpotOrder() {
   /**
    * List orders with filters
    */
-  async function listOrders(params: ListOrdersParams): Promise<OrderListResponse> {
+  async function listOrders(params: ListOrdersParams): Promise<OrderListData> {
     isLoading.value = true
     error.value = null
 
@@ -243,17 +243,17 @@ export function useSpotOrder() {
   /**
    * Get open orders
    */
-  async function getOpenOrders(symbol?: string): Promise<Order[]> {
+  async function getOpenOrders(symbol?: string): Promise<OrderListData> {
     isLoading.value = true
     error.value = null
 
     try {
       // 使用 DataService 获取挂单列表
       const response = await dataService.getOpenOrders(symbol ? formatSymbolForSpot(symbol) : undefined)
-      return response.orders
+      return response
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to get open orders'
-      return []
+      return { orders: [], count: 0 }
     } finally {
       isLoading.value = false
     }

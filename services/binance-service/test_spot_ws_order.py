@@ -19,7 +19,7 @@ sys.path.insert(0, str(service_dir))
 load_dotenv()
 
 from clients.spot_private_ws_client import BinanceSpotPrivateWSClient
-from models.trading_order import SpotOrderResponse
+from models.order_models import BinanceSpotOrderPlaceResult
 
 
 def load_private_key(key_path: str) -> bytes:
@@ -87,7 +87,7 @@ async def test_spot_order():
             )
 
             # 使用数据模型验证响应
-            validated_order = SpotOrderResponse.model_validate(order_result)
+            validated_order = BinanceSpotOrderPlaceResult.model_validate(order_result)
             print(f"下单成功! 响应已通过模型验证:")
             print(f"  订单ID: {validated_order.order_id}")
             print(f"  订单列表ID: {validated_order.order_list_id}")

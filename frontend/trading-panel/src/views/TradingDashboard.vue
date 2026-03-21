@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
 import { NGrid, NGridItem, NCard, NTabs, NTabPane } from 'naive-ui'
-import { useTradingStore } from '../stores/trading-store'
-import { dataService } from '../services/data-service/DataService'
 import SpotOrderForm from '../components/trading/SpotOrderForm.vue'
 
 // Development mode flag
@@ -14,39 +11,6 @@ function log(level: 'log' | 'error', message: string, ...args: unknown[]) {
     console[level](`[TradingDashboard] ${message}`, ...args)
   }
 }
-
-const tradingStore = useTradingStore()
-
-// 取消订阅函数
-let unsubscribeOrder: (() => void) | null = null
-
-function setupOrderSubscription() {
-  try {
-    // 使用 DataService 订阅订单更新
-    unsubscribeOrder = dataService.subscribe('TRADING:ORDER', (data) => {
-      log('log', 'Received order update:', data)
-      // 处理订单更新
-      if (data && typeof data === 'object' && 'clientOrderId' in data) {
-        tradingStore.handleOrderUpdate(data as any)
-      }
-    })
-    log('log', 'Subscribed to order updates via DataService')
-  } catch (error) {
-    log('error', 'Failed to subscribe to order updates:', error)
-  }
-}
-
-onMounted(() => {
-  setupOrderSubscription()
-})
-
-onUnmounted(() => {
-  // 取消订阅
-  if (unsubscribeOrder) {
-    unsubscribeOrder()
-    unsubscribeOrder = null
-  }
-})
 
 // Order event handlers
 function handleOrderSuccess(order: unknown) {

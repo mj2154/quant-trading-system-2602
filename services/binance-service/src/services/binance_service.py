@@ -53,8 +53,24 @@ from events import TaskListener, TaskPayload
 from events.exchange_info_handler import ExchangeInfoHandler
 from events.order_task_listener import OrderTaskListener
 from ws_subscription_manager import WSSubscriptionManager
-from models import KlineCreate, KlineResponse, Ticker24hrSpot
-from services.account_subscription_service import AccountSubscriptionService
+from models.kline_models import (
+    BinanceSpotKlineGetModel,
+    BinanceFuturesKlineGetModel,
+)
+from models.ticker_models import (
+    BinanceSpotTicker24hrGetModel,
+    BinanceFuturesTicker24hrGetModel,
+)
+from models.account_models import (
+    BinanceSpotAccountGetModel,
+    BinanceFuturesAccountGetModel,
+)
+from models.internal_models import (
+    InternalKlineData,
+    InternalQuoteData,
+    InternalQuoteValues,
+    InternalQuotesResult,
+)
 from services.order_task_handler import OrderTaskHandler
 from utils import resolution_to_interval
 
@@ -119,9 +135,6 @@ class BinanceService:
         self._task_listener: Optional[TaskListener] = None
         self._exchange_handler: Optional[ExchangeInfoHandler] = None
         self._ws_manager: Optional[WSSubscriptionManager] = None
-        self._account_subscription: Optional[AccountSubscriptionService] = (
-            None  # 账户订阅服务
-        )
 
         self._running = False
 
@@ -300,6 +313,9 @@ class BinanceService:
         self._order_task_listener.register(
             "order.query", self._order_task_handler.handle_task
         )
+        self._order_task_listener.register(
+            "order.modify", self._order_task_handler.handle_task
+        )
 
         # 启动订单任务监听
         await self._order_task_listener.start()
@@ -308,21 +324,12 @@ class BinanceService:
         # 初始化WS订阅管理器
         self._ws_manager = WSSubscriptionManager(self._pool)
 
-        # 注册WS客户端到订阅管理器
+        # 注册市场数据WS客户端到订阅管理器
         self._ws_manager.register_client("binance-spot-ws-001", self._spot_ws)
         self._ws_manager.register_client("binance-futures-ws-001", self._futures_ws)
 
         # 启动WS订阅管理器
         await self._ws_manager.start()
-
-        # 启动账户订阅服务（如果有 API Key 配置）
-        # TODO: 暂时禁用账户订阅服务
-        # snapshot_interval = int(os.environ.get("ACCOUNT_SNAPSHOT_INTERVAL", "300"))
-        # if api_key and private_key_pem:
-        #     futures_api_key = os.environ.get("BINANCE_FUTURES_API_KEY", api_key)
-        #     self._account_subscription = AccountSubscriptionService(...)
-        #     await self._account_subscription.start()
-        logger.info("账户订阅服务已禁用")
 
         self._running = True
         logger.info("币安服务已启动")
@@ -333,11 +340,6 @@ class BinanceService:
             return
 
         logger.info("停止币安服务...")
-
-        # 停止账户订阅服务
-        if self._account_subscription:
-            await self._account_subscription.stop()
-            self._account_subscription = None
 
         # 停止WS订阅管理器
         if self._ws_manager:
@@ -393,57 +395,6 @@ class BinanceService:
 
         # 调用全量同步
         await self._ws_manager.full_sync()
-
-    def _http_to_kline_create(
-        self,
-        raw_kline: list,
-        symbol: str,
-        interval: str,
-    ) -> KlineCreate:
-        """将HTTP原始数据转换为 KlineCreate
-
-        Args:
-            raw_kline: 原始K线数据（12字段数组）
-            symbol: 交易对符号
-            interval: K线间隔
-
-        Returns:
-            KlineCreate 实例
-        """
-        # 使用 KlineResponse 进行数据验证
-        kline_response = KlineResponse.model_validate(
-            {
-                "0": raw_kline[0],
-                "1": raw_kline[1],
-                "2": raw_kline[2],
-                "3": raw_kline[3],
-                "4": raw_kline[4],
-                "5": raw_kline[5],
-                "6": raw_kline[6],
-                "7": raw_kline[7],
-                "8": raw_kline[8],
-                "9": raw_kline[9],
-                "10": raw_kline[10],
-                "11": raw_kline[11],
-            }
-        )
-
-        return KlineCreate(
-            symbol=symbol,
-            interval=interval,
-            open_time=kline_response.open_time,
-            close_time=kline_response.close_time,
-            open_price=kline_response.open_price,
-            high_price=kline_response.high_price,
-            low_price=kline_response.low_price,
-            close_price=kline_response.close_price,
-            volume=kline_response.volume,
-            quote_volume=kline_response.quote_volume,
-            number_of_trades=kline_response.number_of_trades,
-            taker_buy_base_volume=kline_response.taker_buy_base_volume,
-            taker_buy_quote_volume=kline_response.taker_buy_quote_volume,
-            is_closed=True,  # 历史K线已收盘
-        )
 
     async def _handle_sync_exchange_info(self, payload: TaskPayload) -> None:
         """处理同步交易所信息任务
@@ -545,7 +496,8 @@ class BinanceService:
             clean_symbol = self._parse_symbol(symbol)
 
             # 判断是现货还是期货
-            if clean_symbol.endswith(".PERP"):
+            is_futures = clean_symbol.endswith(".PERP")
+            if is_futures:
                 pair = clean_symbol.replace(".PERP", "")
                 http_client = self._futures_http
             else:
@@ -606,14 +558,21 @@ class BinanceService:
                     break
 
             # 转换数据格式
+            kline_model_class = (
+                BinanceFuturesKlineGetModel if is_futures else BinanceSpotKlineGetModel
+            )
             klines = []
             for raw_kline in all_raw_klines:
-                kline = self._convert_kline_to_dict(raw_kline, symbol, interval)
+                kline = self._convert_kline_to_internal(
+                    raw_kline, symbol, interval, kline_model_class
+                )
                 klines.append(kline)
 
             # 直接写入 klines_history 表（使用 TradingView 格式）
             if self._pool:
-                await self._insert_klines_to_history(symbol, interval, all_raw_klines)
+                await self._insert_klines_to_history(
+                    symbol, interval, all_raw_klines, is_futures=is_futures
+                )
             else:
                 logger.warning(f"pool 未初始化，跳过写入: {symbol} {interval}")
 
@@ -713,8 +672,9 @@ class BinanceService:
                     spot_symbols.append(clean_symbol.upper())
                     spot_symbols_original.append(symbol)
 
-            # ========== 第二步：批量获取数据 ==========
-            raw_tickers: list[dict] = []
+            # ========== 第二步：批量获取数据（直接分离来源）==========
+            spot_raw_tickers: list[dict] = []  # 直接分离，避免依赖symbol值区分
+            futures_raw_tickers: list[dict] = []
 
             # 现货：使用批量API（一次请求）
             if spot_symbols:
@@ -728,9 +688,9 @@ class BinanceService:
                 )
                 # spot_tickers 可能是单个dict（1个symbol）或list（多个symbol）
                 if isinstance(spot_tickers, list):
-                    raw_tickers.extend(spot_tickers)
+                    spot_raw_tickers.extend(spot_tickers)
                 else:
-                    raw_tickers.append(spot_tickers)
+                    spot_raw_tickers.append(spot_tickers)
 
             # 期货：使用并发请求（期货API不支持批量symbols参数）
             if futures_symbols:
@@ -744,9 +704,9 @@ class BinanceService:
                 )
                 # futures_tickers 已经是list
                 if isinstance(futures_tickers, list):
-                    raw_tickers.extend(futures_tickers)
+                    futures_raw_tickers.extend(futures_tickers)
                 else:
-                    raw_tickers.append(futures_tickers)
+                    futures_raw_tickers.append(futures_tickers)
 
             # ========== 第三步：转换为统一格式 ==========
             # 创建 symbol -> original symbol 的映射
@@ -757,38 +717,63 @@ class BinanceService:
                 symbol_mapping[s] = futures_symbols_original[i]
 
             quotes = []
-            for raw_ticker in raw_tickers:
-                # 获取交易对名称
+
+            # 处理现货 ticker：使用 BinanceSpotTicker24hrGetModel 验证
+            for raw_ticker in spot_raw_tickers:
                 ticker_symbol = raw_ticker.get("symbol", "")
                 original_symbol = symbol_mapping.get(
                     ticker_symbol, f"BINANCE:{ticker_symbol}"
                 )
 
-                # 使用模型验证数据
-                ticker = Ticker24hrSpot.model_validate(raw_ticker)
+                # 使用现货 ticker 模型验证数据
+                ticker = BinanceSpotTicker24hrGetModel.model_validate(raw_ticker)
 
-                # 转换为 TradingView 格式
-                quote = {
-                    "n": original_symbol,
-                    "s": "ok",
-                    "v": {
-                        "lp": float(ticker.last_price),
-                        "ch": float(ticker.price_change),
-                        "chp": float(ticker.price_change_percent),
-                        "high": float(ticker.high_price),
-                        "low": float(ticker.low_price),
-                        "volume": float(ticker.volume),
-                        "quote_volume": float(ticker.quote_volume),
-                        "timestamp": ticker.close_time,
-                    },
-                }
+                # 转换为内部报价格式
+                quote = InternalQuoteData(
+                    n=original_symbol,
+                    s="ok",
+                    v=InternalQuoteValues(
+                        lp=float(ticker.last_price),
+                        ch=float(ticker.price_change),
+                        chp=float(ticker.price_change_percent),
+                        high=float(ticker.high_price),
+                        low=float(ticker.low_price),
+                        volume=float(ticker.volume),
+                        quote_volume=float(ticker.quote_volume),
+                        timestamp=ticker.close_time,
+                    ),
+                )
+                quotes.append(quote)
+
+            # 处理期货 ticker：使用 BinanceFuturesTicker24hrGetModel 验证
+            for raw_ticker in futures_raw_tickers:
+                ticker_symbol = raw_ticker.get("symbol", "")
+                original_symbol = symbol_mapping.get(
+                    ticker_symbol, f"BINANCE:{ticker_symbol}"
+                )
+
+                # 使用期货 ticker 模型验证数据
+                ticker = BinanceFuturesTicker24hrGetModel.model_validate(raw_ticker)
+
+                # 转换为内部报价格式
+                quote = InternalQuoteData(
+                    n=original_symbol,
+                    s="ok",
+                    v=InternalQuoteValues(
+                        lp=float(ticker.last_price),
+                        ch=float(ticker.price_change),
+                        chp=float(ticker.price_change_percent),
+                        high=float(ticker.high_price),
+                        low=float(ticker.low_price),
+                        volume=float(ticker.volume),
+                        quote_volume=float(ticker.quote_volume),
+                        timestamp=ticker.close_time,
+                    ),
+                )
                 quotes.append(quote)
 
             # ========== 第四步：一次性写入任务结果 ==========
-            result = {
-                "quotes": quotes,
-                "count": len(quotes),
-            }
+            result = InternalQuotesResult(quotes=quotes, count=len(quotes))
             await self._tasks_repo.complete(task_id, result)
 
             logger.info(f"实时报价获取完成: 共 {len(quotes)} 个交易对")
@@ -827,11 +812,14 @@ class BinanceService:
         await self._tasks_repo.set_processing(task_id)
 
         try:
-            # 获取期货账户信息（使用私有客户端）
-            account_info = await self._futures_private_http.get_account_info()
+            # 获取期货账户信息（使用私有客户端，返回原始 dict）
+            account_info_dict = await self._futures_private_http.get_account_info()
 
-            # 转换为字典格式
-            account_data = account_info.model_dump()
+            # 服务层负责将 dict 转换为 Pydantic 模型
+            account_info = BinanceFuturesAccountGetModel.model_validate(account_info_dict)
+
+            # 转换为字典格式，使用 mode='json' 自动处理 Decimal/ datetime 序列化
+            account_data = account_info.model_dump(mode='json')
 
             # 获取更新时间（V3 API 在 assets[0] 中返回 updateTime）
             update_time = (
@@ -884,11 +872,14 @@ class BinanceService:
         await self._tasks_repo.set_processing(task_id)
 
         try:
-            # 获取现货账户信息（使用私有客户端）
-            account_info = await self._spot_private_http.get_account_info()
+            # 获取现货账户信息（使用私有客户端，返回原始 dict）
+            account_info_dict = await self._spot_private_http.get_account_info()
 
-            # 转换为字典格式
-            account_data = account_info.model_dump()
+            # 服务层负责将 dict 转换为 Pydantic 模型
+            account_info = BinanceSpotAccountGetModel.model_validate(account_info_dict)
+
+            # 转换为字典格式，使用 mode='json' 自动处理 Decimal/ datetime 序列化
+            account_data = account_info.model_dump(mode='json')
 
             # 获取更新时间
             update_time = account_info.update_time
@@ -948,50 +939,73 @@ class BinanceService:
             return symbol.replace("BINANCE:", "")
         return symbol
 
-    def _convert_kline_to_dict(
-        self, raw_kline: list, symbol: str, interval: str
-    ) -> dict:
-        """将原始K线数据转换为字典格式
+    def _convert_kline_to_internal(
+        self,
+        raw_kline: list,
+        symbol: str,
+        interval: str,
+        kline_model_class: type["BinanceSpotKlineGetModel | BinanceFuturesKlineGetModel"],
+    ) -> InternalKlineData:
+        """将原始K线数据转换为内部数据模型
 
         Args:
             raw_kline: 原始K线数据（12字段数组）
-            symbol: 交易对符号
+            symbol: 交易对符号（带 BINANCE: 前缀）
             interval: K线间隔
+            kline_model_class: K线模型类（BinanceSpotKlineGetModel 或 BinanceFuturesKlineGetModel）
 
         Returns:
-            转换后的字典
+            内部K线数据模型
         """
-        return {
-            "time": int(raw_kline[0]),
-            "open": float(raw_kline[1]),
-            "high": float(raw_kline[2]),
-            "low": float(raw_kline[3]),
-            "close": float(raw_kline[4]),
-            "volume": float(raw_kline[5]),
-            "symbol": symbol,
-            "interval": interval,
-        }
+        # 将数组转换为字典格式供 Pydantic 模型验证
+        kline_dict = {str(i): v for i, v in enumerate(raw_kline)}
+        kline_model = kline_model_class.model_validate(kline_dict)
+
+        # 转换为内部数据模型
+        return InternalKlineData(
+            time=kline_model.open_time,
+            close_time=kline_model.close_time,
+            open=float(kline_model.open_price),
+            high=float(kline_model.high_price),
+            low=float(kline_model.low_price),
+            close=float(kline_model.close_price),
+            volume=float(kline_model.volume),
+            quote_volume=float(kline_model.quote_volume),
+            number_of_trades=kline_model.number_of_trades,
+            taker_buy_base_volume=float(kline_model.taker_buy_base_volume),
+            taker_buy_quote_volume=float(kline_model.taker_buy_quote_volume),
+            symbol=symbol,
+            interval=interval,
+        )
 
     async def _insert_klines_to_history(
         self,
         symbol: str,
         interval: str,
         raw_klines: list,
+        is_futures: bool = False,
     ) -> int:
         """将K线数据写入 klines_history 表
 
         用于 get_klines 任务，历史数据写入历史表。
+        使用 BinanceSpotKlineGetModel 或 BinanceFuturesKlineGetModel 验证原始数据。
 
         Args:
             symbol: 交易对符号（带 BINANCE: 前缀）
             interval: K线间隔
-            raw_klines: 原始K线数据列表
+            raw_klines: 原始K线数据列表（12字段数组）
+            is_futures: 是否为期货数据
 
         Returns:
             写入的记录数
         """
         if not raw_klines:
             return 0
+
+        # 根据类型选择模型
+        kline_model_class = (
+            BinanceFuturesKlineGetModel if is_futures else BinanceSpotKlineGetModel
+        )
 
         # 直接使用 interval（TradingView 格式，如 "1D", "60", "M"）
         query = """
@@ -1021,25 +1035,30 @@ class BinanceService:
             error_count = 0
             for i, raw_kline in enumerate(raw_klines):
                 try:
+                    # 使用内部数据模型转换和验证
+                    kline = self._convert_kline_to_internal(
+                        raw_kline, symbol, interval, kline_model_class
+                    )
+
                     await conn.execute(
                         query,
                         symbol,
                         interval,
                         datetime.fromtimestamp(
-                            int(float(raw_kline[0])) / 1000, tz=timezone.utc
+                            kline.time / 1000, tz=timezone.utc
                         ),
                         datetime.fromtimestamp(
-                            int(float(raw_kline[6])) / 1000, tz=timezone.utc
+                            kline.close_time / 1000, tz=timezone.utc
                         ),
-                        raw_kline[1],
-                        raw_kline[2],
-                        raw_kline[3],
-                        raw_kline[4],
-                        raw_kline[5],
-                        raw_kline[7],
-                        raw_kline[8],
-                        raw_kline[9],
-                        raw_kline[10],
+                        kline.open,
+                        kline.high,
+                        kline.low,
+                        kline.close,
+                        kline.volume,
+                        kline.quote_volume,
+                        kline.number_of_trades,
+                        kline.taker_buy_base_volume,
+                        kline.taker_buy_quote_volume,
                     )
                     inserted_count += 1
                 except Exception as e:

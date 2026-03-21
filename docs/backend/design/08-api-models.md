@@ -478,16 +478,21 @@ class OrderData(CamelCaseModel):
 
 | 模型名称 | 用途 | 主要字段 |
 |---------|------|---------|
-| `AlertConfigCreate` | 告警创建 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `is_enabled`, `created_by` |
-| `AlertConfigUpdate` | 告警更新 | `name`, `description`, `is_enabled` |
-| `AlertConfigResponse` | 告警响应 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `trigger_type`, `is_enabled`, `created_at`, `updated_at` |
-| `AlertConfigListResponse` | 告警列表 | `items[]`, `total` |
-| `EnableDisableResponse` | 启用/禁用响应 | `id`, `name`, `is_enabled`, `message` |
-| `CreateAlertConfigRequest` | 创建请求 | `type`, `id`, `name`, `description`, `strategy_type`, `symbol`, `interval` |
-| `ListAlertConfigsRequest` | 列表请求 | `type`, `symbol`, `is_enabled`, `limit`, `offset` |
-| `UpdateAlertConfigRequest` | 更新请求 | `type`, `id`, `name`, `description`, `is_enabled` |
-| `DeleteAlertConfigRequest` | 删除请求 | `type`, `id` |
-| `EnableAlertConfigRequest` | 启用请求 | `type`, `id` |
+| `AlertConfigCreate` | 告警创建请求 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `trigger_type`, `params`, `is_enabled`, `created_by` |
+| `AlertConfigUpdate` | 告警更新请求 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `trigger_type`, `params`, `is_enabled` |
+| `AlertConfigData` | 告警配置数据载荷 | `id`, `name`, `description`, `strategy_type`, `symbol`, `interval`, `trigger_type`, `params`, `is_enabled`, `created_at`, `updated_at`, `created_by` |
+| `AlertConfigListData` | 告警列表数据载荷 | `items[]`, `total`, `page`, `page_size` |
+| `DeleteAlertData` | 删除操作响应载荷 | `id`, `message` |
+| `SignalData` | 信号数据载荷 | `id`, `alert_id`, `name`, `strategy_type`, `symbol`, `interval`, `trigger_type`, `signal_value`, `signal_reason`, `computed_at`, `source_subscription_key`, `metadata`, `created_by` |
+| `SignalListData` | 信号列表数据载荷 | `items[]`, `total`, `page`, `page_size` |
+| `ListAlertConfigsRequest` | 列表查询请求 | `page`, `page_size`, `is_enabled`, `symbol`, `strategy_type` |
+| `ListSignalsRequest` | 信号列表查询请求 | `page`, `page_size`, `symbol`, `strategy_type`, `interval`, `signal_value`, `start_time`, `end_time` |
+
+**WebSocket 响应载荷说明**：
+- `AlertConfigData` / `AlertConfigListData` 用于告警配置的创建、列表、详情、更新响应
+- `SignalData` / `SignalListData` 用于信号查询响应
+- `DeleteAlertData` 用于删除操作响应
+- 所有载荷模型使用 `CamelCaseModel` 基类，序列化时自动将 snake_case 转换为 camelCase
 
 **使用场景**：
 - 告警配置 CRUD 操作（通过 WebSocket 消息）
@@ -502,7 +507,6 @@ class OrderData(CamelCaseModel):
 | `StrategyMetadataListResponse` | 策略元数据列表 | `strategies[]`, `total` |
 | `SignalRecordResponse` | 信号记录响应 | `id`, `alert_id`, `strategy_type`, `symbol`, `interval`, `trigger_type`, `signal_time`, `signal_value`, `signal_reason`, `computed_at`, `source_subscription_key`, `metadata`, `created_by` |
 | `SignalListResponse` | 信号列表响应 | `signals[]`, `total` |
-| `EnableDisableResponse` | 启用/禁用响应 | `id`, `name`, `is_enabled`, `message` |
 
 **字段详情 - StrategyParam**：
 
@@ -583,37 +587,56 @@ class OrderData(CamelCaseModel):
 | 模型名称 | 用途 | 蛇形字段 | JSON字段(camelCase) |
 |---------|------|---------|---------------------|
 | `CreateOrderRequest` | 创建订单 | `symbol`, `side`, `type`, `quantity`, `new_client_order_id` | `symbol`, `side`, `type`, `quantity`, `newClientOrderId` |
+| `FuturesCreateOrderRequest` | 期货创建订单 | `symbol`, `side`, `type`, `quantity`, `new_client_order_id` | `symbol`, `side`, `type`, `quantity`, `newClientOrderId` |
+| `SpotCreateOrderRequest` | 现货创建订单 | `symbol`, `side`, `type`, `quantity`, `new_client_order_id` | `symbol`, `side`, `type`, `quantity`, `newClientOrderId` |
 | `GetOrderRequest` | 查询订单 | `symbol`, `order_id`, `orig_client_order_id` | `symbol`, `orderId`, `origClientOrderId` |
 | `ListOrdersRequest` | 查询列表 | `symbol`, `start_time`, `end_time`, `limit` | `symbol`, `startTime`, `endTime`, `limit` |
 | `CancelOrderRequest` | 取消订单 | `symbol`, `order_id`, `orig_client_order_id`, `new_client_order_id` | `symbol`, `orderId`, `origClientOrderId`, `newClientOrderId` |
 | `GetOpenOrdersRequest` | 查询挂单 | `symbol` | `symbol` |
 
-**字段详情 - CreateOrderRequest**（期货）：
+**字段详情 - FuturesCreateOrderRequest**（期货）：
 
 | 字段名 | 类型 | 必填 | 说明 | JSON字段 |
 |--------|------|-----|------|----------|
 | `symbol` | str | ✅ | 交易对 | `symbol` |
 | `side` | str | ✅ | 方向 BUY/SELL | `side` |
-| `type` | str | ✅ | 订单类型 | `type` |
+| `type` | str | ✅ | 订单类型：LIMIT, MARKET, STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET | `type` |
 | `quantity` | float | ✅ | 数量 | `quantity` |
-| `new_client_order_id` | str | ✅ | 客户端订单ID | `newClientOrderId` |
-| `price` | float | 条件必填 | 价格（LIMIT类型） | `price` |
-| `time_in_force` | str | 条件必填 | 时效 GTC/IOC/FOK | `timeInForce` |
-| `position_side` | str | 否 | 持仓方向 BOTH/LONG/SHORT | `positionSide` |
+| `new_client_order_id` | str | 否 | 客户端订单ID（可选，币安自动生成） | `newClientOrderId` |
+| `position_side` | str | 否 | 持仓方向 BOTH/LONG/SHORT（对冲模式必填） | `positionSide` |
+| `price` | float | 条件必填 | 价格（LIMIT 必填） | `price` |
+| `time_in_force` | str | 条件必填 | 时效 GTC/IOC/FOK/GTD（LIMIT 必填） | `timeInForce` |
 | `reduce_only` | bool | 否 | 是否只减仓 | `reduceOnly` |
+| `stop_price` | float | 条件必填 | 止损/止盈价格 | `stopPrice` |
+| `callback_rate` | float | 条件必填 | 回调比例（仅追踪止损） | `callbackRate` |
+| `new_order_resp_type` | str | 否 | 响应格式：ACK/RESULT（默认 ACK） | `newOrderRespType` |
+| `price_match` | str | 否 | 价格匹配模式 | `priceMatch` |
+| `self_trade_prevention_mode` | str | 否 | 自成交防止模式 | `selfTradePreventionMode` |
+| `good_till_date` | int | 否 | GTD 订单过期时间 | `goodTillDate` |
 
-**字段详情 - CreateOrderRequest**（现货）：
+> **注意**：期货不支持以下参数：closePosition, activationPrice, workingType, priceProtect
+
+**字段详情 - SpotCreateOrderRequest**（现货）：
 
 | 字段名 | 类型 | 必填 | 说明 | JSON字段 |
 |--------|------|-----|------|----------|
 | `symbol` | str | ✅ | 交易对 | `symbol` |
 | `side` | str | ✅ | 方向 BUY/SELL | `side` |
-| `type` | str | ✅ | 订单类型 | `type` |
-| `quantity` | float | ✅ | 数量 | `quantity` |
-| `new_client_order_id` | str | ✅ | 客户端订单ID | `newClientOrderId` |
-| `price` | float | 条件必填 | 价格（LIMIT类型） | `price` |
-| `time_in_force` | str | 条件必填 | 时效 GTC/IOC/FOK | `timeInForce` |
-| `quote_order_qty` | float | 否 | 报价数量 | `quoteOrderQty` |
+| `type` | str | ✅ | 订单类型：LIMIT, MARKET, LIMIT_MAKER, STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT, TAKE_PROFIT_LIMIT, TRAILING_STOP_MARKET | `type` |
+| `quantity` | float | 条件必填 | 数量（MARKET 单需要 quantity 或 quoteOrderQty） | `quantity` |
+| `new_client_order_id` | str | 否 | 客户端订单ID（可选，币安自动生成） | `newClientOrderId` |
+| `price` | float | 条件必填 | 价格（LIMIT/LIMIT_MAKER 必填） | `price` |
+| `time_in_force` | str | 条件必填 | 时效 GTC/IOC/FOK（LIMIT 必填） | `timeInForce` |
+| `quote_order_qty` | float | 条件必填 | 报价数量（市价买单时指定支付金额） | `quoteOrderQty` |
+| `stop_price` | float | 条件必填 | 止损价格（止损单必需） | `stopPrice` |
+| `iceberg_qty` | float | 否 | 冰山订单数量 | `icebergQty` |
+| `trailing_delta` | int | 否 | 追踪止损 delta | `trailingDelta` |
+| `strategy_id` | int | 否 | 策略 ID | `strategyId` |
+| `strategy_type` | int | 否 | 策略类型（值不能小于 1000000） | `strategyType` |
+| `new_order_resp_type` | str | 否 | 响应格式：ACK/RESULT/FULL（默认 FULL） | `newOrderRespType` |
+| `self_trade_prevention_mode` | str | 否 | 自成交防止模式 | `selfTradePreventionMode` |
+
+> **注意**：现货不支持以下参数：positionSide, reduceOnly
 
 **响应模型**：
 
@@ -624,6 +647,8 @@ class OrderData(CamelCaseModel):
 | `OrderUpdateData` | 订单更新推送 | 继承 OrderData，额外包含 `updated_at` |
 | `OrderListResponseData` | 列表响应 | `orders[]`, `count` |
 | `OrderCancelResponseData` | 取消响应 | `order_id`, `client_order_id`, `symbol`, `status` |
+| `FuturesModifyOrderResponseData` | 期货修改订单响应 | `order_id`, `symbol`, `price`, `status` |
+| `SpotAmendOrderResponseData` | 现货修改订单响应 | `transact_time`, `execution_id`, `amended_order_id` |
 | `OpenOrdersResponseData` | 挂单响应 | `orders[]`, `count` |
 
 **字段详情 - OrderData**：
@@ -664,6 +689,94 @@ class OrderData(CamelCaseModel):
 ```
 
 **说明**：交易订单模型与 trading_orders 表和 04-trading-orders.md 设计保持一致。data 字段存储币安 API 返回的完整 JSON 数据。
+
+---
+
+### 订单修改响应模型
+
+#### FuturesModifyOrderResponseData（期货修改订单响应）
+
+期货 order.modify 响应直接返回订单对象：
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `task_id` | int | 任务ID | `taskId` |
+| `status` | str | 订单状态 | `status` |
+| `orig_client_order_id` | str | 原客户端订单ID | `origClientOrderId` |
+| `order_id` | int | 币安订单ID | `orderId` |
+| `symbol` | str | 交易对 | `symbol` |
+| `price` | str | 订单价格 | `price` |
+| `avg_price` | str | 平均成交价格 | `avgPrice` |
+| `orig_qty` | str | 原始数量 | `origQty` |
+| `executed_qty` | str | 已执行数量 | `executedQty` |
+| `order_type` | str | 订单类型 | `type` |
+| `side` | str | 买卖方向 | `side` |
+| `position_side` | str | 持仓方向 | `positionSide` |
+| `stop_price` | str | 止损价格 | `stopPrice` |
+| `time_in_force` | str | 时间策略 | `timeInForce` |
+| `update_time` | int | 更新时间 | `updateTime` |
+
+**JSON 示例（前端接收 - camelCase）**：
+```json
+{
+    "taskId": 123,
+    "status": "COMPLETED",
+    "origClientOrderId": "660e8400e29b41d4a716446655440001",
+    "orderId": 328971409,
+    "symbol": "BTCUSDT",
+    "price": "43769.10",
+    "avgPrice": "0.00",
+    "origQty": "0.110",
+    "executedQty": "0.000",
+    "type": "LIMIT",
+    "side": "SELL",
+    "positionSide": "SHORT",
+    "stopPrice": "0.00",
+    "timeInForce": "GTC",
+    "updateTime": 1703426756190
+}
+```
+
+#### SpotAmendOrderResponseData（现货修改订单响应）
+
+现货 order.amend.keepPriority 响应包含 amendedOrder 嵌套数据：
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `task_id` | int | 任务ID | `taskId` |
+| `status` | str | 订单状态 | `status` |
+| `orig_client_order_id` | str | 原客户端订单ID | `origClientOrderId` |
+| `transact_time` | int | 交易时间（毫秒） | `transactTime` |
+| `execution_id` | int | 执行ID | `executionId` |
+| `amended_order_id` | int | 修改后的订单ID | `amendedOrderId` |
+| `amended_symbol` | str | 交易对 | `amendedSymbol` |
+| `amended_price` | str | 订单价格 | `amendedPrice` |
+| `amended_qty` | str | 订单数量 | `amendedQty` |
+| `amended_executed_qty` | str | 已执行数量 | `amendedExecutedQty` |
+| `amended_status` | str | 订单状态 | `amendedStatus` |
+| `amended_order_type` | str | 订单类型 | `amendedOrderType` |
+| `amended_side` | str | 买卖方向 | `amendedSide` |
+| `amended_time_in_force` | str | 时间策略 | `amendedTimeInForce` |
+
+**JSON 示例（前端接收 - camelCase）**：
+```json
+{
+    "taskId": 123,
+    "status": "COMPLETED",
+    "origClientOrderId": "660e8400e29b41d4a716446655440001",
+    "transactTime": 1741923284382,
+    "executionId": 16,
+    "amendedOrderId": 12,
+    "amendedSymbol": "BTCUSDT",
+    "amendedPrice": "5.00000000",
+    "amendedQty": "5.00000000",
+    "amendedExecutedQty": "0.00000000",
+    "amendedStatus": "NEW",
+    "amendedOrderType": "LIMIT",
+    "amendedSide": "BUY",
+    "amendedTimeInForce": "GTC"
+}
+```
 
 ---
 
@@ -753,16 +866,93 @@ class OrderData(CamelCaseModel):
 **字段详情 - OrderResponseData**（对应 WS协议 ORDER_DATA 响应）：
 
 > **重要**：此模型采用蛇形命名，序列化时自动转换为驼峰发送给前端
+>
+> **设计决策**：使用具体模型而非 dict，确保嵌套字段也能正确转换
 
 | 字段名 | 类型 | 说明 | JSON字段 |
 |--------|------|------|----------|
 | `type` | str | 固定值 `"order"` | `"type"` |
 | `status` | str | 任务状态 | `"status"` |
 | `task_id` | int | 任务ID | `"taskId"` |
-| `result` | dict | 订单结果 | `"result"` |
-| `payload` | dict | 请求载荷 | `"payload"` |
+| `result` | OrderResultData | 订单结果 | `"result"` |
+| `payload` | OrderPayloadData | 请求载荷 | `"payload"` |
 | `error_code` | str | 错误码（失败时） | `"errorCode"` |
 | `error_message` | str | 错误信息（失败时） | `"errorMessage"` |
+
+**OrderResultData**（订单结果数据 - 用于 result 字段）：
+
+> 币安 API 返回的订单信息，需要递归转换为 camelCase 发送给前端
+>
+> **重要**：修改订单（MODIFY_ORDER）的响应格式因市场类型不同而异：
+> - 期货 (order.modify)：直接返回订单对象
+> - 现货 (order.amend.keepPriority)：响应包含 `transactTime`、`executionId`，订单数据在 `amendedOrder` 内
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `order_id` | int | 币安订单ID | `"orderId"` |
+| `client_order_id` | str | 客户端订单ID | `"clientOrderId"` |
+| `symbol` | str | 交易对 | `"symbol"` |
+| `status` | str | 订单状态 | `"status"` |
+| `side` | str | 买卖方向 | `"side"` |
+| `order_type` | str | 订单类型 | `"type"` |
+| `position_side` | str | 持仓方向（仅期货） | `"positionSide"` |
+| `orig_qty` | str | 原始数量 | `"origQty"` |
+| `price` | str | 价格 | `"price"` |
+| `avg_price` | str | 平均价格 | `"avgPrice"` |
+| `executed_qty` | str | 已执行数量 | `"executedQty"` |
+| `cum_qty` | str | 累计数量 | `"cumQty"` |
+| `cum_quote` | str | 累计报价 | `"cumQuote"` |
+| `time_in_force` | str | 时间策略 | `"timeInForce"` |
+| `transact_time` | int | 交易时间 | `"transactTime"` |
+| `update_time` | int | 更新时间 | `"updateTime"` |
+| `stop_price` | str | 止损价格 | `"stopPrice"` |
+| `reduce_only` | bool | 是否只减仓（仅期货） | `"reduceOnly"` |
+| `close_position` | bool | 是否平仓（仅期货） | `"closePosition"` |
+| `iceberg_qty` | str | 冰山数量 | `"icebergQty"` |
+| `is_working` | bool | 是否正在运行 | `"isWorking"` |
+
+**修改订单响应格式差异**：
+
+| 市场 | WS Method | 响应结构 |
+|------|-----------|----------|
+| 期货 | `order.modify` | 直接返回订单对象（与 OrderResultData 兼容） |
+| 现货 | `order.amend.keepPriority` | `{ transactTime, executionId, amendedOrder }` |
+
+**现货修改订单响应示例**：
+```json
+{
+  "transactTime": 1741923284382,
+  "executionId": 16,
+  "amendedOrder": {
+    "orderId": 12,
+    "symbol": "BTCUSDT",
+    "status": "NEW",
+    "price": "5.00000000",
+    "qty": "5.00000000",
+    ...
+  }
+}
+```
+
+> **实现注意**：处理现货修改订单响应时，需要从 `result.amendedOrder` 中提取订单数据作为最终结果。
+| `working_time` | int | 工作时间 | `"workingTime"` |
+
+**OrderPayloadData**（订单请求载荷 - 用于 payload 字段）：
+
+> 下单时传入的参数，用于前端回显
+
+| 字段名 | 类型 | 说明 | JSON字段 |
+|--------|------|------|----------|
+| `symbol` | str | 交易对 | `"symbol"` |
+| `side` | str | 买卖方向 | `"side"` |
+| `order_type` | str | 订单类型 | `"type"` |
+| `quantity` | float | 数量 | `"quantity"` |
+| `new_client_order_id` | str | 客户端订单ID | `"newClientOrderId"` |
+| `price` | float | 价格 | `"price"` |
+| `stop_price` | float | 止损价格 | `"stopPrice"` |
+| `time_in_force` | str | 时间策略 | `"timeInForce"` |
+| `position_side` | str | 持仓方向 | `"positionSide"` |
+| `reduce_only` | bool | 是否只减仓 | `"reduceOnly"` |
 
 **JSON 示例（前端接收 - camelCase）**：
 ```json
@@ -1428,7 +1618,213 @@ class OrderRequest(SnakeCaseModel):
         if v not in ('BUY', 'SELL'):
             raise ValueError('side must be BUY or SELL')
         return v
+
+
+class FuturesModifyOrderRequest(SnakeCaseModel):
+    """期货修改订单请求 (order.modify)
+
+    期货 WS API: order.modify
+
+    用于修改期货订单的价格和数量。修改后订单重新排队。
+    仅支持 LIMIT 订单修改。
+    """
+    symbol: str = Field(..., description="交易对符号，如 BTCUSDT")
+    side: str = Field(..., description="订单方向：BUY 或 SELL")
+    quantity: float = Field(..., gt=0, description="新订单数量")
+    price: float = Field(..., gt=0, description="新订单价格")
+    timestamp: int = Field(..., description="时间戳（毫秒，必填）")
+    order_id: int | None = Field(default=None, description="订单ID（与 origClientOrderId 二选一）")
+    orig_client_order_id: str | None = Field(default=None, description="客户端订单ID（与 orderId 二选一）")
+    new_client_order_id: str | None = Field(default=None, description="新客户端订单ID")
+    position_side: str | None = Field(default=None, description="持仓方向：BOTH/LONG/SHORT")
+    price_match: str | None = Field(default=None, description="价格匹配模式（仅适用于 LIMIT/STOP/TAKE_PROFIT）")
+    recv_window: int | None = Field(default=None, description="接收窗口时间")
+
+
+class SpotAmendOrderRequest(SnakeCaseModel):
+    """现货修改订单请求 (order.amend.keepPriority)
+
+    现货 WS API: order.amend.keepPriority
+
+    用于修改现货订单的数量。只能减少数量，不能增加或修改价格。
+    保持订单簿优先级（Keep Priority）。
+    """
+    symbol: str = Field(..., description="交易对符号，如 BTCUSDT")
+    timestamp: int = Field(..., description="时间戳（毫秒，必填）")
+    new_qty: float = Field(..., gt=0, description="新订单数量，必须大于0且小于原订单数量")
+    order_id: int | None = Field(default=None, description="订单ID（与 origClientOrderId 二选一）")
+    orig_client_order_id: str | None = Field(default=None, description="客户端订单ID（与 orderId 二选一）")
+    new_client_order_id: str | None = Field(default=None, description="新客户端订单ID")
+    recv_window: int | None = Field(default=None, description="接收窗口时间（最大60000）")
+
+
+class ModifyOrderRequest(SnakeCaseModel):
+    """修改订单请求（统一模型）
+
+    根据市场类型自动选择：
+    - 期货：调用 FuturesModifyOrderRequest（WS method: order.modify）
+    - 现货：调用 SpotAmendOrderRequest（WS method: order.amend.keepPriority）
+    """
+    symbol: str = Field(..., description="交易对符号")
+    timestamp: int = Field(..., description="时间戳（毫秒，必填）")
+    side: str | None = Field(default=None, description="订单方向：BUY 或 SELL（期货必填）")
+    quantity: float | None = Field(default=None, gt=0, description="新订单数量（期货必填）")
+    price: float | None = Field(default=None, gt=0, description="新订单价格（期货必填）")
+    new_qty: float | None = Field(default=None, gt=0, description="新订单数量（现货必填，必须小于原订单）")
+    order_id: int | None = Field(default=None, description="订单ID（与 origClientOrderId 二选一）")
+    orig_client_order_id: str | None = Field(default=None, description="客户端订单ID（与 orderId 二选一）")
+    new_client_order_id: str | None = Field(default=None, description="新客户端订单ID")
+    position_side: str | None = Field(default=None, description="持仓方向（期货可选）")
+    price_match: str | None = Field(default=None, description="价格匹配模式（期货可选）")
+    recv_window: int | None = Field(default=None, description="接收窗口时间")
 ```
+
+
+---
+
+#### 修改订单响应模型
+
+##### 期货修改订单响应 (FuturesModifyOrderResponse)
+
+**WS Method**: `order.modify`
+
+期货修改订单响应直接返回订单对象，与普通订单响应结构一致：
+
+```python
+class FuturesModifyOrderResponse(SnakeCaseModel):
+    """期货修改订单响应 (order.modify)
+
+    期货 WS API: order.modify
+
+    响应直接返回订单对象，包含修改后的订单信息。
+    """
+    order_id: int = Field(..., description="币安订单ID")
+    symbol: str = Field(..., description="交易对")
+    status: str = Field(..., description="订单状态：NEW, PARTIALLY_FILLED, FILLED, CANCELED, PENDING_CANCEL, REJECTED, EXPIRED")
+    client_order_id: str = Field(..., description="客户端订单ID")
+    price: str = Field(..., description="订单价格")
+    avg_price: str = Field(default="0.0", description="平均成交价格")
+    orig_qty: str = Field(..., description="原始数量")
+    executed_qty: str = Field(default="0.0", description="已执行数量")
+    cum_qty: str = Field(default="0.0", description="累计数量")
+    cum_quote: str = Field(default="0.0", description="累计报价")
+    time_in_force: str = Field(default="GTC", description="时间策略：GTC, IOC, FOK")
+    type: str = Field(..., description="订单类型：LIMIT, MARKET, STOP, TAKE_PROFIT, LIMIT_MAKER")
+    side: str = Field(..., description="买卖方向：BUY, SELL")
+    position_side: str = Field(default="BOTH", description="持仓方向：BOTH, LONG, SHORT")
+    stop_price: str = Field(default="0.0", description="止损价格")
+    working_type: str = Field(default="CONTRACT_PRICE", description="工作价格类型")
+    price_protect: bool = Field(default=False, description="是否开启价格保护")
+    reduce_only: bool = Field(default=False, description="是否只减仓")
+    close_position: bool = Field(default=False, description="是否平仓")
+    price_match: str = Field(default="NONE", description="价格匹配模式")
+    self_trade_prevention_mode: str = Field(default="NONE", description="自成交预防模式")
+    good_till_date: int = Field(default=0, description="GTD订单自动取消时间")
+    update_time: int = Field(..., description="更新时间")
+```
+
+**JSON 响应示例**：
+```json
+{
+    "orderId": 328971409,
+    "symbol": "BTCUSDT",
+    "status": "NEW",
+    "clientOrderId": "xGHfltUMExx0TbQstQQfRX",
+    "price": "43769.10",
+    "avgPrice": "0.00",
+    "origQty": "0.110",
+    "executedQty": "0.000",
+    "cumQty": "0.000",
+    "cumQuote": "0.00000",
+    "timeInForce": "GTC",
+    "type": "LIMIT",
+    "side": "SELL",
+    "positionSide": "SHORT",
+    "stopPrice": "0.00",
+    "workingType": "CONTRACT_PRICE",
+    "priceProtect": false,
+    "reduceOnly": false,
+    "closePosition": false,
+    "priceMatch": "NONE",
+    "selfTradePreventionMode": "NONE",
+    "goodTillDate": 0,
+    "updateTime": 1703426756190
+}
+```
+
+##### 现货修改订单响应 (SpotAmendOrderResponse)
+
+**WS Method**: `order.amend.keepPriority`
+
+现货修改订单响应包含执行信息和修改后的订单，订单数据在 `amendedOrder` 嵌套对象中：
+
+```python
+class SpotAmendOrderResponse(SnakeCaseModel):
+    """现货修改订单响应 (order.amend.keepPriority)
+
+    现货 WS API: order.amend.keepPriority
+
+    响应包含执行时间和 amendedOrder 嵌套的订单数据。
+    """
+    transact_time: int = Field(..., description="交易时间（毫秒）")
+    execution_id: int = Field(..., description="执行ID")
+    amended_order: "SpotAmendedOrderData" = Field(..., description="修改后的订单数据")
+```
+
+```python
+class SpotAmendedOrderData(SnakeCaseModel):
+    """现货修改订单中的订单数据"""
+    symbol: str = Field(..., description="交易对")
+    order_id: int = Field(..., description="币安订单ID")
+    order_list_id: int = Field(default=-1, description="订单列表ID")
+    client_order_id: str = Field(..., description="客户端订单ID")
+    price: str = Field(..., description="订单价格")
+    qty: str = Field(..., description="订单数量")
+    executed_qty: str = Field(default="0.00000000", description="已执行数量")
+    prevented_qty: str = Field(default="0.00000000", description="阻止成交数量")
+    quote_order_qty: str = Field(default="0.00000000", description="报价订单数量")
+    cumulative_quote_qty: str = Field(default="0.00000000", description="累计报价数量")
+    status: str = Field(..., description="订单状态：NEW, PARTIALLY_FILLED, FILLED, CANCELED, PENDING_CANCEL, REJECTED, EXPIRED")
+    time_in_force: str = Field(default="GTC", description="时间策略：GTC, IOC, FOK")
+    type: str = Field(..., description="订单类型：LIMIT, MARKET, LIMIT_MAKER")
+    side: str = Field(..., description="买卖方向：BUY, SELL")
+    working_time: int = Field(..., description="工作时间")
+    self_trade_prevention_mode: str = Field(default="NONE", description="自成交预防模式")
+```
+
+**JSON 响应示例**：
+```json
+{
+    "transactTime": 1741923284382,
+    "executionId": 16,
+    "amendedOrder": {
+        "symbol": "BTCUSDT",
+        "orderId": 12,
+        "orderListId": -1,
+        "origClientOrderId": "my_test_order1",
+        "clientOrderId": "4zR9HFcEq8gM1tWUqPEUHc",
+        "price": "5.00000000",
+        "qty": "5.00000000",
+        "executedQty": "0.00000000",
+        "preventedQty": "0.00000000",
+        "quoteOrderQty": "0.00000000",
+        "cumulativeQuoteQty": "0.00000000",
+        "status": "NEW",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "BUY",
+        "workingTime": 1741923284364,
+        "selfTradePreventionMode": "NONE"
+    }
+}
+```
+
+##### 响应模型选择指南
+
+| 场景 | 使用模型 | 说明 |
+|------|----------|------|
+| 期货修改订单 | `FuturesModifyOrderResponse` | 直接返回订单对象 |
+| 现货修改订单 | `SpotAmendOrderResponse` | 包含 amendedOrder 嵌套数据 |
 
 ---
 

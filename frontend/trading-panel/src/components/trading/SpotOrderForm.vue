@@ -2,18 +2,17 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import {
   NCard,
-  NInputNumber,
   NButton,
   NSlider,
-  NSpace,
-  NText,
-  NIcon,
-  NSpin,
 } from 'naive-ui'
 import { useSpotOrder } from '../../composables/useSpotOrder'
 import { dataService } from '../../services/data-service/DataService'
 import type { SpotOrderType, OrderTimeInForce } from '../../types/api'
 import { useAccountStore } from '../../stores/account-store'
+import { getSymbolFilters } from '../../libs/symbol-filters'
+import { roundToStep, getDecimalPlaces } from '../../libs/format'
+import NumberInput from '../common/NumberInput.vue'
+import StepperButtons from '../common/StepperButtons.vue'
 
 // Types
 type OrderSide = 'BUY' | 'SELL'
@@ -33,7 +32,7 @@ async function fetchQuote(targetSymbol: string): Promise<void> {
     if (response.quotes && response.quotes.length > 0) {
       const quote = response.quotes[0]
       // DataService 返回的报价格式: { lp: lastPrice, ... }
-      currentPrice.value = parseFloat((quote as any).lp) || 0
+      currentPrice.value = parseFloat((quote as any).v?.lp) || 0
       console.log('[SpotOrderForm] Quote price:', currentPrice.value)
     }
   } catch (e) {
@@ -63,20 +62,32 @@ const orderTypeTab = ref<OrderTypeTab>('LIMIT')
 const orderType = ref<SpotOrderType>('LIMIT')
 
 // Buy side state
-const buyPrice = ref<number | undefined>(undefined)
-const buyQuantity = ref<number | undefined>(undefined)
-const buyInputAmount = ref<number | undefined>(undefined)
-const buyStopPrice = ref<number | undefined>(undefined)
+const buyPrice = ref<number | null>(null)
+const buyQuantity = ref<number | null>(null)
+const buyInputAmount = ref<number | null>(null)
+const buyStopPrice = ref<number | null>(null)
 const buyTimeInForce = ref<OrderTimeInForce>('GTC')
 const buyPercentage = ref(0)
 
+// NumberInput refs for stepper buttons
+const buyPriceInputRef = ref<InstanceType<typeof NumberInput> | null>(null)
+const buyQuantityInputRef = ref<InstanceType<typeof NumberInput> | null>(null)
+const buyAmountInputRef = ref<InstanceType<typeof NumberInput> | null>(null)
+const buyStopPriceInputRef = ref<InstanceType<typeof NumberInput> | null>(null)
+
 // Sell side state
-const sellPrice = ref<number | undefined>(undefined)
-const sellQuantity = ref<number | undefined>(undefined)
-const sellInputAmount = ref<number | undefined>(undefined)
-const sellStopPrice = ref<number | undefined>(undefined)
+const sellPrice = ref<number | null>(null)
+const sellQuantity = ref<number | null>(null)
+const sellInputAmount = ref<number | null>(null)
+const sellStopPrice = ref<number | null>(null)
 const sellTimeInForce = ref<OrderTimeInForce>('GTC')
 const sellPercentage = ref(0)
+
+// NumberInput refs for stepper buttons (sell side)
+const sellPriceInputRef = ref<InstanceType<typeof NumberInput> | null>(null)
+const sellQuantityInputRef = ref<InstanceType<typeof NumberInput> | null>(null)
+const sellAmountInputRef = ref<InstanceType<typeof NumberInput> | null>(null)
+const sellStopPriceInputRef = ref<InstanceType<typeof NumberInput> | null>(null)
 
 // ====== Computed ======
 
@@ -190,51 +201,77 @@ watch(currentPrice, (newPrice) => {
   }
 })
 
-// Watch buy percentage changes
+// Watch buy percentage changes - auto calculate quantity and amount
 watch(buyPercentage, (newPercent) => {
   if (newPercent > 0 && currentPrice.value > 0) {
-    buyQuantity.value = buyPercentageQuantity.value
-    buyInputAmount.value = buyQuantity.value * currentPrice.value
+    const qty = roundQuantity(buyPercentageQuantity.value)
+    buyQuantity.value = qty
+    buyInputAmount.value = (qty || 0) * currentPrice.value
   }
 })
 
-// Watch sell percentage changes
+// Watch sell percentage changes - auto calculate quantity and amount
 watch(sellPercentage, (newPercent) => {
   if (newPercent > 0) {
-    sellQuantity.value = sellPercentageQuantity.value
-    sellInputAmount.value = sellQuantity.value * currentPrice.value
+    const qty = roundQuantity(sellPercentageQuantity.value)
+    sellQuantity.value = qty
+    sellInputAmount.value = (qty || 0) * currentPrice.value
   }
 })
 
-// Watch buy quantity changes - auto calculate amount
+// Watch buy quantity changes - auto calculate amount (仅计算，不回写)
 watch(buyQuantity, (newQuantity) => {
   if (newQuantity && currentPrice.value > 0) {
     buyInputAmount.value = newQuantity * currentPrice.value
   }
 })
 
-// Watch buy amount changes - auto calculate quantity
+// Watch buy amount changes - auto calculate quantity (仅计算，不回写)
 watch(buyInputAmount, (newAmount) => {
   if (newAmount && currentPrice.value > 0) {
-    buyQuantity.value = newAmount / currentPrice.value
+    const rawQty = newAmount / currentPrice.value
+    const qty = roundQuantity(rawQty)
+    buyQuantity.value = qty
   }
 })
 
-// Watch sell quantity changes - auto calculate amount
+// Watch sell quantity changes - auto calculate amount (仅计算，不回写)
 watch(sellQuantity, (newQuantity) => {
   if (newQuantity && currentPrice.value > 0) {
     sellInputAmount.value = newQuantity * currentPrice.value
   }
 })
 
-// Watch sell amount changes - auto calculate quantity
+// Watch sell amount changes - auto calculate quantity (仅计算，不回写)
 watch(sellInputAmount, (newAmount) => {
   if (newAmount && currentPrice.value > 0) {
-    sellQuantity.value = newAmount / currentPrice.value
+    const rawQty = newAmount / currentPrice.value
+    const qty = roundQuantity(rawQty)
+    sellQuantity.value = qty
   }
 })
 
 // ====== Methods ======
+
+/**
+ * 舍入数量到 stepSize 的整数倍
+ * 确保满足币安 LOT_SIZE 过滤器要求
+ */
+function roundQuantity(quantity: number | null): number | null {
+  if (quantity === null || quantity <= 0) return null
+  const filters = getSymbolFilters(symbol.value)
+  return roundToStep(quantity, filters.lotSize.stepSize, 'floor')
+}
+
+/**
+ * 舍入价格到 tickSize 的整数倍
+ * 确保满足币安 PRICE_FILTER 过滤器要求
+ */
+function roundPrice(price: number | null): number | null {
+  if (price === null || price <= 0) return null
+  const filters = getSymbolFilters(symbol.value)
+  return roundToStep(price, filters.priceFilter.tickSize, 'floor')
+}
 
 // Submit buy order
 async function submitBuyOrder() {
@@ -245,16 +282,35 @@ async function submitBuyOrder() {
 
   try {
     let finalQuantity = buyQuantity.value
-    let finalQuoteOrderQty: number | undefined
+    let finalQuoteOrderQty: number | null = null
 
     // 使用成交额模式（市价单用 quoteOrderQty，限价单用计算出的 quantity）
     if (buyInputAmount.value && currentPrice.value > 0) {
       if (orderTypeTab.value === 'MARKET') {
-        finalQuoteOrderQty = buyInputAmount.value
-        finalQuantity = undefined
+        // 市价单成交额舍入到2位小数（满足币安对quote asset的精度要求）
+        finalQuoteOrderQty = roundToStep(buyInputAmount.value, 0.01, 'floor')
+        finalQuantity = null
       } else {
         finalQuantity = buyInputAmount.value / currentPrice.value
       }
+    }
+
+    // 舍入数量到 stepSize 的整数倍（满足币安 LOT_SIZE 要求）
+    finalQuantity = roundQuantity(finalQuantity)
+    // 舍入价格到 tickSize 的整数倍（满足币安 PRICE_FILTER 要求）
+    const finalPrice = roundPrice(buyPrice.value)
+    const finalStopPrice = roundPrice(buyStopPrice.value)
+
+    // 检查数量是否有效
+    if (finalQuantity === null || finalQuantity <= 0) {
+      showMessage('请输入有效的数量', 'error')
+      return
+    }
+
+    // 检查价格是否有效（对于限价单）
+    if ((orderTypeTab.value === 'LIMIT' || orderTypeTab.value === 'STOP') && !finalPrice) {
+      showMessage('请输入有效的价格', 'error')
+      return
     }
 
     const order = await createSpotOrder({
@@ -263,15 +319,16 @@ async function submitBuyOrder() {
       type: orderType.value,
       quantity: finalQuantity,
       quoteOrderQty: finalQuoteOrderQty,
-      price: orderTypeTab.value === 'LIMIT' || orderTypeTab.value === 'STOP' ? buyPrice.value : undefined,
-      stopPrice: orderTypeTab.value === 'STOP' ? buyStopPrice.value : undefined,
-      timeInForce: orderTypeTab.value === 'LIMIT' ? buyTimeInForce.value : undefined,
+      price: orderTypeTab.value === 'LIMIT' || orderTypeTab.value === 'STOP' ? finalPrice : null,
+      stopPrice: orderTypeTab.value === 'STOP' ? finalStopPrice : null,
+      timeInForce: orderTypeTab.value === 'LIMIT' ? buyTimeInForce.value : null,
     })
 
     showMessage(`买入成功: ${order.clientOrderId || (order as unknown as Record<string, unknown>).client_order_id}`, 'success')
     resetBuyForm()
   } catch (e) {
-    showMessage(error.value || '订单创建失败', 'error')
+    const errorMessage = e instanceof Error ? e.message : '订单创建失败'
+    showMessage(errorMessage, 'error')
   }
 }
 
@@ -284,16 +341,35 @@ async function submitSellOrder() {
 
   try {
     let finalQuantity = sellQuantity.value
-    let finalQuoteOrderQty: number | undefined
+    let finalQuoteOrderQty: number | null = null
 
     // 使用成交额模式（市价单用 quoteOrderQty，限价单用计算出的 quantity）
     if (sellInputAmount.value && currentPrice.value > 0) {
       if (orderTypeTab.value === 'MARKET') {
-        finalQuoteOrderQty = sellInputAmount.value
-        finalQuantity = undefined
+        // 市价单成交额舍入到2位小数（满足币安对quote asset的精度要求）
+        finalQuoteOrderQty = roundToStep(sellInputAmount.value, 0.01, 'floor')
+        finalQuantity = null
       } else {
         finalQuantity = sellInputAmount.value / currentPrice.value
       }
+    }
+
+    // 舍入数量到 stepSize 的整数倍（满足币安 LOT_SIZE 要求）
+    finalQuantity = roundQuantity(finalQuantity)
+    // 舍入价格到 tickSize 的整数倍（满足币安 PRICE_FILTER 要求）
+    const finalPrice = roundPrice(sellPrice.value)
+    const finalStopPrice = roundPrice(sellStopPrice.value)
+
+    // 检查数量是否有效
+    if (finalQuantity === null || finalQuantity <= 0) {
+      showMessage('请输入有效的数量', 'error')
+      return
+    }
+
+    // 检查价格是否有效（对于限价单）
+    if ((orderTypeTab.value === 'LIMIT' || orderTypeTab.value === 'STOP') && !finalPrice) {
+      showMessage('请输入有效的价格', 'error')
+      return
     }
 
     const order = await createSpotOrder({
@@ -302,42 +378,61 @@ async function submitSellOrder() {
       type: orderType.value,
       quantity: finalQuantity,
       quoteOrderQty: finalQuoteOrderQty,
-      price: orderTypeTab.value === 'LIMIT' || orderTypeTab.value === 'STOP' ? sellPrice.value : undefined,
-      stopPrice: orderTypeTab.value === 'STOP' ? sellStopPrice.value : undefined,
-      timeInForce: orderTypeTab.value === 'LIMIT' ? sellTimeInForce.value : undefined,
+      price: orderTypeTab.value === 'LIMIT' || orderTypeTab.value === 'STOP' ? finalPrice : null,
+      stopPrice: orderTypeTab.value === 'STOP' ? finalStopPrice : null,
+      timeInForce: orderTypeTab.value === 'LIMIT' ? sellTimeInForce.value : null,
     })
 
     showMessage(`卖出成功: ${order.clientOrderId || (order as unknown as Record<string, unknown>).client_order_id}`, 'success')
     resetSellForm()
   } catch (e) {
-    showMessage(error.value || '订单创建失败', 'error')
+    const errorMessage = e instanceof Error ? e.message : '订单创建失败'
+    showMessage(errorMessage, 'error')
   }
 }
 
 // Reset forms
 function resetBuyForm() {
-  buyQuantity.value = undefined
-  buyInputAmount.value = undefined
-  buyPrice.value = currentPrice.value || undefined
-  buyStopPrice.value = undefined
+  buyQuantity.value = null
+  buyInputAmount.value = null
+  buyPrice.value = currentPrice.value || null
+  buyStopPrice.value = null
   buyPercentage.value = 0
 }
 
 function resetSellForm() {
-  sellQuantity.value = undefined
-  sellInputAmount.value = undefined
-  sellPrice.value = currentPrice.value || undefined
-  sellStopPrice.value = undefined
+  sellQuantity.value = null
+  sellInputAmount.value = null
+  sellPrice.value = currentPrice.value || null
+  sellStopPrice.value = null
   sellPercentage.value = 0
 }
 
 // Format number for display
+function formatQuantityForDisplay(value: number | undefined): string {
+  if (value === undefined || value === null || isNaN(value)) return '0'
+  // 使用交易对的 stepSize 对应的小数位数
+  const filters = getSymbolFilters(symbol.value)
+  const decimals = getDecimalPlaces(filters.lotSize.stepSize)
+  return value.toFixed(decimals)
+}
+
+// Format number for display (通用版本，用于余额等)
 function formatNumber(value: number | undefined, decimals: number = 4): string {
   if (value === undefined || value === null || isNaN(value)) return '0'
   return value.toFixed(decimals)
 }
 
 // Format price for display
+function formatPriceForDisplay(value: number | undefined): string {
+  if (value === undefined || value === null || isNaN(value)) return '0'
+  // 使用交易对的 tickSize 对应的小数位数
+  const filters = getSymbolFilters(symbol.value)
+  const decimals = getDecimalPlaces(filters.priceFilter.tickSize)
+  return value.toFixed(decimals)
+}
+
+// Format price for display (通用版本)
 function formatPrice(value: number | undefined): string {
   if (value === undefined || value === null || isNaN(value)) return '0'
   if (value < 1) return value.toFixed(6)
@@ -355,8 +450,8 @@ onMounted(async () => {
   try {
     await fetchQuote(symbol.value)
     // Set default price for both buy and sell panels
-    buyPrice.value = currentPrice.value || undefined
-    sellPrice.value = currentPrice.value || undefined
+    buyPrice.value = currentPrice.value || null
+    sellPrice.value = currentPrice.value || null
   } catch (e) {
     console.error('[SpotOrderForm] Failed to fetch quote:', e)
   }
@@ -393,78 +488,86 @@ onMounted(async () => {
 
         <!-- Price Input (for non-MARKET orders) -->
         <div class="input-group" v-if="orderTypeTab !== 'MARKET'">
-          <NInputNumber
-            v-model:value="buyPrice"
-            :min="0"
-            :step="0.01"
-            :show-button="false"
+          <NumberInput
+            ref="buyPriceInputRef"
+            v-model="buyPrice"
+            prefix="价格"
+            suffix="USDT"
+            :precision="getDecimalPlaces(getSymbolFilters(symbol).priceFilter.tickSize)"
+            :step-size="getSymbolFilters(symbol).priceFilter.tickSize"
+            :min="getSymbolFilters(symbol).priceFilter.minPrice"
+            :max="getSymbolFilters(symbol).priceFilter.maxPrice"
+            theme="buy"
             placeholder=""
-            class="panel-input"
-          >
-            <template #prefix>
-              <span class="input-prefix">价格</span>
-            </template>
-            <template #suffix>
-              <span class="currency-suffix">USDT</span>
-            </template>
-          </NInputNumber>
+          />
+          <StepperButtons
+            theme="buy"
+            :disabled="orderTypeTab === 'MARKET'"
+            @increment="buyPriceInputRef?.stepIncrement()"
+            @decrement="buyPriceInputRef?.stepDecrement()"
+          />
         </div>
 
         <!-- Quantity -->
         <div class="input-group">
-          <NInputNumber
-            v-model:value="buyQuantity"
-            :min="0"
-            :step="0.001"
-            :show-button="false"
+          <NumberInput
+            ref="buyQuantityInputRef"
+            v-model="buyQuantity"
+            prefix="数量"
+            :suffix="baseCurrency"
+            :precision="getDecimalPlaces(getSymbolFilters(symbol).lotSize.stepSize)"
+            :step-size="getSymbolFilters(symbol).lotSize.stepSize"
+            :min="getSymbolFilters(symbol).lotSize.minQty"
+            :max="getSymbolFilters(symbol).lotSize.maxQty"
+            theme="buy"
             placeholder=""
-            class="panel-input"
-          >
-            <template #prefix>
-              <span class="input-prefix"></span>
-            </template>
-            <template #suffix>
-              <span class="currency-suffix">{{ baseCurrency }}</span>
-            </template>
-          </NInputNumber>
+          />
+          <StepperButtons
+            theme="buy"
+            @increment="buyQuantityInputRef?.stepIncrement()"
+            @decrement="buyQuantityInputRef?.stepDecrement()"
+          />
         </div>
 
         <!-- Total Amount -->
         <div class="input-group">
-          <NInputNumber
-            v-model:value="buyInputAmount"
+          <NumberInput
+            ref="buyAmountInputRef"
+            v-model="buyInputAmount"
+            prefix="成交额"
+            suffix="USDT"
+            :precision="2"
+            :step-size="1"
             :min="5"
-            :step="1"
-            :show-button="false"
+            theme="buy"
             placeholder="最少 5"
-            class="panel-input"
-          >
-            <template #prefix>
-              <span class="input-prefix"></span>
-            </template>
-            <template #suffix>
-              <span class="currency-suffix">USDT</span>
-            </template>
-          </NInputNumber>
+          />
+          <StepperButtons
+            theme="buy"
+            @increment="buyAmountInputRef?.stepIncrement()"
+            @decrement="buyAmountInputRef?.stepDecrement()"
+          />
         </div>
 
         <!-- Stop Price (for STOP orders) -->
         <div class="input-group" v-if="orderTypeTab === 'STOP'">
-          <NInputNumber
-            v-model:value="buyStopPrice"
-            :min="0"
-            :step="0.01"
-            :show-button="false"
+          <NumberInput
+            ref="buyStopPriceInputRef"
+            v-model="buyStopPrice"
+            prefix="触发"
+            suffix="USDT"
+            :precision="getDecimalPlaces(getSymbolFilters(symbol).priceFilter.tickSize)"
+            :step-size="getSymbolFilters(symbol).priceFilter.tickSize"
+            :min="getSymbolFilters(symbol).priceFilter.minPrice"
+            :max="getSymbolFilters(symbol).priceFilter.maxPrice"
+            theme="buy"
             placeholder=""
-            class="panel-input"
-          >
-            <template #prefix>
-              <span class="input-prefix">触发</span>
-            </template>
-            <template #suffix>
-              <span class="currency-suffix">USDT</span>
-            </template>
-          </NInputNumber>
+          />
+          <StepperButtons
+            theme="buy"
+            @increment="buyStopPriceInputRef?.stepIncrement()"
+            @decrement="buyStopPriceInputRef?.stepDecrement()"
+          />
         </div>
 
         <!-- Percentage Slider -->
@@ -493,7 +596,7 @@ onMounted(async () => {
         <NButton
           type="success"
           :loading="isLoading"
-          :disabled="!buyIsFormValid"
+          :disabled="!buyIsFormValid || isLoading"
           block
           size="large"
           class="submit-btn buy-btn"
@@ -511,78 +614,86 @@ onMounted(async () => {
 
         <!-- Price Input (for non-MARKET orders) -->
         <div class="input-group" v-if="orderTypeTab !== 'MARKET'">
-          <NInputNumber
-            v-model:value="sellPrice"
-            :min="0"
-            :step="0.01"
-            :show-button="false"
+          <NumberInput
+            ref="sellPriceInputRef"
+            v-model="sellPrice"
+            prefix="价格"
+            suffix="USDT"
+            :precision="getDecimalPlaces(getSymbolFilters(symbol).priceFilter.tickSize)"
+            :step-size="getSymbolFilters(symbol).priceFilter.tickSize"
+            :min="getSymbolFilters(symbol).priceFilter.minPrice"
+            :max="getSymbolFilters(symbol).priceFilter.maxPrice"
+            theme="sell"
             placeholder=""
-            class="panel-input"
-          >
-            <template #prefix>
-              <span class="input-prefix">价格</span>
-            </template>
-            <template #suffix>
-              <span class="currency-suffix">USDT</span>
-            </template>
-          </NInputNumber>
+          />
+          <StepperButtons
+            theme="sell"
+            :disabled="orderTypeTab === 'MARKET'"
+            @increment="sellPriceInputRef?.stepIncrement()"
+            @decrement="sellPriceInputRef?.stepDecrement()"
+          />
         </div>
 
         <!-- Quantity -->
         <div class="input-group">
-          <NInputNumber
-            v-model:value="sellQuantity"
-            :min="0"
-            :step="0.001"
-            :show-button="false"
+          <NumberInput
+            ref="sellQuantityInputRef"
+            v-model="sellQuantity"
+            prefix="数量"
+            :suffix="baseCurrency"
+            :precision="getDecimalPlaces(getSymbolFilters(symbol).lotSize.stepSize)"
+            :step-size="getSymbolFilters(symbol).lotSize.stepSize"
+            :min="getSymbolFilters(symbol).lotSize.minQty"
+            :max="getSymbolFilters(symbol).lotSize.maxQty"
+            theme="sell"
             placeholder=""
-            class="panel-input"
-          >
-            <template #prefix>
-              <span class="input-prefix"></span>
-            </template>
-            <template #suffix>
-              <span class="currency-suffix">{{ baseCurrency }}</span>
-            </template>
-          </NInputNumber>
+          />
+          <StepperButtons
+            theme="sell"
+            @increment="sellQuantityInputRef?.stepIncrement()"
+            @decrement="sellQuantityInputRef?.stepDecrement()"
+          />
         </div>
 
         <!-- Total Amount -->
         <div class="input-group">
-          <NInputNumber
-            v-model:value="sellInputAmount"
+          <NumberInput
+            ref="sellAmountInputRef"
+            v-model="sellInputAmount"
+            prefix="成交额"
+            suffix="USDT"
+            :precision="2"
+            :step-size="1"
             :min="5"
-            :step="1"
-            :show-button="false"
+            theme="sell"
             placeholder="最少 5"
-            class="panel-input"
-          >
-            <template #prefix>
-              <span class="input-prefix"></span>
-            </template>
-            <template #suffix>
-              <span class="currency-suffix">USDT</span>
-            </template>
-          </NInputNumber>
+          />
+          <StepperButtons
+            theme="sell"
+            @increment="sellAmountInputRef?.stepIncrement()"
+            @decrement="sellAmountInputRef?.stepDecrement()"
+          />
         </div>
 
         <!-- Stop Price (for STOP orders) -->
         <div class="input-group" v-if="orderTypeTab === 'STOP'">
-          <NInputNumber
-            v-model:value="sellStopPrice"
-            :min="0"
-            :step="0.01"
-            :show-button="false"
+          <NumberInput
+            ref="sellStopPriceInputRef"
+            v-model="sellStopPrice"
+            prefix="触发"
+            suffix="USDT"
+            :precision="getDecimalPlaces(getSymbolFilters(symbol).priceFilter.tickSize)"
+            :step-size="getSymbolFilters(symbol).priceFilter.tickSize"
+            :min="getSymbolFilters(symbol).priceFilter.minPrice"
+            :max="getSymbolFilters(symbol).priceFilter.maxPrice"
+            theme="sell"
             placeholder=""
-            class="panel-input"
-          >
-            <template #prefix>
-              <span class="input-prefix">触发</span>
-            </template>
-            <template #suffix>
-              <span class="currency-suffix">USDT</span>
-            </template>
-          </NInputNumber>
+          />
+          <StepperButtons
+            theme="sell"
+            @increment="sellStopPriceInputRef?.stepIncrement()"
+            @decrement="sellStopPriceInputRef?.stepDecrement()"
+          />
         </div>
 
         <!-- Percentage Slider -->
@@ -611,7 +722,7 @@ onMounted(async () => {
         <NButton
           type="error"
           :loading="isLoading"
-          :disabled="!sellIsFormValid"
+          :disabled="!sellIsFormValid || isLoading"
           block
           size="large"
           class="submit-btn sell-btn"
@@ -784,6 +895,7 @@ onMounted(async () => {
   font-size: 14px !important;
   color: #fff !important;
   font-weight: 600 !important;
+  margin-right: 4px;
 }
 
 .input-label {
@@ -917,23 +1029,27 @@ onMounted(async () => {
 }
 
 .buy-btn {
-  background: #00c087;
-  border-color: #00c087;
+  background: #00875a !important;
+  border-color: #00875a !important;
+  color: #ffffff !important;
 }
 
 .buy-btn:hover {
-  background: #00a06e;
-  border-color: #00a06e;
+  background: #006644 !important;
+  border-color: #006644 !important;
+  color: #ffffff !important;
 }
 
 .sell-btn {
-  background: #ef4444;
-  border-color: #ef4444;
+  background: #dc2626 !important;
+  border-color: #dc2626 !important;
+  color: #ffffff !important;
 }
 
 .sell-btn:hover {
-  background: #dc2626;
-  border-color: #dc2626;
+  background: #b91c1c !important;
+  border-color: #b91c1c !important;
+  color: #ffffff !important;
 }
 
 /* Override Naive UI input styles */
@@ -968,6 +1084,57 @@ onMounted(async () => {
 
 :deep(.n-slider .n-slider-handle) {
   border-color: #00c087;
+}
+
+/* Native Input Styles */
+.native-input-wrapper {
+  display: flex;
+  align-items: center;
+  background: #0f0f1a;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  height: 52px;
+  padding: 0 12px;
+  transition: border-color 0.2s;
+  flex: 1;
+}
+
+.native-input-wrapper:focus-within {
+  border-color: #00c087;
+}
+
+.buy-panel .native-input-wrapper:focus-within {
+  border-color: #00c087;
+}
+
+.sell-panel .native-input-wrapper:focus-within {
+  border-color: #ef4444;
+}
+
+.native-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+  height: 100%;
+  padding: 0;
+  margin-right: 8px;
+}
+
+.native-input::placeholder {
+  color: #4a4a5a;
+  text-align: right;
+}
+
+/* Input group with stepper buttons */
+.input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Responsive */

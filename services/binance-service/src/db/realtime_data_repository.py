@@ -64,28 +64,17 @@ class RealtimeDataRepository:
 
         Args:
             subscription_key: 订阅键，如 "BINANCE:BTCUSDT@KLINE_1m"
-            data: 实时数据（JSON格式）
+            data: 实时数据（JSON格式）。应由 Pydantic model_dump(mode='json') 产生，
+                  已自动处理 Decimal/ datetime 等类型的序列化。
             event_time: 事件时间（可选，默认为当前时间）
         """
-        from datetime import datetime
-
-        def json_serializer(obj):
-            """自定义JSON序列化器，处理datetime类型"""
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-
         query = """
             UPDATE realtime_data
             SET data = $1, event_time = COALESCE($2, NOW()), updated_at = NOW()
             WHERE subscription_key = $3
         """
         async with self._pool.acquire() as conn:
-            data_json = (
-                data
-                if isinstance(data, str)
-                else json.dumps(data, default=json_serializer)
-            )
+            data_json = data if isinstance(data, str) else json.dumps(data)
             await conn.execute(
                 query,
                 data_json,

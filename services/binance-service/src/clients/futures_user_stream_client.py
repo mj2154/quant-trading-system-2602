@@ -4,15 +4,29 @@
 管理期货账户的 listenKey 创建、续期和 WebSocket 连接。
 接收期货账户更新事件（ACCOUNT_UPDATE, ORDER_TRADE_UPDATE）。
 
-API文档: https://binance-docs.github.io/apidocs/futures/cn/#user-data-stream
+设计原则（与 SpotUserStreamClient 一致）：
+- WS客户端只负责连接和接收数据
+- 收到数据后立即打包为 WSDataPackage，发送给币安服务
+- 不维护任何回调或订阅状态
+- 所有数据处理由币安服务统一完成
+
+端点（Testnet）:
+- REST API: https://demo-fapi.binance.com
+- WebSocket: wss://fstream.binancefuture.com
+
+文档: binance_futures_docs/01_U本位合约/02_Websocket账户信息推送/
 """
 
 import asyncio
 import json
 import logging
-from typing import Any, Callable, Awaitable, Optional
+import time
+from typing import Any, Optional
 
 import httpx
+from websockets.asyncio.client import connect
+
+from clients.base_ws_client import WSDataPackage
 
 logger = logging.getLogger(__name__)
 
@@ -20,25 +34,39 @@ logger = logging.getLogger(__name__)
 class FuturesUserStreamClient:
     """期货用户数据流客户端
 
+    继承 BaseWSClient 统一客户端模式：
+    - connect() -> 建立连接
+    - disconnect() -> 断开连接
+    - 接收数据 -> 打包为 WSDataPackage -> 调用 _data_callback
+
     职责：
     1. 管理 listenKey 的创建、续期和关闭
     2. 建立 WebSocket 连接接收账户更新事件
-    3. 将接收到的数据通过回调传递给调用方
+    3. 将接收到的原始数据打包为 WSDataPackage 传递给调用方
 
     数据流程：
     1. start() -> 创建 listenKey -> 建立 WebSocket 连接
-    2. 接收事件 -> 解析事件 -> 调用 _data_callback
+    2. 接收事件 -> 打包为 WSDataPackage -> 调用 _data_callback
     3. stop() -> 关闭 WebSocket -> 关闭 listenKey
 
     事件类型：
     - ACCOUNT_UPDATE: 账户余额和持仓变化
     - ORDER_TRADE_UPDATE: 订单和成交更新
+
+    端点（Testnet）:
+    - REST API: https://demo-fapi.binance.com
+    - WebSocket: wss://fstream.binancefuture.com
     """
 
     # listenKey 有效期（毫秒）
     LISTEN_KEY_EXPIRY_MS = 60 * 60 * 1000  # 60分钟
     # 续期间隔（秒），提前5分钟续期
     RENEW_INTERVAL_SEC = (LISTEN_KEY_EXPIRY_MS / 1000) - 5 * 60
+
+    # 客户端标识
+    CLIENT_ID = "binance-futures-user-stream-001"
+    # Testnet WebSocket 端点
+    WS_URI = "wss://fstream.binancefuture.com/ws"
 
     def __init__(
         self,
@@ -63,22 +91,38 @@ class FuturesUserStreamClient:
         self._listen_key: Optional[str] = None
         self._ws_connection: Optional[Any] = None
         self._running = False
+        self._connected = False
         self._receive_task: Optional[asyncio.Task] = None
         self._renew_task: Optional[asyncio.Task] = None
-        self._data_callback: Optional[Callable[[dict], Awaitable[None]]] = None
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._data_callback: Optional[Any] = None
+        self._reconnect_callback: Optional[Any] = None
+
+    @property
+    def client_id(self) -> str:
+        """客户端标识"""
+        return self.CLIENT_ID
 
     @property
     def is_connected(self) -> bool:
         """检查是否已连接"""
-        return self._running and self._ws_connection is not None
+        return self._connected
 
-    def set_data_callback(self, callback: Callable[[dict], Awaitable[None]]) -> None:
-        """设置数据回调
+    def set_data_callback(self, callback: Any) -> None:
+        """设置数据回调（币安服务接收数据用）
 
         Args:
-            callback: 异步回调函数，接收解析后的账户数据
+            callback: 异步回调函数，接收 WSDataPackage
         """
         self._data_callback = callback
+
+    def set_reconnect_callback(self, callback: Any) -> None:
+        """设置断线重连回调
+
+        Args:
+            callback: 断线重连时的回调函数
+        """
+        self._reconnect_callback = callback
 
     async def start(self) -> bool:
         """启动客户端
@@ -99,18 +143,17 @@ class FuturesUserStreamClient:
 
             logger.info(f"期货 listenKey 已创建: {self._listen_key[:10]}...")
 
-            # 2. 建立 WebSocket 连接
-            from websockets.asyncio.client import connect
-
-            ws_url = f"wss://dstream.binance.com/ws/{self._listen_key}"
-            connect_kwargs: dict[str, str] = {}
+            # 2. 建立 WebSocket 连接（Testnet）
+            ws_url = f"{self.WS_URI}/{self._listen_key}"
+            connect_kwargs: dict[str, Any] = {}
             if self._proxy_url:
                 connect_kwargs["proxy"] = self._proxy_url
 
             self._ws_connection = await connect(ws_url, **connect_kwargs)
             self._running = True
+            self._connected = True
 
-            logger.info("期货用户数据流 WebSocket 已连接")
+            logger.info("期货用户数据流 WebSocket 已连接 (Testnet)")
 
             # 3. 启动接收循环
             self._receive_task = asyncio.create_task(self._receive_loop())
@@ -122,6 +165,7 @@ class FuturesUserStreamClient:
 
         except Exception as e:
             logger.error(f"启动期货用户数据流客户端失败: {e}")
+            self._connected = False
             await self.stop()
             return False
 
@@ -132,6 +176,7 @@ class FuturesUserStreamClient:
 
         logger.info("停止期货用户数据流客户端...")
         self._running = False
+        self._connected = False
 
         # 取消续期任务
         if self._renew_task:
@@ -150,6 +195,15 @@ class FuturesUserStreamClient:
             except asyncio.CancelledError:
                 pass
             self._receive_task = None
+
+        # 取消重连任务
+        if self._reconnect_task:
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+            self._reconnect_task = None
 
         # 关闭 WebSocket
         if self._ws_connection:
@@ -188,6 +242,7 @@ class FuturesUserStreamClient:
         except Exception as e:
             logger.error(f"期货用户数据流接收循环异常: {e}")
         finally:
+            self._connected = False
             if self._running:
                 # 尝试重新连接
                 logger.info("期货用户数据流断开，尝试重新连接...")
@@ -196,61 +251,24 @@ class FuturesUserStreamClient:
     async def _handle_message(self, message: dict) -> None:
         """处理接收到的消息
 
-        Args:
-            message: WebSocket 消息
+        BaseWSClient 模式：
+        - 收到数据后立即打包为 WSDataPackage
+        - 调用 _data_callback 发送给币安服务
+        - 不做任何数据解析
         """
         event_type = message.get("e", "unknown")
+        logger.debug(f"[{self.CLIENT_ID}] 收到期货账户事件: {event_type}")
 
-        logger.debug(f"收到期货账户事件: {event_type}")
+        # 打包数据并发送给币安服务（不解析）
+        package = WSDataPackage(
+            client_id=self.CLIENT_ID,
+            data=message,  # 发送原始消息，不解析
+            timestamp=int(time.time() * 1000),
+        )
 
-        # 解析事件数据
-        if event_type == "ACCOUNT_UPDATE":
-            # 账户余额和持仓变化
-            account_data = message.get("a", {})
-
-            processed_data = {
-                "source": "websocket",
-                "event_type": event_type,
-                "update_time": message.get("E"),  # 事件时间
-                "transaction_time": message.get("T"),  # 事务时间
-                "reason": account_data.get("m"),  # 事件原因
-                "balances": account_data.get("B", []),  # 余额列表
-                "positions": account_data.get("P", []),  # 持仓列表
-            }
-        elif event_type == "ORDER_TRADE_UPDATE":
-            # 订单和成交更新
-            order_data = message.get("o", {})
-
-            processed_data = {
-                "source": "websocket",
-                "event_type": event_type,
-                "update_time": message.get("E"),
-                "transaction_time": message.get("T"),
-                "symbol": order_data.get("s"),
-                "client_order_id": order_data.get("c"),
-                "order_id": order_data.get("i"),
-                "side": order_data.get("S"),
-                "order_type": order_data.get("o"),
-                "order_status": order_data.get("X"),
-                "price": order_data.get("p"),
-                "quantity": order_data.get("q"),
-                "accumulated_quantity": order_data.get("z"),
-                "average_price": order_data.get("ap"),
-                "realized_profit": order_data.get("rp"),
-            }
-        else:
-            # 未知事件类型
-            logger.warning(f"未知的期货账户事件类型: {event_type}")
-            processed_data = {
-                "source": "websocket",
-                "event_type": event_type,
-                "raw": message,
-            }
-
-        # 调用回调
         if self._data_callback:
             try:
-                await self._data_callback(processed_data)
+                await self._data_callback(package)
             except Exception as e:
                 logger.error(f"调用数据回调失败: {e}")
 
@@ -282,9 +300,16 @@ class FuturesUserStreamClient:
         logger.info("期货用户数据流续期循环结束")
 
     async def _reconnect(self) -> None:
-        """重新连接"""
+        """断线重连
+
+        重连后需要重新：
+        1. 创建新的 listenKey
+        2. 建立 WebSocket 连接
+        """
         if not self._running:
             return
+
+        logger.info(f"[{self.CLIENT_ID}] 尝试重新连接...")
 
         # 关闭旧连接
         if self._ws_connection:
@@ -293,6 +318,8 @@ class FuturesUserStreamClient:
             except Exception as e:
                 logger.warning(f"关闭WebSocket连接失败: {e}")
             self._ws_connection = None
+
+        self._connected = False
 
         # 等待后重试
         for attempt in range(5):
@@ -305,6 +332,8 @@ class FuturesUserStreamClient:
             success = await self.start()
             if success:
                 logger.info("期货用户数据流重连成功")
+                if self._reconnect_callback:
+                    await self._reconnect_callback()
                 return
 
         logger.error("期货用户数据流重连失败，停止客户端")
@@ -313,7 +342,7 @@ class FuturesUserStreamClient:
     # ========== listenKey 管理 ==========
 
     async def _create_listen_key(self) -> Optional[str]:
-        """创建 listenKey
+        """创建 listenKey (Testnet)
 
         Returns:
             listenKey 字符串，失败返回 None

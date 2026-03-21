@@ -48,15 +48,18 @@ from .db.account_models import (
 # 告警配置模型
 from .db.alert_config_models import (
     AlertConfigCreate,
-    AlertConfigListResponse,
-    AlertConfigResponse,
     AlertConfigUpdate,
+    AlertConfigData,
+    AlertConfigListData,
+    DeleteAlertData,
+    SignalData,
+    SignalListData,
     CreateAlertConfigRequest,
+    ListAlertConfigsRequest,
+    ListSignalsRequest,
+    UpdateAlertConfigRequest,
     DeleteAlertConfigRequest,
     EnableAlertConfigRequest,
-    EnableDisableResponse,
-    ListAlertConfigsRequest,
-    UpdateAlertConfigRequest,
 )
 
 # 交易所信息模型
@@ -92,8 +95,16 @@ from .db.realtime_data_models import (
     SubscriptionValidation,
 )
 
-# 信号模型（仅保留启用/禁用响应）
-# EnableDisableResponse 已在 alert_config_models 中导入
+# 信号模型
+from .db.signal_models import (
+    SignalListResponse,
+    SignalRecordResponse,
+    StrategyMetadataListResponse,
+    StrategyMetadataResponse,
+    StrategyParam,
+)
+
+# 任务模型
 from .db.task_models import (
     TaskCreate,
     TaskResponse,
@@ -165,6 +176,9 @@ from .protocol.ws_payload import (
     ErrorData,
     KlineBars,
     MetricsData,
+    OrderPayloadData,
+    OrderResponseData,
+    OrderResultData,
     QuotesData,
     SearchSymbolsData,
     ServerTimeData,
@@ -218,7 +232,8 @@ from .trading.symbol_models import (
 # 订单模型
 from .trading.order_models import (
     CancelOrderRequest,
-    CreateOrderRequest,
+    FuturesCreateOrderRequest,
+    FuturesModifyOrderRequest,
     GetOpenOrdersRequest,
     GetOrderRequest,
     ListOrdersRequest,
@@ -228,10 +243,14 @@ from .trading.order_models import (
     OrderData,
     OrderListData,
     OrderListResponseData,
+    FuturesModifyOrderResponseData,
+    SpotAmendOrderResponseData,
     OrderSide,
     OrderTimeInForce,
     OrderType,
     OrderUpdateData,
+    SpotAmendOrderRequest,
+    SpotCreateOrderRequest,
 )
 
 # ==================== 统一导出 ====================
@@ -291,15 +310,23 @@ __all__ = [
     # 告警配置模型
     "AlertConfigCreate",
     "AlertConfigUpdate",
-    "AlertConfigResponse",
-    "AlertConfigListResponse",
-    "EnableDisableResponse",
+    "AlertConfigData",
+    "AlertConfigListData",
+    "DeleteAlertData",
+    "SignalData",
+    "SignalListData",
     "CreateAlertConfigRequest",
     "ListAlertConfigsRequest",
+    "ListSignalsRequest",
     "UpdateAlertConfigRequest",
     "DeleteAlertConfigRequest",
     "EnableAlertConfigRequest",
     # 信号模型
+    "SignalListResponse",
+    "SignalRecordResponse",
+    "StrategyMetadataListResponse",
+    "StrategyMetadataResponse",
+    "StrategyParam",
     # 交易对模型
     "SymbolInfo",
     "SymbolSearchResult",
@@ -310,7 +337,10 @@ __all__ = [
     "QuotesList",
     "PriceLevel",
     # 订单模型
-    "CreateOrderRequest",
+    "FuturesCreateOrderRequest",
+    "FuturesModifyOrderRequest",
+    "SpotAmendOrderRequest",
+    "SpotCreateOrderRequest",
     "GetOrderRequest",
     "ListOrdersRequest",
     "CancelOrderRequest",
@@ -320,7 +350,12 @@ __all__ = [
     "OrderUpdateData",
     "OrderListResponseData",
     "OrderCancelResponseData",
+    "FuturesModifyOrderResponseData",
+    "SpotAmendOrderResponseData",
     "OpenOrdersResponseData",
+    # 修改订单请求
+    "FuturesModifyOrderRequest",
+    "SpotAmendOrderRequest",
     "OrderSide",
     "OrderType",
     "OrderTimeInForce",
@@ -363,6 +398,10 @@ __all__ = [
     "SystemMetrics",
     "ErrorData",
     "WSSubscriptionInfo",
+    # 订单响应模型
+    "OrderResultData",
+    "OrderPayloadData",
+    "OrderResponseData",
     # 协议常量
     "WSAction",
     "WSMessageType",

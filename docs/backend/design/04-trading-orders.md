@@ -160,6 +160,7 @@ CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, sta
 | 类型 | 说明 | 触发方式 |
 |------|------|----------|
 | `order.create` | 创建订单 | 前端请求 |
+| `order.modify` | 修改订单 | 前端请求 |
 | `order.cancel` | 取消订单 | 前端请求 |
 | `order.query` | 查询订单状态 | 前端请求 / 定时任务 |
 
@@ -192,29 +193,11 @@ CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, sta
 
 ### 4.3 payload 参数格式（蛇形命名）
 
-> **重要变更**：
+> **重要**：
 > - 完全采用币安蛇形命名，与币安API格式完全一致
-> - 不再使用 `marketType` 字段区分期货/现货，通过 symbol 前缀识别
-> - `new_client_order_id` 为必填字段
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `symbol` | string | 是 | 交易对符号（如 BTCUSDT） |
-| `side` | string | 是 | 买卖方向 (BUY/SELL) |
-| `type` | string | 是 | 订单类型 |
-| `quantity` | float | 是 | 数量 |
-| `new_client_order_id` | string | 是 | 客户端订单ID（UUID格式） |
-| `price` | float | 条件 | 价格（限价单必需） |
-| `time_in_force` | string | 条件 | 有效期 (GTC/IOC/FOK) |
-| `position_side` | string | 否 | 持仓方向（期货：BOTH/LONG/SHORT） |
-| `reduce_only` | bool | 否 | 是否只减仓 |
-| `stop_price` | float | 条件 | 止损价格 |
-| `activation_price` | float | 否 | 触发价格（追踪止损） |
-| `callback_rate` | float | 条件 | 回调比例（追踪止损） |
-| `quote_order_qty` | float | 否 | 报价数量（现货市价单可用） |
-| `iceberg_qty` | float | 否 | 冰山订单数量（LIMIT订单可用） |
-| `self_trade_prevention_mode` | string | 否 | 自成交防止模式 |
-| `new_order_resp_type` | string | 否 | 响应格式：ACK/RESULT/FULL（默认FULL） |
+> - 通过交易对符号前缀区分期货/现货
+> - **`new_client_order_id` 为必填字段**（与币安官方不同，本项目强制要求）
+> - 格式：UUID v4 hex 格式（32字符），前端生成
 
 #### 期货 vs 现货区分
 
@@ -227,8 +210,85 @@ CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, sta
 
 后端根据 symbol 前缀自动识别市场类型，payload 中不再包含 `marketType` 字段。
 
-#### order.create 参数
+---
 
+#### 期货订单参数 (Futures)
+
+**必填参数**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `symbol` | string | 交易对符号（如 BTCUSDT） |
+| `side` | string | 买卖方向 (BUY/SELL) |
+| `type` | string | 订单类型：LIMIT, MARKET, STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET |
+| `quantity` | float | 数量 |
+| `new_client_order_id` | string | 客户端订单ID（**必填**，UUID格式，32字符） |
+
+**可选参数** (严格遵循官方 API):
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `position_side` | string | 持仓方向：BOTH/LONG/SHORT（**对冲模式必填**，单向模式可选） |
+| `price` | float | 限价价格（LIMIT 订单必填） |
+| `time_in_force` | string | 有效期：GTC/IOC/FOK/GTD |
+| `reduce_only` | bool | 是否只减仓 |
+| `stop_price` | float | 止损/止盈价格 |
+| `callback_rate` | float | 回调比例（0.1-10，仅追踪止损） |
+| `new_order_resp_type` | string | 响应格式：ACK/RESULT（默认ACK） |
+| `price_match` | string | 价格匹配模式：OPPONENT/QUEUE 等 |
+| `self_trade_prevention_mode` | string | 自成交防止模式 |
+| `good_till_date` | int | GTD 订单过期时间 |
+
+**期货不支持以下参数**（已移除）:
+- ❌ `closePosition`
+- ❌ `activationPrice`
+- ❌ `workingType`
+- ❌ `priceProtect`
+
+**期货下单示例**:
+```json
+{
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "quantity": 0.002,
+    "price": 50000.0,
+    "time_in_force": "GTC",
+    "position_side": "BOTH",
+    "reduce_only": false
+}
+```
+
+---
+
+#### 现货订单参数 (Spot)
+
+**必填参数**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `symbol` | string | 交易对符号（如 BTCUSDT） |
+| `side` | string | 买卖方向 (BUY/SELL) |
+| `type` | string | 订单类型：LIMIT, MARKET, LIMIT_MAKER, STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT, TAKE_PROFIT_LIMIT, TRAILING_STOP_MARKET |
+| `quantity` | float | 数量（市价单可使用 quoteOrderQty 替代） |
+| `new_client_order_id` | string | 客户端订单ID（**必填**，UUID格式，32字符） |
+
+**可选参数** (严格遵循官方 API):
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `price` | float | 限价价格（LIMIT/LIMIT_MAKER 订单必填） |
+| `time_in_force` | string | 有效期：GTC/IOC/FOK |
+| `quote_order_qty` | float | 报价数量（市价买单时指定支付金额） |
+| `stop_price` | float | 止损价格（止损单必需） |
+| `iceberg_qty` | float | 冰山订单数量 |
+| `trailing_delta` | int | 追踪止损 delta |
+| `strategy_id` | int | 策略ID |
+| `strategy_type` | int | 策略类型（值不能小于 1000000） |
+| `new_order_resp_type` | string | 响应格式：ACK/RESULT/FULL（默认FULL） |
+| `self_trade_prevention_mode` | string | 自成交防止模式 |
+
+**现货不支持以下参数**:
+- ❌ `position_side`
+- ❌ `reduce_only`
+
+**现货下单示例**:
 ```json
 {
     "symbol": "BTCUSDT",
@@ -237,12 +297,15 @@ CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, sta
     "quantity": 0.002,
     "new_client_order_id": "660e8400e29b41d4a716446655440001",
     "price": 50000.0,
-    "time_in_force": "GTC",
-    "position_side": "BOTH",
-    "reduce_only": false
+    "time_in_force": "GTC"
 }
 ```
-> 顶层字段: request_id = "550e8400e29b41d4a716446655440000"
+
+---
+
+#### order.create 参数（旧版本兼容）
+
+> **注意**: 以下为后端 payload 存储格式，前端无需关注
 
 #### order.cancel 参数（取消订单）
 
@@ -259,6 +322,10 @@ CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, sta
 ```
 > 顶层字段: request_id = "660e8400e29b41d4a716446655440001"
 > **必填**：`symbol`，以及 `orderId` 或 `origClientOrderId`（二选一）
+>
+> **ID 优先级**：`orderId`（币安生成的订单ID）> `origClientOrderId`（客户端自定义ID）
+> - `orderId` 存在时优先使用
+> - `orderId` 不存在时使用 `origClientOrderId`
 
 ##### 现货特有可选参数（前端 camelCase，后端自动转换）
 
@@ -282,8 +349,96 @@ CREATE INDEX IF NOT EXISTS idx_order_tasks_type_status ON order_tasks (type, sta
 ```
 > 顶层字段: request_id = "770e8400e29b41d4a716446655440002"
 > **必填**：`symbol`，以及 `orderId` 或 `origClientOrderId`（二选一）
+>
+> **ID 优先级**：`orderId`（币安生成的订单ID）> `origClientOrderId`（客户端自定义ID）
 
 > **说明**：查询订单 API 现货和期货参数完全一致，无额外可选参数。
+
+#### order.modify 参数（修改订单）
+
+> **重要**：期货和现货使用不同的 API，参数差异较大：
+> - 期货 (WS): `order.modify` - 可修改价格和数量，**仅支持 LIMIT 订单**
+> - 现货 (WS): `order.amend.keepPriority` - 只能减少数量
+
+##### 期货修改订单参数 (Futures)
+
+**WS Method**: `order.modify`
+
+**命名规则**：前端发送 camelCase，后端自动转换为 snake_case 存储
+
+```json
+{
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "quantity": 0.003,
+    "price": 51000.0,
+    "origClientOrderId": "660e8400e29b41d4a716446655440001",
+    "newClientOrderId": "770e8400e29b41d4a716446655440002",
+    "positionSide": "BOTH",
+    "timestamp": 1703426755754
+}
+```
+> 顶层字段: request_id = "550e8400e29b41d4a716446655440000"
+> **必填**：`symbol`, `side`, `quantity`, `price`, `timestamp`，以及 `orderId` 或 `origClientOrderId`（二选一）
+>
+> **ID 优先级**：`orderId`（币安生成的订单ID）> `origClientOrderId`（客户端自定义ID）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `symbol` | string | 交易对符号 |
+| `side` | string | 订单方向：BUY 或 SELL |
+| `quantity` | float | 新订单数量 |
+| `price` | float | 新订单价格 |
+| `timestamp` | long | **必填** 时间戳（毫秒） |
+| `orderId` | int | 订单ID（与 origClientOrderId 二选一，**优先使用**） |
+| `origClientOrderId` | string | 客户端订单ID（与 orderId 二选一） |
+| `newClientOrderId` | string | 新客户端订单ID（可选，用于标识此次修改） |
+| `positionSide` | string | 持仓方向：BOTH/LONG/SHORT（可选） |
+| `priceMatch` | string | 价格匹配模式（可选，仅适用于 LIMIT/STOP/TAKE_PROFIT 订单） |
+| `recvWindow` | long | 接收窗口时间（可选） |
+
+> **限制说明**：
+> - 仅支持 LIMIT 订单修改
+> - priceMatch 与 price 不能同时使用
+> - 新数量或价格不满足过滤器规则时修改会被拒绝
+> - 部分成交时新数量 <= 已成交数量会导致订单被取消
+> - GTX 订单新价格导致立即成交会取消订单
+> - 单个订单最多修改 10000 次
+
+##### 现货修改订单参数 (Spot)
+
+**WS Method**: `order.amend.keepPriority`
+
+**命名规则**：前端发送 camelCase，后端自动转换为 snake_case 存储
+
+```json
+{
+    "symbol": "BTCUSDT",
+    "origClientOrderId": "660e8400e29b41d4a716446655440001",
+    "newClientOrderId": "770e8400e29b41d4a716446655440002",
+    "newQty": 0.001,
+    "timestamp": 1741922620419
+}
+```
+> 顶层字段: request_id = "550e8400e29b41d4a716446655440000"
+> **必填**：`symbol`, `newQty`, `timestamp`，以及 `orderId` 或 `origClientOrderId`（二选一）
+>
+> **ID 优先级**：`orderId`（币安生成的订单ID）> `origClientOrderId`（客户端自定义ID）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `symbol` | string | 交易对符号 |
+| `timestamp` | long | **必填** 时间戳（毫秒） |
+| `orderId` | int | 订单ID（与 origClientOrderId 二选一，**优先使用**） |
+| `origClientOrderId` | string | 客户端订单ID（与 orderId 二选一） |
+| `newClientOrderId` | string | 新客户端订单ID（可选） |
+| `newQty` | float | 新订单数量，**必须大于0且小于原订单数量** |
+| `recvWindow` | long | 接收窗口时间（可选，最大 60000） |
+
+> **限制说明**：
+> - 只能**减少**数量，不能增加数量或修改价格
+> - 响应中的订单数据在 `amendedOrder` 字段内
+> - 不会增加 EXCHANGE_MAX_ORDERS 和 MAX_NUM_ORDERS 过滤器的计数
 
 ### 4.3 status 状态流转
 
@@ -325,7 +480,32 @@ pending → processing → completed (成功)
    - 成功/失败处理同上
 ```
 
-### 5.3 订单状态查询流程
+### 5.3 订单修改流程
+
+```
+1. 前端 → API 写入 order_tasks (type=order.modify, status=pending)
+2. INSERT 触发 notify_order_task_new()
+3. binance-service 监听并处理:
+   - 读取 order_tasks 获取修改参数
+   - 期货: 调用币安 fapi/order.modify API
+   - 现货: 调用币安 api/order.amend API
+   - 成功: UPDATE result=API响应, status=completed
+   - 失败: UPDATE result=错误信息, status=failed
+4. 触发 order_task_completed / order_task_failed 通知
+5. API-service 推送结果给前端
+```
+
+> **期货 vs 现货差异**：
+> - 期货 (`order.modify`)：可修改价格和数量，修改后订单重新排队
+> - 现货 (`order.amend.keepPriority`)：只能减少数量，保持订单簿优先级
+
+**响应格式差异**（详见 08-api-models.md）：
+> - 期货：使用 `FuturesModifyOrderResponse` 模型，直接返回订单对象
+> - 现货：使用 `SpotAmendOrderResponse` 模型，返回 `{transactTime, executionId, amendedOrder}`
+>
+> **实现注意**：binance-service 处理现货响应时需要提取 `amendedOrder` 作为最终结果。
+
+### 5.4 订单状态查询流程
 
 ```
 方式A: WebSocket订阅 (推荐)
@@ -474,10 +654,168 @@ current_status = row["result"]["status"]
 
 - [QUANT_TRADING_SYSTEM_ARCHITECTURE.md](./QUANT_TRADING_SYSTEM_ARCHITECTURE.md) - 完整实施文档
 - [03-binance-service.md](./03-binance-service.md) - 币安服务交易功能设计
+- [09-binance-models.md](./09-binance-models.md) - 币安数据模型设计文档
 - [01-task-subscription.md](./01-task-subscription.md) - 任务与订阅管理
 - [02-dataflow.md](./02-dataflow.md) - 数据流设计
 
 ---
+
+## 10. 币安过滤器限制（重要）
+
+> **必读**: 下单参数必须满足币安交易所的过滤器规则，否则订单会被拒绝。
+
+### 10.1 LOT_SIZE 过滤器（数量限制）
+
+**官方文档**: https://developers.binance.com/docs/binance-spot-api-docs/filters
+
+```json
+{
+  "filterType": "LOT_SIZE",
+  "minQty": "0.00001000",
+  "maxQty": "9000.00000000",
+  "stepSize": "0.00001000"
+}
+```
+
+**数量必须满足以下条件**：
+| 条件 | 说明 |
+|------|------|
+| `quantity >= minQty` | 数量不能小于最小值 |
+| `quantity <= maxQty` | 数量不能大于最大值 |
+| `quantity % stepSize == 0` | **数量必须是 stepSize 的整数倍** |
+
+**示例**（BTCUSDT，stepSize=0.00001）：
+```
+✓ 有效: 0.04397 BTC (4370 × 0.00001)
+✓ 有效: 0.04398 BTC (4398 × 0.00001)
+✗ 无效: 0.04397598 BTC (4397.598 × 0.00001，余数 0.000008)
+✗ 无效: 0.0439 BTC (4390 × 0.00001，但可能被用户界面圆整)
+```
+
+**前端处理要求**：
+```typescript
+// 将数量舍入到 stepSize 的整数倍
+function roundToStepSize(quantity: number, stepSize: number): number {
+  return Math.floor(quantity / stepSize) * stepSize
+}
+
+// 示例
+const stepSize = 0.00001  // BTCUSDT
+const quantity = 0.04397598
+const rounded = roundToStepSize(quantity, stepSize)  // 0.04397
+```
+
+### 10.2 PRICE_FILTER（价格限制）
+
+**官方文档**: https://developers.binance.com/docs/binance-spot-api-docs/filters
+
+```json
+{
+  "filterType": "PRICE_FILTER",
+  "minPrice": "0.01000000",
+  "maxPrice": "1000000.00000000",
+  "tickSize": "0.01000000"
+}
+```
+
+**价格必须满足以下条件**：
+| 条件 | 说明 |
+|------|------|
+| `price >= minPrice` | 价格不能小于最小值 |
+| `price <= maxPrice` | 价格不能大于最大值 |
+| `price % tickSize == 0` | **价格必须是 tickSize 的整数倍** |
+
+**示例**（BTCUSDT，tickSize=0.01）：
+```
+✓ 有效: 70000.00 USDT
+✓ 有效: 70000.01 USDT
+✗ 无效: 70000.001 USDT (不是 0.01 的整数倍)
+```
+
+### 10.3 MIN_NOTIONAL（最小名义价值）
+
+```json
+{
+  "filterType": "NOTIONAL",
+  "minNotional": "5.00000000",
+  "applyMinToMarket": true
+}
+```
+
+**名义价值 = price × quantity，必须满足**：
+```
+price × quantity >= minNotional
+```
+
+### 10.4 前端校验实现建议
+
+**强烈建议前端在发送订单前进行校验**：
+
+```typescript
+interface ExchangeFilters {
+  lotSize: {
+    minQty: number
+    maxQty: number
+    stepSize: number
+  }
+  priceFilter: {
+    minPrice: number
+    maxPrice: number
+    tickSize: number
+  }
+  minNotional: number
+}
+
+function validateOrderParams(
+  quantity: number,
+  price: number,
+  filters: ExchangeFilters
+): { valid: boolean; error?: string } {
+  // 检查数量
+  if (quantity < filters.lotSize.minQty) {
+    return { valid: false, error: `数量低于最小值 ${filters.lotSize.minQty}` }
+  }
+  if (quantity > filters.lotSize.maxQty) {
+    return { valid: false, error: `数量超过最大值 ${filters.lotSize.maxQty}` }
+  }
+  if (quantity % filters.lotSize.stepSize !== 0) {
+    return { valid: false, error: `数量必须是 ${filters.lotSize.stepSize} 的整数倍` }
+  }
+
+  // 检查价格
+  if (price < filters.priceFilter.minPrice) {
+    return { valid: false, error: `价格低于最小值 ${filters.priceFilter.minPrice}` }
+  }
+  if (price > filters.priceFilter.maxPrice) {
+    return { valid: false, error: `价格超过最大值 ${filters.priceFilter.maxPrice}` }
+  }
+  if (price % filters.priceFilter.tickSize !== 0) {
+    return { valid: false, error: `价格必须是 ${filters.priceFilter.tickSize} 的整数倍` }
+  }
+
+  // 检查最小名义价值
+  const notional = price * quantity
+  if (notional < filters.minNotional) {
+    return { valid: false, error: `订单名义价值 ${notional} 低于最小值 ${filters.minNotional}` }
+  }
+
+  return { valid: true }
+}
+```
+
+### 10.5 常见错误代码
+
+| 错误代码 | 错误信息 | 原因 |
+|---------|---------|------|
+| -1013 | Filter failure: LOT_SIZE | 数量不满足 stepSize 要求 |
+| -1013 | Filter failure: MIN_NOTIONAL | 名义价值低于最低要求 |
+| -1013 | Filter failure: PRICE_FILTER | 价格不满足 tickSize 要求 |
+| -1013 | Filter failure: MAX_NOTIONAL | 名义价值超过最高限制 |
+
+---
+
+**版本**: v2.6
+**更新**: 2026-03-19 - 添加币安过滤器限制说明（LOT_SIZE, PRICE_FILTER, MIN_NOTIONAL）
 
 **版本**: v2.5
 **更新**: 2026-03-06 - 补充现货特有可选参数：取消订单支持newClientOrderId和cancelRestrictions

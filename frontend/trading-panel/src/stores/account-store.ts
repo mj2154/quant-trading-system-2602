@@ -14,14 +14,41 @@ import type {
   SpotAccountData,
   FuturesAccountDetail,
   FuturesAccountData,
-  AccountOverview,
-  PositionItem,
-  BalanceItem,
+  FuturesAccountAsset,
+  FuturesAccountPosition,
 } from '../types/api'
 
 // 类型别名，保持向后兼容
 type SpotAccountInfo = SpotAccountDetail
 type FuturesAccountInfo = FuturesAccountDetail
+
+// 前端展示类型（Store 内部使用）
+interface AccountOverview {
+  accountType: 'spot' | 'futures'
+  totalAsset: string
+  availableBalance: string
+  positionCount: number
+  updateTime: string
+}
+
+interface PositionItem {
+  symbol: string
+  side: 'long' | 'short' | 'both'
+  amount: string
+  entryPrice: string
+  markPrice: string
+  unrealizedPnl: string
+  margin: string
+  liquidationPrice?: string
+  notional?: string
+}
+
+interface BalanceItem {
+  asset: string
+  free: string
+  locked: string
+  total: string
+}
 
 // ==================== Store 定义 ====================
 

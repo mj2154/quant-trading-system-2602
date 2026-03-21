@@ -184,6 +184,7 @@ API 服务内部使用 **snake_case** 命名规范，与 Python 惯例一致：
 | `GET_SPOT_ACCOUNT` | 获取现货账户信息 |
 | **交易操作** | |
 | `CREATE_ORDER` | 创建订单 |
+| `MODIFY_ORDER` | 修改订单 |
 | `GET_ORDER` | 查询订单 |
 | `LIST_ORDERS` | 查询订单列表 |
 | `CANCEL_ORDER` | 取消订单 |
@@ -214,19 +215,21 @@ API 服务内部使用 **snake_case** 命名规范，与 Python 惯例一致：
 
 系统采用订阅键格式 `EXCHANGE:SYMBOL@DATATYPE_RESOLUTION`，前端无需关心产品类型（现货/期货/期权），后端自动解析：
 
-| 订阅键示例 | 交易所 | 交易对 | 数据类型 | 分辨率 |
-|-----------|--------|--------|---------|--------|
+| 订阅键示例 | 交易所 | 产品类型 | 数据类型 | 分辨率 |
+|-----------|--------|---------|---------|--------|
 | `BINANCE:BTCUSDT@KLINE_60` | BINANCE | BTCUSDT | K线 | 60分钟 |
 | `BINANCE:BTCUSDT@QUOTES` | BINANCE | BTCUSDT | 报价 | - |
-| `BINANCE:ACCOUNT@FUTURES` | BINANCE | 账户 | 期货 | - |
-| `BINANCE:ACCOUNT@SPOT` | BINANCE | 账户 | 现货 | - |
+| `BINANCE:FUTURES@ACCOUNT` | BINANCE | FUTURES | 账户 | - |
+| `BINANCE:SPOT@ACCOUNT` | BINANCE | SPOT | 账户 | - |
 
 ### v2.0 订阅键格式规范
 
-**格式**: `EXCHANGE:SYMBOL@DATATYPE[_RESOLUTION]`
+**格式**: `EXCHANGE:PRODUCT@DATATYPE[_RESOLUTION]`
 
 - `EXCHANGE`: 交易所代码（大写）
-- `SYMBOL`: 交易对代码（大写）
+- `PRODUCT`: 产品标识
+  - 交易对（如 `BTCUSDT`、`BTCUSDT.PERP`）
+  - 账户类型（如 `SPOT`、`FUTURES`）
 - `DATATYPE`: 数据类型
   - `KLINE` - K线数据
   - `QUOTES` - 报价数据
@@ -236,6 +239,10 @@ API 服务内部使用 **snake_case** 命名规范，与 Python 惯例一致：
 - `RESOLUTION`: 分辨率（仅K线需要）
   - `1`, `3`, `5`, `15`, `30`, `60`, `120`, `240`, `360`, `480`, `720`
   - `D`, `1D`, `W`, `1W`, `M`, `1M`
+
+**账户订阅键示例**:
+- `BINANCE:SPOT@ACCOUNT` - 现货账户
+- `BINANCE:FUTURES@ACCOUNT` - USDT本位合约账户
 
 ### 交易对搜索响应示例
 

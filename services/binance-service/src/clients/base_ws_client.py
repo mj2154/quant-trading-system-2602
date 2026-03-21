@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Awaitable, Optional
 
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import connect, ClientConnection
 from websockets.exceptions import ConnectionClosed
 
 from models.ws_message import WSSubscribeRequest, WSUnsubscribeRequest
@@ -42,6 +42,7 @@ class WSConnectionState:
     """WebSocket连接状态"""
 
     connected: bool = False
+    reconnecting: bool = False  # 防止并发重连
 
 
 class BaseWSClient:
@@ -64,6 +65,7 @@ class BaseWSClient:
         self._websocket = None
         self._receive_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None  # 重连任务引用，防止被GC
+        self._reconnect_lock: asyncio.Lock = asyncio.Lock()  # 重连锁，防止并发重连
 
     @property
     def client_id(self) -> str:
@@ -97,7 +99,12 @@ class BaseWSClient:
             if self._proxy_url:
                 connect_kwargs["proxy"] = self._proxy_url
 
-            self._websocket = await connect(self.WS_URI, **connect_kwargs)
+            self._websocket = await connect(
+                self.WS_URI,
+                open_timeout=3.0,
+                close_timeout=5.0,
+                **connect_kwargs,
+            )
 
             # 再次检查运行状态（防止在连接过程中被断开）
             if not self._running:
@@ -152,35 +159,28 @@ class BaseWSClient:
         self._state.connected = False
         logger.info(f"[{self.CLIENT_ID}] 已断开连接")
 
-    async def subscribe(self, streams: list[str]) -> None:
+    async def subscribe(self, request: WSSubscribeRequest) -> None:
         """订阅流
 
         Args:
-            streams: 流名称列表，如 ['btcusdt@kline_1m', 'ethusdt@kline_1m']
+            request: 订阅请求模型
         """
         if not self._state.connected:
             await self.connect()
 
-        # 使用模型构造消息
-        request = WSSubscribeRequest(params=streams, id=id(self))
         await self._send(request.model_dump(by_alias=True))
 
-        logger.info(f"[{self.CLIENT_ID}] 订阅: {streams}")
+        logger.info(f"[{self.CLIENT_ID}] 订阅: {request.params}")
 
-    async def unsubscribe(self, streams: list[str]) -> None:
+    async def unsubscribe(self, request: WSUnsubscribeRequest) -> None:
         """取消订阅流
 
         Args:
-            streams: 流名称列表，支持批量
+            request: 取消订阅请求模型
         """
-        if not streams:
-            return
-
-        # 使用模型构造消息
-        request = WSUnsubscribeRequest(params=streams, id=id(self))
         await self._send(request.model_dump(by_alias=True))
 
-        logger.info(f"[{self.CLIENT_ID}] 取消订阅: {streams}")
+        logger.info(f"[{self.CLIENT_ID}] 取消订阅: {request.params}")
 
     async def _receive_loop(self) -> None:
         """接收数据循环"""
@@ -238,12 +238,7 @@ class BaseWSClient:
         self._websocket = None
         self._state.connected = False
 
-        if old_websocket:
-            try:
-                await old_websocket.close()
-                logger.debug(f"[{self.CLIENT_ID}] 旧连接已关闭")
-            except Exception as e:
-                logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
+        await self._close_websocket(old_websocket)
 
         # 2. 尝试创建新连接
         success = await self._try_reconnect()
@@ -269,39 +264,47 @@ class BaseWSClient:
             logger.info(f"[{self.CLIENT_ID}] 重连任务已取消")
 
     async def _try_reconnect(self) -> bool:
-        """尝试重连，返回是否成功"""
-        try:
-            # 关闭旧连接
-            old_websocket = self._websocket
-            self._websocket = None
-            self._state.connected = False
+        """尝试重连，返回是否成功
 
-            if old_websocket:
-                try:
-                    await old_websocket.close()
-                except Exception as e:
-                    logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
+        使用重连锁防止并发调用。
+        """
+        async with self._reconnect_lock:
+            # 再次检查连接状态（锁内检查，防止在等待锁期间被其他任务连接成功）
+            if self._state.connected:
+                logger.debug(f"[{self.CLIENT_ID}] 已有连接，无需重连")
+                return True
 
-            # 创建新连接
-            connect_kwargs: dict[str, Any] = {}
-            if self._proxy_url:
-                connect_kwargs["proxy"] = self._proxy_url
+            try:
+                # 关闭旧连接（如果存在）
+                await self._close_websocket(self._websocket)
+                self._websocket = None
+                self._state.connected = False
 
-            self._websocket = await connect(self.WS_URI, **connect_kwargs)
-            self._state.connected = True
-            logger.info(f"[{self.CLIENT_ID}] 已重新连接")
+                # 创建新连接
+                connect_kwargs: dict[str, Any] = {}
+                if self._proxy_url:
+                    connect_kwargs["proxy"] = self._proxy_url
 
-            if self._reconnect_callback:
-                await self._reconnect_callback()
+                self._websocket = await connect(
+                    self.WS_URI,
+                    open_timeout=3.0,
+                    close_timeout=5.0,
+                    **connect_kwargs,
+                )
+                self._state.connected = True
+                logger.info(f"[{self.CLIENT_ID}] 已重新连接")
 
-            self._receive_task = asyncio.create_task(self._receive_loop())
-            self._reconnect_task = None  # 重连成功，清除任务引用
-            return True
+                if self._reconnect_callback:
+                    await self._reconnect_callback()
 
-        except Exception as e:
-            logger.error(f"[{self.CLIENT_ID}] 重连失败: {e}")
-            self._state.connected = False
-            return False
+                self._receive_task = asyncio.create_task(self._receive_loop())
+                self._reconnect_task = None  # 重连成功，清除任务引用
+                return True
+
+            except Exception as e:
+                logger.error(f"[{self.CLIENT_ID}] 重连失败: {e}")
+                self._state.connected = False
+                return False
 
     async def _handle_message(self, message: dict) -> None:
         """处理接收到的消息
@@ -329,6 +332,15 @@ class BaseWSClient:
         if self._data_callback:
             logger.debug(f"[{self.CLIENT_ID}] 调用 _data_callback")
             await self._data_callback(package)
+
+    async def _close_websocket(self, websocket: Optional[ClientConnection]) -> None:
+        """安全关闭 WebSocket 连接"""
+        if websocket:
+            try:
+                await websocket.close()
+                logger.debug(f"[{self.CLIENT_ID}] 旧连接已关闭")
+            except Exception as e:
+                logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
 
     async def _send(self, message: dict) -> None:
         """发送消息"""

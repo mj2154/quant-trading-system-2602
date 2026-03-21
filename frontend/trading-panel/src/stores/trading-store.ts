@@ -2,12 +2,22 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { dataService } from '../services/data-service/DataService'
 import type {
-  Order,
-  CreateOrderParams,
-  OrderFilters,
-  OrderUpdate,
-  OrderListResponse,
-} from '../types/api'
+  OrderData,
+  OrderListData,
+  OrderUpdateData,
+  CreateOrderRequest,
+  FuturesCreateOrderRequest,
+  SpotCreateOrderRequest,
+} from '../types/api/order'
+
+// Order filters type (inlined to avoid creating a separate type)
+interface OrderFilters {
+  symbol?: string
+  status?: string
+  startTime?: string
+  endTime?: string
+  limit?: number
+}
 
 // Development mode flag
 const isDev = import.meta.env.DEV
@@ -21,9 +31,9 @@ function log(level: 'log' | 'error', message: string, ...args: unknown[]) {
 
 export const useTradingStore = defineStore('trading', () => {
   // State
-  const orders = ref<Order[]>([])
-  const openOrders = ref<Order[]>([])
-  const currentOrder = ref<Order | null>(null)
+  const orders = ref<OrderData[]>([])
+  const openOrders = ref<OrderData[]>([])
+  const currentOrder = ref<OrderData | null>(null)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   const lastUpdate = ref(new Date())
@@ -35,7 +45,7 @@ export const useTradingStore = defineStore('trading', () => {
   const isFuturesSymbol = (symbol: string) => symbol.endsWith('.PERP')
 
   const ordersByMarket = computed(() => {
-    const result: Record<'FUTURES' | 'SPOT', Order[]> = {
+    const result: Record<'FUTURES' | 'SPOT', OrderData[]> = {
       FUTURES: [],
       SPOT: [],
     }
@@ -47,22 +57,22 @@ export const useTradingStore = defineStore('trading', () => {
   })
 
   // Actions
-  async function createOrder(params: CreateOrderParams): Promise<Order> {
+  async function createOrder(params: CreateOrderRequest): Promise<OrderData> {
     isLoading.value = true
     error.value = null
 
     try {
       // Validate required params
-      if (!params.symbol || !params.side || !params.orderType) {
+      if (!params.symbol || !params.side || !params.type) {
         throw new Error('Missing required order parameters')
       }
 
       // Validate quantity for MARKET orders (spot can use quoteOrderQty)
       // 通过 symbol 前缀区分市场类型：.PERP 结尾为期货
       const isSpot = !params.symbol.endsWith('.PERP')
-      if (params.orderType === 'MARKET') {
+      if (params.type === 'MARKET') {
         if (isSpot) {
-          if (!params.quantity && !params.quoteOrderQty) {
+          if (!params.quantity && !(params as SpotCreateOrderRequest).quoteOrderQty) {
             throw new Error('Quantity or quoteOrderQty is required for spot market orders')
           }
         } else {
@@ -78,60 +88,60 @@ export const useTradingStore = defineStore('trading', () => {
 
       // Validate price for limit orders
       if (
-        (params.orderType === 'LIMIT' || params.orderType === 'STOP' || params.orderType === 'TAKE_PROFIT') &&
+        (params.type === 'LIMIT' || params.type === 'STOP' || params.type === 'TAKE_PROFIT') &&
         !params.price &&
-        !params.priceMatch  // priceMatch can replace price
+        !(params as FuturesCreateOrderRequest).priceMatch  // priceMatch can replace price
       ) {
         throw new Error('Price is required for limit orders')
       }
 
       // Validate stopPrice for stop orders
       if (
-        (params.orderType === 'STOP' || params.orderType === 'STOP_MARKET' || params.orderType === 'TAKE_PROFIT' || params.orderType === 'TAKE_PROFIT_MARKET') &&
+        (params.type === 'STOP' || params.type === 'STOP_MARKET' || params.type === 'TAKE_PROFIT' || params.type === 'TAKE_PROFIT_MARKET') &&
         !params.stopPrice &&
-        !params.trailingDelta  // trailingDelta can replace stopPrice
+        !(params as SpotCreateOrderRequest).trailingDelta  // trailingDelta can replace stopPrice
       ) {
         throw new Error('Stop price or trailingDelta is required for stop orders')
       }
 
       // Validate trailingDelta for TRAILING_STOP_MARKET
-      if (params.orderType === 'TRAILING_STOP_MARKET' && !params.trailingDelta) {
+      if (params.type === 'TRAILING_STOP_MARKET' && !(params as SpotCreateOrderRequest).trailingDelta) {
         throw new Error('TrailingDelta is required for trailing stop orders')
       }
 
       // Validate goodTillDate for GTD orders (GTD is only supported in futures)
       // 期货使用 .PERP 后缀
-      if (params.goodTillDate && !isSpot && !params.timeInForce) {
+      if ((params as FuturesCreateOrderRequest).goodTillDate && !isSpot && !params.timeInForce) {
         throw new Error('timeInForce is required when goodTillDate is set')
       }
 
-      const clientOrderId = generateRequestId()
+      const clientOrderId = crypto.randomUUID().replace(/-/g, '')
 
       // Create order locally first (optimistic update)
-      const newOrder: Order = {
+      const newOrder: OrderData = {
         clientOrderId,
         symbol: params.symbol,
         side: params.side,
-        orderType: params.orderType,
+        type: params.type,
         status: 'NEW',
         data: {
           quantity: params.quantity,
-          quoteOrderQty: params.quoteOrderQty,
+          quoteOrderQty: (params as SpotCreateOrderRequest).quoteOrderQty,
           price: params.price,
           timeInForce: params.timeInForce,
           stopPrice: params.stopPrice,
-          reduceOnly: params.reduceOnly,
-          positionSide: params.positionSide,
+          reduceOnly: (params as FuturesCreateOrderRequest).reduceOnly,
+          positionSide: (params as FuturesCreateOrderRequest).positionSide,
           // 高级参数
           newClientOrderId: params.newClientOrderId,
           newOrderRespType: params.newOrderRespType,
-          selfTradePreventionMode: params.selfTradePreventionMode,
-          icebergQty: params.icebergQty,
-          trailingDelta: params.trailingDelta,
-          strategyId: params.strategyId,
-          strategyType: params.strategyType,
-          priceMatch: params.priceMatch,
-          goodTillDate: params.goodTillDate,
+          selfTradePreventionMode: (params as SpotCreateOrderRequest).selfTradePreventionMode,
+          icebergQty: (params as SpotCreateOrderRequest).icebergQty,
+          trailingDelta: (params as SpotCreateOrderRequest).trailingDelta,
+          strategyId: (params as SpotCreateOrderRequest).strategyId,
+          strategyType: (params as SpotCreateOrderRequest).strategyType,
+          priceMatch: (params as FuturesCreateOrderRequest).priceMatch,
+          goodTillDate: (params as FuturesCreateOrderRequest).goodTillDate,
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -147,7 +157,7 @@ export const useTradingStore = defineStore('trading', () => {
         // 使用 DataService 创建订单
         const response = await dataService.createOrder({
           ...params,
-          clientOrderId,
+          newClientOrderId: clientOrderId,
         })
 
         // Update order with server response (immutable update)
@@ -180,7 +190,7 @@ export const useTradingStore = defineStore('trading', () => {
     }
   }
 
-  async function fetchOrder(clientOrderId: string): Promise<Order | null> {
+  async function fetchOrder(clientOrderId: string): Promise<OrderData | null> {
     isLoading.value = true
     error.value = null
 
@@ -193,7 +203,7 @@ export const useTradingStore = defineStore('trading', () => {
 
       // Fetch from server
       // 使用 DataService 获取订单详情
-      const response = await dataService.getOrder({ origClientOrderId: clientOrderId })
+      const response = await dataService.getOrder({ symbol: '', origClientOrderId: clientOrderId })
 
       if (response) {
         // Update local cache (immutable update)
@@ -216,19 +226,25 @@ export const useTradingStore = defineStore('trading', () => {
     }
   }
 
-  async function fetchOrders(filters?: OrderFilters): Promise<OrderListResponse> {
+  async function fetchOrders(filters?: OrderFilters): Promise<OrderListData> {
     isLoading.value = true
     error.value = null
 
     try {
       // 使用 DataService 获取订单列表
-      const response = await dataService.listOrders(filters)
+      const response = await dataService.listOrders({
+        symbol: filters?.symbol,
+        status: filters?.status,
+        startTime: filters?.startTime ? new Date(filters.startTime).getTime() : undefined,
+        endTime: filters?.endTime ? new Date(filters.endTime).getTime() : undefined,
+        limit: filters?.limit,
+      })
 
       // Update local cache
       orders.value = response.orders
       lastUpdate.value = new Date()
 
-      return { orders: response.orders, count: response.count }
+      return response
     } catch (e) {
       log('error', 'Failed to fetch orders:', e)
       error.value = e instanceof Error ? e.message : 'Failed to fetch orders'
@@ -238,7 +254,7 @@ export const useTradingStore = defineStore('trading', () => {
     }
   }
 
-  async function fetchOpenOrders(symbol?: string): Promise<Order[]> {
+  async function fetchOpenOrders(symbol?: string): Promise<OrderData[]> {
     isLoading.value = true
     error.value = null
 
@@ -260,7 +276,7 @@ export const useTradingStore = defineStore('trading', () => {
     }
   }
 
-  async function cancelOrder(clientOrderId: string): Promise<Order | null> {
+  async function cancelOrder(clientOrderId: string): Promise<OrderData | null> {
     isLoading.value = true
     error.value = null
 
@@ -302,11 +318,11 @@ export const useTradingStore = defineStore('trading', () => {
     }
   }
 
-  function setCurrentOrder(order: Order | null): void {
+  function setCurrentOrder(order: OrderData | null): void {
     currentOrder.value = order
   }
 
-  function handleOrderUpdate(update: OrderUpdate): void {
+  function handleOrderUpdate(update: OrderUpdateData): void {
     // Find and update existing order
     const index = orders.value.findIndex((o) => o.clientOrderId === update.clientOrderId)
 
@@ -338,15 +354,15 @@ export const useTradingStore = defineStore('trading', () => {
     } else {
       // Add new order (from WebSocket push)
       // 市场类型通过 symbol 区分：.PERP 结尾为期货
-      const newOrder: Order = {
+      const newOrder: OrderData = {
         clientOrderId: update.clientOrderId,
-        binanceOrderId: update.binanceOrderId,
+        orderId: update.orderId,
         symbol: update.symbol,
         side: update.side,
-        orderType: update.orderType,
+        type: update.type,
         status: update.status,
         data: update.data,
-        createdAt: update.updatedAt,
+        createdAt: update.createdAt,
         updatedAt: update.updatedAt,
       }
       orders.value = [...orders.value, newOrder]

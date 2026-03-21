@@ -23,11 +23,11 @@ import type {
   GetKlinesParams,
   KlineBar,
   QuotesData,
-  SpotAccountInfo,
-  FuturesAccountInfo,
+  SpotAccountDetail,
+  FuturesAccountDetail,
   AlertConfig,
   SignalRecord,
-  Order,
+  OrderData,
   OrderListData,
   SubscriptionOptions,
   QuotesValue,
@@ -94,7 +94,7 @@ export async function fetchQuote(symbol: string): Promise<QuotesData | null> {
  *
  * @returns 现货账户信息
  */
-export async function fetchSpotAccount(): Promise<SpotAccountInfo> {
+export async function fetchSpotAccount(): Promise<SpotAccountDetail> {
   return dataService.getSpotAccount()
 }
 
@@ -103,7 +103,7 @@ export async function fetchSpotAccount(): Promise<SpotAccountInfo> {
  *
  * @returns 期货账户信息
  */
-export async function fetchFuturesAccount(): Promise<FuturesAccountInfo> {
+export async function fetchFuturesAccount(): Promise<FuturesAccountDetail> {
   return dataService.getFuturesAccount()
 }
 
@@ -113,7 +113,7 @@ export async function fetchFuturesAccount(): Promise<FuturesAccountInfo> {
  * @param type - 账户类型 'spot' | 'futures'
  * @returns 账户信息
  */
-export async function fetchAccount(type: 'spot' | 'futures'): Promise<SpotAccountInfo | FuturesAccountInfo> {
+export async function fetchAccount(type: 'spot' | 'futures'): Promise<SpotAccountDetail | FuturesAccountDetail> {
   if (type === 'spot') {
     return fetchSpotAccount()
   }
@@ -189,7 +189,7 @@ export async function fetchOpenOrders(symbol?: string): Promise<OrderListData> {
  * @param orderId - 订单ID
  * @returns 订单详情
  */
-export async function fetchOrder(symbol: string, orderId: number): Promise<Order> {
+export async function fetchOrder(symbol: string, orderId: number): Promise<OrderData> {
   return dataService.getOrder({ symbol, orderId })
 }
 

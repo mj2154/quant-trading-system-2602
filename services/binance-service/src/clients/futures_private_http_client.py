@@ -11,7 +11,6 @@ from typing import Optional
 from urllib.parse import urlencode
 
 from .base_http_client import BinanceHTTPClient
-from models.futures_account import FuturesAccountInfo
 from utils.ed25519_signer import Ed25519Signer
 from utils.rsa_signer import RSASigner
 
@@ -183,7 +182,7 @@ class BinanceFuturesPrivateHTTPClient(BinanceHTTPClient):
 
     async def get_account_info(
         self, recv_window: Optional[int] = None
-    ) -> FuturesAccountInfo:
+    ) -> dict:
         """获取期货账户信息
 
         调用 GET /fapi/v3/account 获取账户详情。
@@ -193,7 +192,7 @@ class BinanceFuturesPrivateHTTPClient(BinanceHTTPClient):
             recv_window: 接收窗口时间（毫秒），默认5000
 
         Returns:
-            期货账户信息模型
+            期货账户信息字典（待实现模型）
         """
         response = await self._signed_request(
             method="GET",
@@ -202,7 +201,7 @@ class BinanceFuturesPrivateHTTPClient(BinanceHTTPClient):
             recv_window=recv_window or 5000,
         )
 
-        return FuturesAccountInfo.model_validate(response)
+        return response
 
     async def get_balance(self, recv_window: Optional[int] = None) -> list[dict]:
         """获取期货账户余额
