@@ -223,13 +223,15 @@ class BinanceFuturesExchangeInfoSymbolModel(BaseModel):
     underlying_sub_type: list[str] = Field(
         alias="underlyingSubType", description="底层资产子类型"
     )
-    settle_plan: int = Field(alias="settlePlan", description="结算计划")
+    settle_plan: int | None = Field(
+        default=None, alias="settlePlan", description="结算计划（条件字段，仅标准永续合约有）"
+    )
     trigger_protect: str = Field(
         alias="triggerProtect", description="触发保护阈值"
     )
     filters: list[dict] = Field(description="过滤器列表")
-    order_type: list[str] = Field(
-        alias="OrderType", description="订单类型列表"
+    order_type: list[str] | None = Field(
+        default=None, alias="OrderType", description="订单类型列表（条件字段，仅标准合约有）"
     )
     time_in_force: list[str] = Field(
         alias="timeInForce", description="有效期限列表"
@@ -439,7 +441,7 @@ def _futures_symbol_to_exchange_info(
         base_commission_precision=0,  # 期货没有这个字段
         quote_commission_precision=0,  # 期货没有这个字段
         filters=self.filters,
-        order_types=self.order_type,  # 期货用 order_type
+        order_types=self.order_type or [],  # 期货用 order_type，None时使用空列表
         permissions=[],  # 期货没有这个字段
         iceberg_allowed=False,  # 期货没有这个字段
         oco_allowed=False,  # 期货没有这个字段

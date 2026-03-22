@@ -893,13 +893,15 @@ class BinanceFuturesExchangeInfoSymbolModel(BaseModel):
     underlying_sub_type: list[str] = Field(
         alias="underlyingSubType", description="底层资产子类型"
     )
-    settle_plan: int = Field(alias="settlePlan", description="结算计划")
+    settle_plan: int | None = Field(
+        default=None, alias="settlePlan", description="结算计划（条件字段，仅标准永续合约有）"
+    )
     trigger_protect: str = Field(
         alias="triggerProtect", description="触发保护阈值"
     )
     filters: list[dict] = Field(description="过滤器列表")
-    order_type: list[str] = Field(
-        alias="OrderType", description="订单类型列表"
+    order_type: list[str] | None = Field(
+        default=None, alias="OrderType", description="订单类型列表（条件字段，仅标准合约有）"
     )
     time_in_force: list[str] = Field(
         alias="timeInForce", description="有效期限列表"
@@ -1207,6 +1209,11 @@ class BinanceSpotOutboundAccountPositionWSModel(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 ```
+
+**实现注意**：
+- `subscriptionId` 字段是币安 WebSocket 协议的内部字段，**无实际业务用途**
+- 数据写入 `realtime_data` 表时，**只取 `event` 字段内容**，不包含 `subscriptionId`
+- 这样可以保持与期货账户数据格式一致，便于后续处理
 
 ---
 

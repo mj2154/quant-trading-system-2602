@@ -7,8 +7,8 @@
 //   - BINANCE:BTCUSDT@QUOTES      - 报价数据
 //   - BINANCE:BTCUSDT@TRADE       - 实时交易
 //   - BINANCE:BTCUSDT.PERP@KLINE_1 - 永续合约K线
-//   - BINANCE:ACCOUNT@SPOT        - 现货账户信息
-//   - BINANCE:ACCOUNT@FUTURES     - 期货账户信息
+//   - BINANCE:SPOT@ACCOUNT        - 现货账户信息
+//   - BINANCE:FUTURES@ACCOUNT     - 期货账户信息
 // ========================================
 
 // Import DataService for unified data access
@@ -24,13 +24,13 @@ const DataType = {
 /**
  * 构建 v2.0 格式的订阅键
  * @param {string} exchange - 交易所代码（如 BINANCE）
- * @param {string} symbol - 交易符号（如 BTCUSDT 或 BTCUSDT.PERP），账户类型用 ACCOUNT@SPOT 或 ACCOUNT@FUTURES
+ * @param {string} symbol - 交易符号（如 BTCUSDT 或 BTCUSDT.PERP），账户类型用 SPOT@ACCOUNT 或 FUTURES@ACCOUNT
  * @param {string} dataType - 数据类型（KLINE, QUOTES, TRADE, ACCOUNT）
  * @param {string} [interval] - K线周期（可选，如 '1', '60'）
  * @returns {string} v2.0 格式的订阅键
  */
 function buildSubscriptionKey(exchange, symbol, dataType, interval = null) {
-    // 账户类型订阅键格式: BINANCE:ACCOUNT@SPOT 或 BINANCE:ACCOUNT@FUTURES
+    // 账户类型订阅键格式: BINANCE:SPOT@ACCOUNT 或 BINANCE:FUTURES@ACCOUNT
     if (dataType === DataType.ACCOUNT) {
         return `${exchange}:${symbol}@${dataType}`;
     }

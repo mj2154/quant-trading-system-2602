@@ -196,7 +196,15 @@ class DataProcessor:
         channel: str,
         payload: str,
     ) -> None:
-        """处理业务事件通知回调
+        """处理任务表和业务事件表的通知回调
+
+        处理的表和频道：
+        - tasks 表：task_new, task_completed, task_failed
+        - order_tasks 表：order_task_new, order_task_completed, order_task_failed
+        - strategy_signals 表：signal_new
+        - alert_configs 表：alert_config.new, alert_config.update, alert_config.delete
+
+        特点：不处理 realtime_data 表（那是 _on_realtime_notification 的职责）
 
         Args:
             connection: 数据库连接
@@ -1030,12 +1038,21 @@ class DataProcessor:
         channel: str,
         payload: str,
     ) -> None:
-        """处理实时数据更新通知回调
+        """处理实时数据表的通知回调（仅 realtime_data 表）
+
+        处理的表和频道：
+        - realtime_data 表：realtime_update
+
+        数据来源：
+        - binance-service 写入的 K线、报价、账户等实时数据
+        - 通过 convert_binance_to_tv() 转换为 TV 格式后推送
+
+        特点：只处理 realtime_data 表，不处理 tasks/order_tasks/strategy_signals/alert_configs 表
 
         Args:
             connection: 数据库连接
             pid: 后端进程 ID
-            channel: 通知频道
+            channel: 通知频道（仅 realtime_update）
             payload: 通知载荷（JSON 字符串）
         """
         try:
@@ -1137,6 +1154,19 @@ class DataProcessor:
         elif event_type.startswith("config."):
             # config.new, config.update, config.delete
             return f"strategy:{event_type}"
+        elif event_type == "realtime_update":
+            # realtime_update 事件的 subscription_key 在 event_data 中
+            # 格式: { "subscription_key": "BINANCE:FUTURES@ACCOUNT", "data_type": "ACCOUNT", ... }
+            subscription_key = event_data.get("subscription_key")
+            if subscription_key:
+                return subscription_key
+            # 兜底：尝试从 data 字段中获取（某些情况下 data 字段是嵌套的）
+            data_field = event_data.get("data")
+            if isinstance(data_field, dict):
+                subscription_key = data_field.get("subscription_key")
+                if subscription_key:
+                    return subscription_key
+            return "realtime_update"
         else:
             return f"{event_type}"
 

@@ -190,14 +190,76 @@ def convert_trade(data: dict) -> CamelCaseModel:
 
 
 def convert_account(data: dict) -> CamelCaseModel:
-    """将账户数据转换为TV格式
+    """将账户数据转换为符合协议的数据模型
 
-    返回 CamelCaseModel 以确保类型安全。
-    账户数据直接转发原始数据。
+    根据 07-websocket-protocol.md 设计：
+    - 账户更新推送统一使用币安原始短字段名
+    - 不包含 subscriptionId 等内部字段（已在 binance-service 中移除）
 
-    返回: 使用通用模型包装的字典数据
+    币安数据格式（已统一）：
+    现货 outboundAccountPosition: {e: "outboundAccountPosition", E: 1704067205000, u: ..., B: [...]}
+    现货 balanceUpdate: {e: "balanceUpdate", E: 1704067205000, a: "BTC", d: "...", T: ...}
+    现货 executionReport: {e: "executionReport", E: ..., s: ..., ...}
+    期货 ACCOUNT_UPDATE: {e: "ACCOUNT_UPDATE", E: ..., T: ..., a: {...}}
+    期货 ORDER_TRADE_UPDATE: {e: "ORDER_TRADE_UPDATE", E: ..., s: ..., ...}
+
+    使用 SpotAccountUpdate / SpotBalanceUpdateEvent / SpotExecutionReportEvent 模型进行转换，
+    确保类型安全和符合协议定义。所有模型使用 alias 输出币安原始短字段名。
+
+    Returns:
+        SpotAccountUpdate / SpotBalanceUpdateEvent / SpotExecutionReportEvent / FuturesAccountUpdate 实例
     """
-    return _DictWrapper(data=data)
+    # 数据已经是直接的事件对象，不需要再提取 event 字段
+    event_type = data.get("e", "unknown")
+
+    # 根据事件类型选择对应的模型
+    if event_type == "outboundAccountPosition":
+        # 现货账户余额更新事件
+        from ..models.trading.account_models import SpotAccountUpdate
+        return SpotAccountUpdate.from_outbound_account_position(data)
+    elif event_type == "balanceUpdate":
+        # 现货余额更新事件
+        from ..models.trading.account_models import SpotBalanceUpdateEvent
+        return SpotBalanceUpdateEvent.from_balance_update(data)
+    elif event_type == "executionReport":
+        # 现货订单执行报告事件
+        from ..models.trading.account_models import SpotExecutionReportEvent
+        return SpotExecutionReportEvent.from_execution_report(data)
+    elif event_type == "ACCOUNT_UPDATE" or event_type == "ORDER_TRADE_UPDATE":
+        # 期货账户更新事件
+        return _create_futures_account_update(data)
+    else:
+        # 未知事件类型，使用通用包装
+        return _DictWrapper(data=data)
+
+
+def _create_futures_account_update(event_data: dict) -> CamelCaseModel:
+    """创建期货账户更新模型
+
+    Args:
+        event_data: 币安期货事件数据 (e, E, T, a 字段)
+
+    Returns:
+        FuturesAccountUpdate 实例
+    """
+    from ..models.trading.account_models import (
+        FuturesAccountUpdate,
+        FuturesAccountUpdateContent,
+    )
+
+    # 构建content内容
+    content = FuturesAccountUpdateContent(
+        event_type=event_data.get("e", "ACCOUNT_UPDATE"),
+        event_time=event_data.get("E", 0),
+        transaction_time=event_data.get("T", 0),
+        a=event_data.get("a", {}),
+    )
+
+    return FuturesAccountUpdate(
+        event_type="account_update",
+        subscription_key="BINANCE:FUTURES@ACCOUNT",
+        content=content,
+    )
 
 
 def convert_unknown(data_type: str, data: dict) -> CamelCaseModel:

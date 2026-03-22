@@ -4,6 +4,15 @@
 
 ---
 
+## v2.6 (2026-03-22)
+
+- 🐛 **修复 subscriptionKey 位置** - 所有 UPDATE 消息的 subscriptionKey 已提升到顶层，与代码实现一致
+  - K线推送
+  - 报价推送
+  - 信号推送
+  - 账户增量推送（期货/现货）
+  - 订单状态推送
+
 ## v2.5 (2026-03-06)
 
 - 🚀 **补充现货特有可选参数** - 取消订单支持 newClientOrderId 和 cancelRestrictions 参数
@@ -23,7 +32,7 @@
 
 ## v2.2 (2026-02-27)
 
-- 🚀 **账户订阅支持** - 新增 ACCOUNT 订阅类型 (BINANCE:ACCOUNT@SPOT, BINANCE:ACCOUNT@FUTURES)
+- 🚀 **账户订阅支持** - 新增 ACCOUNT 订阅类型 (BINANCE:SPOT@ACCOUNT, BINANCE:FUTURES@ACCOUNT)
 - 🚀 **增量数据推送** - 账户订阅采用"GET 完整 + 订阅增量"策略，前端需先 GET 初始化再订阅增量
 
 ## v2.1 (2026-02-10)

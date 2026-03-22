@@ -49,6 +49,10 @@ models/
 
 | 特性 | 说明 |
 |------|------|
+| `alias` | 字段别名功能，用于统一数据格式。对于账户事件，使用 alias 输出币安原始短字段名（如 `e`, `E`, `u`），而代码中使用有意义的长名称（如 `event_type`, `event_time`）以提高可读性。序列化时 `by_alias=True` 输出别名格式。 |
+
+> **重要设计决策**：账户事件（outboundAccountPosition, balanceUpdate, executionReport）统一使用币安原始短字段名作为 JSON 输出格式，通过 Pydantic `Field(alias="...")` 实现。
+|------|------|
 | 用途 | API 响应消息，内部使用 snake_case，序列化输出 camelCase |
 | 示例 | internal_field -> "internalField" |
 | 配置 | alias_generator=to_camel, by_alias=True |
@@ -1133,10 +1137,10 @@ class OrderData(CamelCaseModel):
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | `event_type` | str | 固定值 `"account_update"` |
-| `subscription_key` | str | 订阅键，如 `"BINANCE:ACCOUNT@FUTURES"` |
-| `content` | dict | 推送内容 |
+| `subscription_key` | str | 订阅键，如 `"BINANCE:FUTURES@ACCOUNT"` |
+| `content` | FuturesAccountUpdateContent | 推送内容 |
 
-**Content 字段**：
+**FuturesAccountUpdateContent 字段**：
 
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
@@ -1150,31 +1154,32 @@ class OrderData(CamelCaseModel):
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | `m` | str | 事件原因：`DEPOSIT`, `WITHDRAW`, `ORDER`, `FUNDING_FEE`, `WITHDRAW_REJECT`, `ADJUSTMENT`, `INSURANCE_CLEAR`, `ADMIN_DEPOSIT`, `ADMIN_WITHDRAW`, `MARGIN_TRANSFER`, `MARGIN_TYPE_CHANGE`, `ASSET_TRANSFER`, `OPTIONS_PREMIUM_FEE`, `OPTIONS_SETTLE_PROFIT`, `AUTO_EXCHANGE`, `COIN_SWAP_DEPOSIT`, `COIN_SWAP_WITHDRAW` |
-| `B` | list[dict] | 余额更新列表 |
-| `P` | list[dict] | 持仓更新列表 |
+| `B` | list[FuturesBalanceUpdate] | 余额更新列表 |
+| `P` | list[FuturesPositionUpdate] | 持仓更新列表 |
 
-**B (余额) 字段**：
+**FuturesBalanceUpdate (余额) 字段**：
 
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| `a` | str | 资产名称 |
-| `wb` | str | 钱包余额 |
-| `cw` | str | 可用余额（扣除挂单保证金） |
-| `bc` | str | 变更金额 |
+| 字段名 | 类型 | 说明 | 币安字段 |
+|--------|------|------|----------|
+| `asset` | str | 资产名称 | `a` |
+| `wallet_balance` | str | 钱包余额 | `wb` |
+| `cross_wallet_balance` | str | 全仓钱包余额 | `cw` |
+| `change_amount` | str | 余额变动（不含盈亏和手续费） | `bc` |
+| `reason` | str | 余额变动原因类型 | `m` |
 
-**P (持仓) 字段**：
+**FuturesPositionUpdate (持仓) 字段**：
 
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| `s` | str | 交易对 |
-| `pa` | str | 持仓数量 |
-| `ep` | str | 开仓价格 |
-| `bep` | str | 盈亏平衡价格 |
-| `cr` | str | 费前累计实现盈亏 |
-| `up` | str | 未实现盈亏 |
-| `mt` | str | 保证金类型：`isolated`(逐仓) / `cross`(全仓) |
-| `iw` | str | 逐仓钱包余额 |
-| `ps` | str | 持仓方向：`LONG`, `SHORT`, `BOTH` |
+| 字段名 | 类型 | 说明 | 币安字段 |
+|--------|------|------|----------|
+| `symbol` | str | 交易对 | `s` |
+| `position_amt` | str | 持仓数量 | `pa` |
+| `entry_price` | str | 开仓价格 | `ep` |
+| `break_even_price` | str | 盈亏平衡价格 | `bep` |
+| `cum_realized_pnl` | str | 费前累计实现盈亏 | `cr` |
+| `unrealized_pnl` | str | 未实现盈亏 | `up` |
+| `margin_type` | str | 保证金类型：`isolated`(逐仓) / `cross`(全仓) | `mt` |
+| `isolated_wallet` | str | 逐仓钱包余额 | `iw` |
+| `position_side` | str | 持仓方向：`LONG`, `SHORT`, `BOTH` | `ps` |
 
 > **JSON 示例**: 参考 WS 协议文档 `3.3.2 期货账户增量推送` 节
 
@@ -1182,32 +1187,80 @@ class OrderData(CamelCaseModel):
 
 ##### 4. 现货账户增量推送（订阅）
 
-**模型**: `SpotAccountUpdate` - 对应 WS协议 `outboundAccountPosition` 事件
+> **重要说明**：现货账户推送有三种事件类型，统一使用币安原始短字段名。
 
-> **数据来源**: Binance WebSocket User Data Stream (`outboundAccountPosition`)
+**模型**: `SpotAccountUpdate` / `SpotBalanceUpdateEvent` / `SpotExecutionReportEvent`
 
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| `event_type` | str | 固定值 `"account_update"` |
-| `subscription_key` | str | 订阅键，如 `"BINANCE:ACCOUNT@SPOT"` |
-| `content` | dict | 推送内容 |
+> **数据来源**: Binance WebSocket User Data Stream (`outboundAccountPosition` / `balanceUpdate` / `executionReport`)
+>
+> **JSON 序列化**: 使用 `model_dump(by_alias=True, mode='json')` 输出币安原始短字段名格式
 
-**Content 字段**：
+**SpotAccountUpdate (outboundAccountPosition 事件)**：
 
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| `e` | str | 事件类型：`"outboundAccountPosition"` |
-| `E` | int | 事件时间（毫秒） |
-| `u` | int | 账户最后更新时间（毫秒） |
-| `B` | list[dict] | 余额列表 |
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"outboundAccountPosition"` |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `last_update_time` | `u` | int | 账户最后更新时间（毫秒） |
+| `balances` | `B` | list[SpotBalance] | 余额列表 |
 
-**B (余额) 字段**：
+**SpotBalance (余额)**：
 
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| `a` | str | 资产名称 |
-| `f` | str | 可用余额 |
-| `l` | str | 冻结余额 |
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `asset` | `a` | str | 资产名称 |
+| `free` | `f` | str | 可用余额 |
+| `locked` | `l` | str | 冻结余额 |
+
+**SpotBalanceUpdateEvent (balanceUpdate 事件)**：
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"balanceUpdate"` |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `asset` | `a` | str | 资产名称 |
+| `balance_delta` | `d` | str | 余额变化量 |
+| `clear_time` | `T` | int | 清算时间（毫秒） |
+
+**SpotExecutionReportEvent (executionReport 事件)**：
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"executionReport"` |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `symbol` | `s` | str | 交易对 |
+| `client_order_id` | `c` | str | 客户端订单ID |
+| `side` | `S` | str | 订单方向：`BUY`/`SELL` |
+| `order_type` | `o` | str | 订单类型：`LIMIT`/`MARKET`/`STOP_LOSS` 等 |
+| `time_in_force` | `f` | str | 有效期限：`GTC`/`IOC`/`FOK` |
+| `order_quantity` | `q` | str | 订单数量 |
+| `order_price` | `p` | str | 订单价格 |
+| `stop_price` | `P` | str | 止损价格 |
+| `iceberg_quantity` | `F` | str | 冰山数量 |
+| `order_list_id` | `g` | int | 订单列表ID |
+| `original_client_order_id` | `C` | str | 原订单ID（用于取消/修改） |
+| `execution_type` | `x` | str | 当前执行类型：`NEW`/`TRADE`/`CANCELED` 等 |
+| `order_status` | `X` | str | 订单状态：`NEW`/`FILLED`/`PARTIALLY_FILLED` 等 |
+| `order_reject_reason` | `r` | str | 拒绝原因 |
+| `order_id` | `i` | int | 订单ID |
+| `last_executed_quantity` | `l` | str | 最近执行数量 |
+| `cumulative_filled_quantity` | `z` | str | 累计成交数量 |
+| `last_executed_price` | `L` | str | 最近执行价格 |
+| `commission_amount` | `n` | str | 手续费金额 |
+| `commission_asset` | `N` | str | 手续费资产 |
+| `transaction_time` | `T` | int | 成交时间（毫秒） |
+| `trade_id` | `t` | int | 成交ID |
+| `prevented_match_id` | `v` | int | STP 防止成交ID |
+| `execution_id` | `I` | int | 执行ID |
+| `is_on_book` | `w` | bool | 是否在订单簿上 |
+| `is_maker_side` | `m` | bool | 是否为 maker |
+| `is_ignore` | `M` | bool | 忽略 |
+| `order_creation_time` | `O` | int | 订单创建时间（毫秒） |
+| `cumulative_quote_qty` | `Z` | str | 累计成交金额 |
+| `last_quote_qty` | `Y` | str | 最近成交金额 |
+| `quote_order_qty` | `Q` | str | 报价订单数量 |
+| `working_time` | `W` | int | 工作时间（毫秒） |
+| `self_trade_prevention` | `V` | str | 自成交防止模式 |
 
 > **JSON 示例**: 参考 WS 协议文档 `3.3.3 现货账户增量推送` 节
 
@@ -1283,7 +1336,7 @@ class OrderData(CamelCaseModel):
 | `KLINE` | K线数据 | `BINANCE:BTCUSDT@KLINE_1` |
 | `QUOTES` | 报价数据 | `BINANCE:BTCUSDT@QUOTES` |
 | `TRADE` | 交易数据 | `BINANCE:BTCUSDT@TRADE` |
-| `ACCOUNT` | 账户数据 | `BINANCE:ACCOUNT@SPOT` |
+| `ACCOUNT` | 账户数据 | `BINANCE:SPOT@ACCOUNT` |
 | `TICKER` | 24hr行情 | `BINANCE:BTCUSDT@TICKER` |
 
 **ProductType - 产品类型**：

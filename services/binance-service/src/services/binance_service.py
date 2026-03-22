@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Optional
 
 import asyncpg
+from pydantic import ValidationError
 
 from clients import (
     BinanceSpotHTTPClient,
@@ -44,6 +45,7 @@ from clients import (
     BinanceFuturesPrivateHTTPClient,
     BinanceFuturesPrivateWSClient,
     BinanceSpotPrivateWSClient,
+    SpotUserStreamClient,
 )
 from storage import ExchangeInfoRepository
 from db.tasks_repository import TasksRepository
@@ -123,6 +125,8 @@ class BinanceService:
         # 私有WebSocket客户端（用于订单功能）
         self._spot_private_ws: Optional[BinanceSpotPrivateWSClient] = None
         self._futures_private_ws: Optional[BinanceFuturesPrivateWSClient] = None
+        # 用户数据流客户端（用于账户订阅）
+        self._spot_user_stream: Optional[SpotUserStreamClient] = None
         self._exchange_repo: Optional[ExchangeInfoRepository] = None
         self._tasks_repo: Optional[TasksRepository] = None  # Tasks表仓储
         self._realtime_repo: Optional[RealtimeDataRepository] = (
@@ -258,6 +262,18 @@ class BinanceService:
         else:
             logger.warning("期货私有WebSocket客户端未初始化（缺少API Key或私钥）")
 
+        # 初始化用户数据流客户端（用于账户订阅）
+        # SpotUserStreamClient 独立处理 session.logon + userDataStream.subscribe
+        if api_key and private_key_pem:
+            self._spot_user_stream = SpotUserStreamClient(
+                api_key=api_key,
+                private_key_pem=private_key_pem,
+                proxy_url=self._proxy_ws,
+            )
+            logger.info("现货用户数据流客户端已初始化")
+        else:
+            logger.warning("现货用户数据流客户端未初始化（缺少API Key或私钥）")
+
         # 初始化存储层
         self._exchange_repo = ExchangeInfoRepository(self._pool)
         self._tasks_repo = TasksRepository(self._pool)
@@ -327,6 +343,13 @@ class BinanceService:
         # 注册市场数据WS客户端到订阅管理器
         self._ws_manager.register_client("binance-spot-ws-001", self._spot_ws)
         self._ws_manager.register_client("binance-futures-ws-001", self._futures_ws)
+
+        # 注册用户数据流客户端到订阅管理器（用于账户订阅）
+        if self._spot_user_stream:
+            self._ws_manager.register_user_stream_client(
+                "binance-spot-user-stream-001", self._spot_user_stream
+            )
+            logger.info("现货用户数据流客户端已注册到WS管理器")
 
         # 启动WS订阅管理器
         await self._ws_manager.start()
@@ -441,7 +464,14 @@ class BinanceService:
         except Exception as e:
             logger.error(f"同步交易所信息失败: {e}")
             if task_id and self._tasks_repo:
-                await self._tasks_repo.fail(task_id, str(e))
+                # 对 ValidationError 进行截断，避免 payload 超过 PostgreSQL NOTIFY 限制
+                error_msg = str(e)
+                if isinstance(e, ValidationError):
+                    # 只保留前 500 个字符和错误数量摘要
+                    error_count = len(e.errors())
+                    error_msg = f"ValidationError ({error_count} errors): {error_msg[:500]}..."
+                # result 字段限制在 2000 字符以内
+                await self._tasks_repo.fail(task_id, error_msg[:2000])
 
     async def run(self) -> None:
         """运行服务（阻塞）"""
@@ -774,7 +804,7 @@ class BinanceService:
 
             # ========== 第四步：一次性写入任务结果 ==========
             result = InternalQuotesResult(quotes=quotes, count=len(quotes))
-            await self._tasks_repo.complete(task_id, result)
+            await self._tasks_repo.complete(task_id, result.model_dump(mode='json'))
 
             logger.info(f"实时报价获取完成: 共 {len(quotes)} 个交易对")
 

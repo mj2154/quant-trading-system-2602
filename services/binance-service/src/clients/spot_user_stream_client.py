@@ -1,17 +1,20 @@
 """
 现货用户数据流客户端 (WebSocket API 方式)
 
-设计原则（与 BaseWSClient 一致）：
+设计原则：
 - WS客户端只负责连接和接收数据
 - 收到数据后立即打包为 WSDataPackage，发送给币安服务
 - 不维护任何回调或订阅状态
 - 所有数据处理由币安服务统一完成
 
+职责划分：
+- SpotUserStreamClient: 连接 + session.logon 认证
+- WSManager: 决定何时发送 userDataStream.subscribe
+
 特殊流程：
 1. 连接 WebSocket API
 2. session.logon 认证（Ed25519 签名，建立会话）
-3. userDataStream.subscribe 订阅账户数据流
-4. 接收事件并打包发送
+3. 接收事件并打包发送
 
 端点: wss://demo-ws-api.binance.com/ws-api/v3 (仅 Demo 模式)
 
@@ -22,32 +25,28 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Awaitable, Optional
 
 from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 
-from clients.base_ws_client import BaseWSClient, WSDataPackage
+from clients.base_ws_client import WSDataPackage
 from utils.ed25519_signer import Ed25519Signer
 
 logger = logging.getLogger(__name__)
 
 
-class SpotUserStreamClient(BaseWSClient):
+class SpotUserStreamClient:
     """现货用户数据流客户端 (WebSocket API 方式)
 
-    继承 BaseWSClient，统一客户端模式：
-    - connect() -> 建立连接
-    - disconnect() -> 断开连接
-    - 接收数据 -> 打包为 WSDataPackage -> 调用 _data_callback
+    职责：
+    - 建立 WebSocket 连接
+    - 执行 session.logon 认证
+    - 接收消息并通过回调传递给调用方
 
-    特殊流程：
-    - session.logon 认证（Ed25519 签名）
-    - userDataStream.subscribe 订阅账户数据流
-
-    会话级认证特点：
-    - 无需每个请求都签名
-    - 无需 listenKey
-    - 无需续期
+    不负责：
+    - 订阅管理（由 WSManager 控制）
+    - 重连后的订阅恢复（由 WSManager 触发）
     """
 
     # 现货 WebSocket API 端点 - 仅 Demo 模式
@@ -69,17 +68,38 @@ class SpotUserStreamClient(BaseWSClient):
             signature_type: 签名类型（仅支持 ed25519）
             proxy_url: 可选的代理 URL
         """
-        super().__init__(proxy_url=proxy_url)
-
         self._api_key = api_key
         self._signer = Ed25519Signer(private_key_pem)
         self._signature_type = signature_type
+        self._proxy_url = proxy_url
+
+        # WebSocket 连接
+        self._websocket: Optional[Any] = None
+        self._connected: bool = False
+        self._running: bool = False
+
+        # 任务引用
+        self._receive_task: Optional[asyncio.Task] = None
+        self._reconnect_task: Optional[asyncio.Task] = None
+
+        # 回调
+        self._data_callback: Optional[Callable[[WSDataPackage], Awaitable[None]]] = None
+        self._reconnect_callback: Optional[Callable[[], Awaitable[None]]] = None
 
         # 请求 ID 计数器
         self._request_id_counter = 1000
 
-        # 订阅 ID（用于追踪订阅）
-        self._subscription_id: Optional[int] = None
+        # 认证状态同步
+        self._auth_event: Optional[asyncio.Event] = None
+        self._auth_success: bool = False
+
+    def set_data_callback(self, callback: Callable[[WSDataPackage], Awaitable[None]]) -> None:
+        """设置数据回调"""
+        self._data_callback = callback
+
+    def set_reconnect_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
+        """设置断线重连回调"""
+        self._reconnect_callback = callback
 
     def _next_request_id(self) -> str:
         """生成下一个请求 ID"""
@@ -92,9 +112,10 @@ class SpotUserStreamClient(BaseWSClient):
         流程：
         1. 连接 WebSocket API
         2. session.logon 认证
-        3. userDataStream.subscribe 订阅
+
+        注意：不自动订阅，订阅由 WSManager 通过 subscribe() 方法触发
         """
-        if self._state.connected:
+        if self._connected:
             logger.info(f"[{self.CLIENT_ID}] 已连接，跳过")
             return
 
@@ -105,32 +126,34 @@ class SpotUserStreamClient(BaseWSClient):
                 connect_kwargs["proxy"] = self._proxy_url
 
             self._websocket = await connect(self.WS_URI, **connect_kwargs)
-            self._state.connected = True
+            self._connected = True
             self._running = True
             logger.info(f"[{self.CLIENT_ID}] WebSocket 连接已建立")
 
-            # 启动接收循环
+            # 先启动接收循环，用于处理认证响应
             self._receive_task = asyncio.create_task(self._receive_loop())
 
-            # session.logon 认证
-            await self._session_logon()
-
-            # userDataStream.subscribe 订阅
-            await self._subscribe_user_data_stream()
+            # session.logon 认证（等待认证结果）
+            auth_success = await self._session_logon()
+            if not auth_success:
+                logger.error(f"[{self.CLIENT_ID}] session.logon 认证失败，断开连接并重试")
+                await self.disconnect()
+                self._schedule_reconnect()
+                return
 
         except Exception as e:
             logger.error(f"[{self.CLIENT_ID}] 连接失败: {e}")
-            self._state.connected = False
+            self._connected = False
             self._running = True
-            # 调度持续重连
-            if self._reconnect_task and not self._reconnect_task.done():
-                self._reconnect_task.cancel()
-            self._reconnect_task = asyncio.create_task(self._schedule_reconnect())
+            self._schedule_reconnect()
 
-    async def _session_logon(self) -> None:
+    async def _session_logon(self) -> bool:
         """执行 session.logon 认证
 
         Ed25519 签名 payload 格式：apiKey=xxx&timestamp=xxx（按键名字母排序）
+
+        Returns:
+            认证是否成功
         """
         timestamp = int(time.time() * 1000)
 
@@ -145,6 +168,10 @@ class SpotUserStreamClient(BaseWSClient):
         # Ed25519 签名
         signature = self._signer.sign(payload)
 
+        # 创建认证事件用于同步
+        self._auth_event = asyncio.Event()
+        self._auth_success = False
+
         # 构建认证请求
         auth_request = {
             "id": self._next_request_id(),
@@ -158,13 +185,34 @@ class SpotUserStreamClient(BaseWSClient):
 
         logger.info(f"[{self.CLIENT_ID}] 正在执行 session.logon 认证...")
         await self._send(auth_request)
+        logger.info(f"[{self.CLIENT_ID}] session.logon 请求已发送，等待认证结果...")
 
-        # 注意：BaseWSClient 的 _receive_loop 会处理响应
-        # 响应会通过 _handle_message 处理
-        logger.info(f"[{self.CLIENT_ID}] session.logon 请求已发送")
+        # 等待认证结果（最多30秒超时）
+        try:
+            await asyncio.wait_for(self._auth_event.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            logger.error(f"[{self.CLIENT_ID}] session.logon 认证超时")
+            return False
 
-    async def _subscribe_user_data_stream(self) -> None:
-        """订阅用户数据流"""
+        if self._auth_success:
+            logger.info(f"[{self.CLIENT_ID}] session.logon 认证成功")
+        else:
+            logger.error(f"[{self.CLIENT_ID}] session.logon 认证失败")
+
+        return self._auth_success
+
+    async def subscribe(self) -> bool:
+        """订阅用户数据流
+
+        由 WSManager 调用，在连接和认证完成后触发订阅。
+
+        Returns:
+            是否订阅成功
+        """
+        if not self._connected:
+            logger.warning(f"[{self.CLIENT_ID}] 未连接，无法订阅")
+            return False
+
         subscribe_request = {
             "id": self._next_request_id(),
             "method": "userDataStream.subscribe",
@@ -174,29 +222,54 @@ class SpotUserStreamClient(BaseWSClient):
         logger.info(f"[{self.CLIENT_ID}] 正在订阅 userDataStream...")
         await self._send(subscribe_request)
         logger.info(f"[{self.CLIENT_ID}] userDataStream.subscribe 请求已发送")
+        return True
+
+    async def _send(self, message: dict) -> None:
+        """发送消息"""
+        if self._websocket:
+            await self._websocket.send(json.dumps(message))
+
+    async def _receive_loop(self) -> None:
+        """接收消息循环"""
+        try:
+            while self._running and self._connected:
+                try:
+                    message = await asyncio.wait_for(
+                        self._websocket.recv(), timeout=1.0
+                    )
+                    data = json.loads(message)
+                    await self._handle_message(data)
+                except asyncio.TimeoutError:
+                    continue
+                except ConnectionClosed:
+                    logger.warning(f"[{self.CLIENT_ID}] 连接已关闭")
+                    break
+                except Exception as e:
+                    logger.error(f"[{self.CLIENT_ID}] 接收消息异常: {e}")
+                    break
+        except asyncio.CancelledError:
+            logger.info(f"[{self.CLIENT_ID}] 接收循环已取消")
+        finally:
+            if self._connected:
+                self._connected = False
+                if self._running:
+                    self._schedule_reconnect()
 
     async def _handle_message(self, message: dict) -> None:
         """处理接收到的消息
 
-        BaseWSClient 模式：
-        - 收到数据后立即打包为 WSDataPackage
-        - 调用 _data_callback 发送给币安服务
-        - 不做任何数据解析
+        业务事件消息（outboundAccountPosition, balanceUpdate, executionReport 等）
+        格式：{"subscriptionId": 0, "event": {...}}
         """
-        # 识别 ACK 确认消息 {"result": null, "id": xxx}
-        if "result" in message and "id" in message:
+        # 识别 session.logon 成功响应
+        # 响应格式：{"id": "...", "status": 200, "result": {"apiKey": "...", "userDataStream": false}}
+        if "status" in message and message.get("status") == 200 and "result" in message:
             result = message.get("result")
-            request_id = message.get("id")
-            logger.debug(
-                f"[{self.CLIENT_ID}] 收到 ACK 确认: result={result}, id={request_id}"
-            )
-
-            # 如果是订阅响应，记录 subscriptionId
-            if isinstance(result, dict) and "subscriptionId" in result:
-                self._subscription_id = result.get("subscriptionId")
-                logger.info(
-                    f"[{self.CLIENT_ID}] 订阅成功: subscriptionId={self._subscription_id}"
-                )
+            # session.logon 成功的响应包含 apiKey
+            if isinstance(result, dict) and "apiKey" in result:
+                if self._auth_event and not self._auth_event.is_set():
+                    self._auth_success = True
+                    self._auth_event.set()
             return
 
         # 识别错误消息
@@ -204,6 +277,13 @@ class SpotUserStreamClient(BaseWSClient):
             error_code = message.get("error", {}).get("code", "unknown")
             error_msg = message.get("error", {}).get("msg", "unknown")
             logger.error(f"[{self.CLIENT_ID}] WebSocket 错误: code={error_code}, msg={error_msg}")
+
+            # 检查是否是 session.logon 认证失败
+            if error_code == -1193 or "session not authenticated" in error_msg.lower():
+                if self._auth_event and not self._auth_event.is_set():
+                    self._auth_success = False
+                    self._auth_event.set()
+                    logger.error(f"[{self.CLIENT_ID}] session.logon 认证失败")
             return
 
         # 识别会话状态消息
@@ -211,17 +291,16 @@ class SpotUserStreamClient(BaseWSClient):
             logger.debug(f"[{self.CLIENT_ID}] 会话状态消息: {message}")
             return
 
-        # 业务事件消息（outboundAccountPosition, balanceUpdate, executionReport 等）
-        # 格式：{"subscriptionId": 0, "event": {...}}
+        # 业务事件消息
         if "subscriptionId" in message and "event" in message:
             event_data = message.get("event", {})
             event_type = event_data.get("e", "unknown")
-            logger.debug(f"[{self.CLIENT_ID}] 收到业务事件: {event_type}")
+            logger.info(f"[{self.CLIENT_ID}] 收到业务事件: {event_type}")
 
-            # 打包数据并发送给币安服务（不解析）
+            # 打包数据并发送给币安服务
             package = WSDataPackage(
                 client_id=self.CLIENT_ID,
-                data=message,  # 发送原始消息，不解析
+                data=message,
                 timestamp=int(time.time() * 1000),
             )
 
@@ -232,77 +311,77 @@ class SpotUserStreamClient(BaseWSClient):
         # 其他消息类型
         logger.debug(f"[{self.CLIENT_ID}] 收到其他消息: {message}")
 
-    async def _reconnect(self) -> None:
-        """断线重连
+    def _schedule_reconnect(self) -> None:
+        """调度延迟重连"""
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
 
-        重连后需要重新：
-        1. 连接 WebSocket
-        2. session.logon 认证
-        3. userDataStream.subscribe 订阅
-        """
-        if not self._running:
-            return
+        async def reconnect_loop():
+            delay = 2
+            while self._running and not self._connected:
+                logger.info(f"[{self.CLIENT_ID}] 等待 {delay} 秒后重试...")
+                await asyncio.sleep(delay)
+                if not self._running:
+                    break
 
-        logger.info(f"[{self.CLIENT_ID}] 尝试重新连接...")
-
-        # 1. 正确关闭旧连接
-        old_websocket = self._websocket
-        self._websocket = None
-        self._state.connected = False
-        self._subscription_id = None
-
-        if old_websocket:
-            try:
-                await old_websocket.close()
-                logger.debug(f"[{self.CLIENT_ID}] 旧连接已关闭")
-            except Exception as e:
-                logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
-
-        # 2. 尝试创建新连接
-        success = await self._try_reconnect()
-
-        if success and self._running:
-            # 重新认证和订阅
-            await self._session_logon()
-            await self._subscribe_user_data_stream()
-
-            # 通知上层重连完成
-            if self._reconnect_callback:
-                await self._reconnect_callback()
-        elif not success and self._running:
-            # 调度持续重试任务
-            if self._reconnect_task and not self._reconnect_task.done():
-                self._reconnect_task.cancel()
-            self._reconnect_task = asyncio.create_task(self._schedule_reconnect())
-
-    async def _try_reconnect(self) -> bool:
-        """尝试重连，返回是否成功"""
-        try:
-            # 关闭旧连接
-            old_websocket = self._websocket
-            self._websocket = None
-            self._state.connected = False
-
-            if old_websocket:
+                logger.info(f"[{self.CLIENT_ID}] 尝试重新连接...")
                 try:
-                    await old_websocket.close()
+                    # 关闭旧连接
+                    if self._websocket:
+                        try:
+                            await self._websocket.close()
+                        except Exception:
+                            pass
+                    self._websocket = None
+
+                    # 创建新连接
+                    connect_kwargs: dict[str, Any] = {}
+                    if self._proxy_url:
+                        connect_kwargs["proxy"] = self._proxy_url
+
+                    self._websocket = await connect(self.WS_URI, **connect_kwargs)
+                    self._connected = True
+                    logger.info(f"[{self.CLIENT_ID}] 已重新连接")
+
+                    # 重新认证
+                    await self._session_logon()
+
+                    # 重启接收循环
+                    self._receive_task = asyncio.create_task(self._receive_loop())
+
+                    # 通知上层重连完成，以便重新订阅
+                    if self._reconnect_callback:
+                        await self._reconnect_callback()
+
+                    logger.info(f"[{self.CLIENT_ID}] 重连任务完成")
+                    return
+
                 except Exception as e:
-                    logger.warning(f"[{self.CLIENT_ID}] 关闭旧连接时出错: {e}")
+                    logger.error(f"[{self.CLIENT_ID}] 重连失败: {e}")
+                    self._connected = False
+                    delay = min(delay * 2, 60)  # 指数退避，最大60秒
 
-            # 创建新连接
-            connect_kwargs: dict[str, Any] = {}
-            if self._proxy_url:
-                connect_kwargs["proxy"] = self._proxy_url
+        self._reconnect_task = asyncio.create_task(reconnect_loop())
 
-            self._websocket = await connect(self.WS_URI, **connect_kwargs)
-            self._state.connected = True
-            logger.info(f"[{self.CLIENT_ID}] 已重新连接")
+    async def disconnect(self) -> None:
+        """断开 WebSocket 连接"""
+        logger.info(f"[{self.CLIENT_ID}] 正在断开连接...")
+        self._running = False
 
-            self._receive_task = asyncio.create_task(self._receive_loop())
-            self._reconnect_task = None
-            return True
+        # 重置认证状态
+        self._auth_event = None
+        self._auth_success = False
 
-        except Exception as e:
-            logger.error(f"[{self.CLIENT_ID}] 重连失败: {e}")
-            self._state.connected = False
-            return False
+        if self._websocket:
+            try:
+                await self._websocket.close()
+            except Exception:
+                pass
+            self._websocket = None
+
+        self._connected = False
+        logger.info(f"[{self.CLIENT_ID}] 连接已断开")
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected

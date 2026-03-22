@@ -1147,7 +1147,8 @@ export class DataService {
     callback: (update: AccountUpdate) => void,
     options?: SubscriptionOptions
   ): () => void {
-    const subscriptionKey = `BINANCE:ACCOUNT@${accountType}`
+    // 订阅键格式: BINANCE:SPOT@ACCOUNT 或 BINANCE:FUTURES@ACCOUNT (遵循WS协议文档)
+    const subscriptionKey = `BINANCE:${accountType}@ACCOUNT`
     const finalOptions: SubscriptionOptions = { reconnect: true, ...options }
 
     this.subscriptionInfos.set(subscriptionKey, {

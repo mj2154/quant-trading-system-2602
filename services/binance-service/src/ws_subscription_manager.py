@@ -41,11 +41,14 @@ from models.ticker_models import (
 )
 from models.ws_account_models import (
     BinanceSpotOutboundAccountPositionWSModel,
+    BinanceSpotOutboundAccountPositionEvent,
     BinanceSpotBalanceUpdateWSModel,
+    BinanceSpotBalanceUpdateEvent,
     BinanceFuturesAccountUpdateWSModel,
 )
 from models.order_models import (
     BinanceSpotExecutionReportWSModel,
+    BinanceSpotExecutionReportEvent,
     BinanceFuturesOrderTradeUpdateWSModel,
 )
 from utils import interval_to_resolution
@@ -161,6 +164,8 @@ class WSSubscriptionManager:
         # 启动用户数据流客户端（账户订阅）
         for client_id, client in self._user_stream_clients.items():
             try:
+                # 设置重连回调，用于重连后重新订阅
+                client.set_reconnect_callback(self._on_user_stream_reconnect)
                 await client.connect()
                 logger.info(f"用户数据流客户端已启动: {client_id}")
             except Exception as e:
@@ -338,14 +343,12 @@ class WSSubscriptionManager:
     async def _handle_account_data(self, package: WSDataPackage) -> None:
         """处理账户数据（用户数据流）
 
-        用户数据流消息格式：
-        {
-            "subscriptionId": 0,
-            "event": {
-                "e": "outboundAccountPosition",  // 事件类型
-                ...
-            }
-        }
+        消息格式：
+        - 现货：{subscriptionId: 0, event: {e: "...", ...}}
+        - 期货：{e: "ACCOUNT_UPDATE", E: ..., T: ..., a: {...}}
+
+        重要：写入 realtime_data 表时，只取 event 字段内容（不包含 subscriptionId）
+        以保持与期货数据格式一致。
 
         Args:
             package: WS数据包
@@ -361,19 +364,26 @@ class WSSubscriptionManager:
             event_data = message.get("event", {})
             event_type = event_data.get("e", "unknown")
 
+            # 现货账户数据：只取 event 字段进行验证和输出
+            # 不包含 subscriptionId（它是 WS 协议的内部字段，无业务用途）
             if event_type == "outboundAccountPosition":
-                ws_event = BinanceSpotOutboundAccountPositionWSModel.model_validate(event_data)
+                # event_data 格式: {e: "outboundAccountPosition", E: ..., u: ..., B: [...]}
+                ws_event = BinanceSpotOutboundAccountPositionEvent.model_validate(event_data)
                 processed_data = ws_event.model_dump(by_alias=True, mode='json')
             elif event_type == "balanceUpdate":
-                ws_event = BinanceSpotBalanceUpdateWSModel.model_validate(event_data)
+                # event_data 格式: {e: "balanceUpdate", E: ..., a: ..., d: ..., T: ...}
+                ws_event = BinanceSpotBalanceUpdateEvent.model_validate(event_data)
                 processed_data = ws_event.model_dump(by_alias=True, mode='json')
             elif event_type == "executionReport":
-                ws_event = BinanceSpotExecutionReportWSModel.model_validate(event_data)
+                # event_data 格式: {e: "executionReport", E: ..., s: ..., ...}
+                ws_event = BinanceSpotExecutionReportEvent.model_validate(event_data)
                 processed_data = ws_event.model_dump(by_alias=True, mode='json')
             elif event_type == "ACCOUNT_UPDATE":
+                # 期货数据直接是事件对象
                 ws_event = BinanceFuturesAccountUpdateWSModel.model_validate(event_data)
                 processed_data = ws_event.model_dump(by_alias=True, mode='json')
             elif event_type == "ORDER_TRADE_UPDATE":
+                # 期货数据直接是事件对象
                 ws_event = BinanceFuturesOrderTradeUpdateWSModel.model_validate(event_data)
                 processed_data = ws_event.model_dump(by_alias=True, mode='json')
             else:
@@ -646,6 +656,13 @@ class WSSubscriptionManager:
                 self._account_subscriptions.add(sub_key)
             logger.info(f"[EXEC_SUB] 账户订阅已激活: {account_subscriptions}")
 
+            # 触发现货用户数据流客户端订阅
+            if BinanceAccountSubscriptionKey.SPOT in account_subscriptions:
+                spot_user_client = self._user_stream_clients.get("binance-spot-user-stream-001")
+                if spot_user_client:
+                    await spot_user_client.subscribe()
+                    logger.info("[EXEC_SUB] 现货用户数据流已触发订阅")
+
         # 现货客户端批量订阅
         if spot_streams:
             client = self._ws_clients.get("binance-spot-ws-001")
@@ -737,6 +754,22 @@ class WSSubscriptionManager:
                 except Exception as e:
                     logger.error(f"[EXEC_UNSUB] 期货批量取消订阅失败: {e}")
 
+    async def _on_user_stream_reconnect(self) -> None:
+        """用户数据流客户端断线重连后的回调
+
+        WSManager 调用 subscribe() 重新订阅账户数据流。
+        """
+        logger.info("用户数据流客户端重连完成，正在重新订阅...")
+
+        # 检查是否需要订阅现货账户
+        if BinanceAccountSubscriptionKey.SPOT in self._account_subscriptions:
+            client = self._user_stream_clients.get("binance-spot-user-stream-001")
+            if client and hasattr(client, 'subscribe'):
+                await client.subscribe()
+                logger.info("现货账户数据流已重新订阅")
+        else:
+            logger.info("无现货账户订阅，跳过")
+
     async def _handle_clean_all(self) -> None:
         """处理 clean_all 通知：触发WS客户端重连并恢复订阅"""
         logger.info("收到 clean_all 通知，WS客户端将重连")
@@ -792,6 +825,13 @@ class WSSubscriptionManager:
                     logger.info(
                         f"全量同步：账户订阅已激活: {list(self._account_subscriptions)}"
                     )
+                    # 触发现货用户数据流订阅
+                    if BinanceAccountSubscriptionKey.SPOT in self._account_subscriptions:
+                        spot_user_client = self._user_stream_clients.get("binance-spot-user-stream-001")
+                        if spot_user_client and hasattr(spot_user_client, 'subscribe'):
+                            await spot_user_client.subscribe()
+                            logger.info("全量同步：现货用户数据流已订阅")
+
                 await self._execute_batch_subscribe(market_subscription_keys)
             else:
                 logger.info("全量同步：无订阅")

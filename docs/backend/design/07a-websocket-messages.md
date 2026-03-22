@@ -368,7 +368,7 @@
 | K线 | `EXCHANGE:SYMBOL@KLINE_INTERVAL` | 如 `BINANCE:BTCUSDT@KLINE_60` |
 | 报价 | `EXCHANGE:SYMBOL@QUOTES` | 如 `BINANCE:BTCUSDT@QUOTES` |
 | 成交 | `EXCHANGE:SYMBOL@TRADE` | 如 `BINANCE:BTCUSDT@TRADE` |
-| 账户 | `EXCHANGE:ACCOUNT@PRODUCT` | 如 `BINANCE:ACCOUNT@FUTURES` |
+| 账户 | `EXCHANGE:PRODUCT@ACCOUNT` | 如 `BINANCE:FUTURES@ACCOUNT` |
 | 信号 | `SIGNAL:ALERT_ID` | 如 `SIGNAL:550e8400e29b41d4a716446655440001` |
 
 #### 取消订阅
@@ -964,8 +964,8 @@
 {
     "type": "UPDATE",
     "timestamp": 1703123456790,
+    "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
     "data": {
-        "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
         "content": {
             "time": 1703123400000,
             "open": 97000.00,
@@ -984,8 +984,8 @@
 {
     "type": "UPDATE",
     "timestamp": 1703123456790,
+    "subscriptionKey": "BINANCE:BTCUSDT@QUOTES",
     "data": {
-        "subscriptionKey": "BINANCE:BTCUSDT@QUOTES",
         "content": {
             "n": "BINANCE:BTCUSDT",
             "s": "ok",
@@ -1006,9 +1006,9 @@
 {
     "type": "UPDATE",
     "timestamp": 1704067205000,
+    "subscriptionKey": "SIGNAL:550e8400e29b41d4a716446655440001",
     "data": {
         "eventType": "signal_new",
-        "subscriptionKey": "SIGNAL:550e8400e29b41d4a716446655440001",
         "content": {
             "id": 123,
             "alertId": "550e8400e29b41d4a716446655440001",
@@ -1035,9 +1035,9 @@
 {
     "type": "UPDATE",
     "timestamp": 1704067205000,
+    "subscriptionKey": "BINANCE:FUTURES@ACCOUNT",
     "data": {
         "eventType": "account_update",
-        "subscriptionKey": "BINANCE:ACCOUNT@FUTURES",
         "content": {
             "e": "ACCOUNT_UPDATE",
             "E": 1704067205000,
@@ -1051,26 +1051,93 @@
 }
 ```
 
-#### 现货账户（outboundAccountPosition）
+#### 现货账户事件（outboundAccountPosition / balanceUpdate / executionReport）
 
+> **重要说明**：现货账户推送有三种事件类型，所有事件都统一使用币安原始短字段名。
+> 代码实现使用 Pydantic alias 功能，字段名（如 `event_type`）映射到 JSON 输出（如 `e`）。
+> 参考: `binance-docs/binance_spot_docs/User Data Stream.md`
+
+**outboundAccountPosition 事件** - 账户余额变化时推送：
 ```json
 {
     "type": "UPDATE",
     "timestamp": 1704067205000,
+    "subscriptionKey": "BINANCE:SPOT@ACCOUNT",
     "data": {
-        "eventType": "account_update",
-        "subscriptionKey": "BINANCE:ACCOUNT@SPOT",
-        "content": {
-            "e": "outboundAccountPosition",
-            "E": 1704067205000,
-            "u": 1704067204000,
-            "B": [
-                { "a": "BTC", "f": "0.50000000", "l": "0.10000000" }
-            ]
-        }
+        "e": "outboundAccountPosition",
+        "E": 1564034571105,
+        "u": 1564034571073,
+        "B": [
+            { "a": "ETH", "f": "10000.000000", "l": "0.000000" }
+        ]
     }
 }
 ```
+
+**balanceUpdate 事件** - 充值/提现/转账时推送：
+```json
+{
+    "type": "UPDATE",
+    "timestamp": 1704067205000,
+    "subscriptionKey": "BINANCE:SPOT@ACCOUNT",
+    "data": {
+        "e": "balanceUpdate",
+        "E": 1573200697110,
+        "a": "BTC",
+        "d": "100.00000000",
+        "T": 1573200697068
+    }
+}
+```
+
+**executionReport 事件** - 订单状态更新时推送：
+```json
+{
+    "type": "UPDATE",
+    "timestamp": 1704067205000,
+    "subscriptionKey": "BINANCE:SPOT@ACCOUNT",
+    "data": {
+        "e": "executionReport",
+        "E": 1499405658658,
+        "s": "ETHBTC",
+        "c": "mUvoqJxFIILMdfAW5iGSOW",
+        "S": "BUY",
+        "o": "LIMIT",
+        "f": "GTC",
+        "q": "1.00000000",
+        "p": "0.10264410",
+        "P": "0.00000000",
+        "F": "0.00000000",
+        "g": -1,
+        "C": "",
+        "x": "NEW",
+        "X": "NEW",
+        "r": "NONE",
+        "i": 4293153,
+        "l": "0.00000000",
+        "z": "0.00000000",
+        "L": "0.00000000",
+        "n": "0",
+        "N": null,
+        "T": 1499405658657,
+        "t": -1,
+        "v": 3,
+        "I": 8641984,
+        "w": true,
+        "m": false,
+        "M": false,
+        "O": 1499405658657,
+        "Z": "0.00000000",
+        "Y": "0.00000000",
+        "Q": "0.00000000",
+        "W": 1499405658657,
+        "V": "NONE"
+    }
+}
+```
+
+> **条件字段**：executionReport 事件可能包含以下条件字段（见文档 `Conditional Fields in Execution Report` 节）：
+> `d`(Trailing Delta), `D`(Trailing Time), `j`(Strategy Id), `J`(Strategy Type), `v`(Prevented Match Id), `A`(Prevented Quantity), `B`(Last Prevented Quantity), `u`(Trade Group Id), `U`(Counter Order Id), `Cs`(Counter Symbol), `pl`(Prevented Execution Quantity), `pL`(Prevented Execution Price), `pY`(Prevented Execution Quote Qty), `W`(Working Time), `b`(Match Type), `a`(Allocation ID), `k`(Working Floor), `uS`(UsedSor), `gP`(Pegged Price Type), `gOT`(Pegged offset Type), `gOV`(Pegged Offset Value), `gp`(Pegged Price)
 
 ### 服务状态推送
 
@@ -1099,9 +1166,9 @@
 {
     "type": "UPDATE",
     "timestamp": 1704067205000,
+    "subscriptionKey": "BINANCE:FUTURES@ACCOUNT",
     "data": {
         "eventType": "order_update",
-        "subscriptionKey": "BINANCE:ACCOUNT@FUTURES",
         "content": {
             "e": "ORDER_TRADE_UPDATE",
             "E": 1704067205000,

@@ -618,8 +618,8 @@ await accountStore.refreshAccounts()
 
 | 账户类型 | 订阅键 | 数据来源 |
 |---------|--------|----------|
-| 现货账户 | `BINANCE:ACCOUNT@SPOT` | 用户数据流 (stream.binance.com) |
-| 期货账户 | `BINANCE:ACCOUNT@FUTURES` | 用户数据流 (fstream.binance.com) |
+| 现货账户 | `BINANCE:SPOT@ACCOUNT` | 用户数据流 (stream.binance.com) |
+| 期货账户 | `BINANCE:FUTURES@ACCOUNT` | 用户数据流 (fstream.binance.com) |
 
 ### 8.10.3 数据更新策略
 
@@ -809,6 +809,30 @@ wss://fstream.binance.com/ws/<listenKey>
 - `realtime_data` 表中的数据是**增量数据的直接覆盖**
 - 前端需要先 GET 完整数据（初始化），再通过订阅增量更新
 
+### 8.10.6 subscriptionId 处理原则
+
+**重要**：币安现货 WebSocket 用户数据流消息格式包含 `subscriptionId` 字段：
+```json
+{
+    "subscriptionId": 0,
+    "event": {...}
+}
+```
+
+**处理原则**：
+- `subscriptionId` 是币安 WebSocket 协议的内部字段，**无实际业务用途**
+- 写入 `realtime_data` 表时，**只取 `event` 字段内容**，不包含 `subscriptionId`
+- 这样可以保持与期货账户数据格式一致，便于后续统一处理
+
+**数据格式对比**：
+
+| 类型 | 币安原始格式 | 写入 realtime_data.data 的格式 |
+|------|-------------|-------------------------------|
+| 期货 | `{e: "...", E: ..., a: {...}}` | `{e: "...", E: ..., a: {...}}` ✅ |
+| 现货 | `{subscriptionId: 0, event: {...}}` | `{e: "...", E: ..., B: [...]}` ✅ |
+
+### 8.10.7 实现组件
+
 ### 8.10.6 实现组件
 
 **用户数据流客户端**：
@@ -857,7 +881,7 @@ async function init() {
   render(account);
 
   // 2. 再订阅增量更新
-  ws.subscribe('BINANCE:ACCOUNT@SPOT', (data) => {
+  ws.subscribe('BINANCE:SPOT@ACCOUNT', (data) => {
     // 增量更新 - 直接覆盖
     updateAccount(data);
   });

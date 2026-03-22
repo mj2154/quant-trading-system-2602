@@ -313,8 +313,8 @@ sequenceDiagram
 
 | 账户类型 | 订阅键 | 数据类型 |
 |---------|--------|---------|
-| 现货账户 | `BINANCE:ACCOUNT@SPOT` | `ACCOUNT` |
-| 期货账户 | `BINANCE:ACCOUNT@FUTURES` | `ACCOUNT` |
+| 现货账户 | `BINANCE:SPOT@ACCOUNT` | `ACCOUNT` |
+| 期货账户 | `BINANCE:FUTURES@ACCOUNT` | `ACCOUNT` |
 
 ### 10.4 数据流流程
 
@@ -340,8 +340,8 @@ sequenceDiagram
 
     Note over Frontend, DB: 订阅阶段
 
-    Frontend->>GW: WebSocket订阅 BINANCE:ACCOUNT@SPOT
-    GW->>DB: INSERT realtime_data (subscription_key=BINANCE:ACCOUNT@SPOT)
+    Frontend->>GW: WebSocket订阅 BINANCE:SPOT@ACCOUNT
+    GW->>DB: INSERT realtime_data (subscription_key=BINANCE:SPOT@ACCOUNT)
     DB->>DB: 触发 subscription_add 通知
 
     BN-->>DB: 监听 subscription_add
@@ -392,12 +392,12 @@ async function init() {
   render(spotAccount, futuresAccount);
 
   // 2. 订阅增量更新
-  ws.subscribe('BINANCE:ACCOUNT@SPOT', (data) => {
+  ws.subscribe('BINANCE:SPOT@ACCOUNT', (data) => {
     // 增量更新
     updateSpotAccount(data);
   });
 
-  ws.subscribe('BINANCE:ACCOUNT@FUTURES', (data) => {
+  ws.subscribe('BINANCE:FUTURES@ACCOUNT', (data) => {
     // 增量更新
     updateFuturesAccount(data);
   });

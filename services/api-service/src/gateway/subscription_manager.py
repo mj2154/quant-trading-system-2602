@@ -315,6 +315,8 @@ class SubscriptionManager:
             return "QUOTES"
         elif data_part == "TRADE":
             return "TRADE"
+        elif data_part == "ACCOUNT":
+            return "ACCOUNT"
         else:
             return "UNKNOWN"
 

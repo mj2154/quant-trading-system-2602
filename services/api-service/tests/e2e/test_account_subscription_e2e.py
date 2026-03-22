@@ -1,16 +1,15 @@
 """
-现货账户订阅 E2E 测试
+现货账户订阅 E2E 测试（纯监听模式）
 
-测试通过 WebSocket 连接 API 服务，订阅现货账户信息，然后通过
-市价买入操作触发账户变化，验证是否能收到账户更新推送。
+测试通过 WebSocket 连接 API 服务，订阅现货账户信息，
+然后监听 30 秒，期间用户手动下单，验证是否能收到账户更新推送。
 
 测试流程：
 1. 连接 WebSocket
-2. 订阅现货账户: BINANCE:ACCOUNT@SPOT
-3. 创建市价买入订单 (200 USDT BTCUSDT) - 触发账户变化
-4. 等待接收账户更新推送
-5. (可选) 5秒后卖出所有BTC - 再次触发账户变化
-6. 验证账户更新事件
+2. 获取初始账户信息
+3. 订阅现货账户: BINANCE:SPOT@ACCOUNT
+4. 监听 30 秒（用户在此时手动下单）
+5. 验证账户更新事件
 
 参考文档：
 - docs/backend/design/VERIFICATION_REPORT_USER_STREAM.md - 现货 WS API 账户订阅验证
@@ -40,7 +39,7 @@ logger = logging.getLogger(__name__)
 WS_URL = "ws://localhost:8000/ws"
 
 # 账户订阅键
-SPOT_ACCOUNT_SUBSCRIPTION = "BINANCE:ACCOUNT@SPOT"
+SPOT_ACCOUNT_SUBSCRIPTION = "BINANCE:SPOT@ACCOUNT"
 
 
 async def wait_for_message(ws, timeout=10, expected_request_id: str | None = None):
@@ -65,7 +64,12 @@ async def wait_for_message(ws, timeout=10, expected_request_id: str | None = Non
 
 
 async def subscribe_account(ws, subscription: str) -> bool:
-    """订阅账户信息"""
+    """订阅账户信息
+
+    订阅采用三阶段模式：
+    1. 发送请求后立即收到 ACK
+    2. 继续等待直到收到 SUBSCRIPTION_DATA 或成功响应
+    """
     request_id = uuid.uuid4().hex
 
     subscribe_request = {
@@ -80,30 +84,48 @@ async def subscribe_account(ws, subscription: str) -> bool:
     logger.info(f"📤 发送订阅请求: {subscription}")
     await ws.send(json.dumps(subscribe_request))
 
-    # 等待响应
-    response = await wait_for_message(ws, timeout=10, expected_request_id=request_id)
-    if response is None:
-        logger.error("❌ 未收到订阅响应")
-        return False
+    # 等待 SUBSCRIPTION_DATA 响应（忽略中间的 ACK）
+    while True:
+        response = await wait_for_message(ws, timeout=30, expected_request_id=request_id)
+        if response is None:
+            logger.error("❌ 未收到订阅响应")
+            return False
 
-    data = json.loads(response)
-    logger.info(f"📥 收到订阅响应: {json.dumps(data, ensure_ascii=False)}")
+        data = json.loads(response)
+        msg_type = data.get("type")
+        logger.info(f"📥 收到消息类型: {msg_type}")
 
-    if data.get("type") == "SUBSCRIPTION_DATA" and data.get("data", {}).get("status") == "success":
-        logger.info("✅ 订阅成功")
-        return True
+        if msg_type == "ACK":
+            logger.info("📝 收到 ACK，继续等待订阅结果...")
+            continue
 
-    logger.error(f"❌ 订阅失败: {data}")
-    return False
+        if msg_type == "SUBSCRIPTION_DATA":
+            status = data.get("data", {}).get("status")
+            if status == "success":
+                logger.info("✅ 订阅成功")
+                return True
+            else:
+                logger.error(f"❌ 订阅失败: status={status}")
+                return False
+
+        if msg_type == "ERROR":
+            error_msg = data.get("data", {}).get("errorMessage", "Unknown error")
+            logger.error(f"❌ 订阅失败: {error_msg}")
+            return False
+
+        if msg_type == "ACK":
+            continue
+
+        logger.warning(f"⚠️ 收到意外消息类型: {msg_type}，继续等待")
 
 
-async def create_market_buy_order(ws, symbol: str, quote_quantity: float) -> str | None:
-    """创建市价买单（按报价数量）
+async def create_market_buy_order(ws, symbol: str, quantity: float) -> str | None:
+    """创建市价买单
 
     Args:
         ws: WebSocket 连接
         symbol: 交易对，如 BTCUSDT
-        quote_quantity: 报价数量（USDT）
+        quantity: 购买数量
 
     Returns:
         orderId 或 None
@@ -111,7 +133,7 @@ async def create_market_buy_order(ws, symbol: str, quote_quantity: float) -> str
     request_id = uuid.uuid4().hex
     new_client_order_id = uuid.uuid4().hex
 
-    # 现货市价买单使用 quoteOrderQty（报价数量）
+    # 现货市价买单使用 quantity（数量）
     order_request = {
         "type": "CREATE_ORDER",
         "requestId": request_id,
@@ -120,7 +142,7 @@ async def create_market_buy_order(ws, symbol: str, quote_quantity: float) -> str
             "symbol": symbol,
             "side": "BUY",
             "type": "MARKET",
-            "quoteOrderQty": quote_quantity,  # 200 USDT
+            "quantity": quantity,
             "newClientOrderId": new_client_order_id,
         },
     }
@@ -292,7 +314,12 @@ async def listen_for_account_updates(ws, timeout: float = 30) -> list[dict]:
 
 
 async def get_spot_account(ws) -> dict | None:
-    """获取现货账户信息"""
+    """获取现货账户信息
+
+    异步任务采用三阶段模式：
+    1. 发送请求后立即收到 ACK
+    2. 继续等待直到收到 ACCOUNT_DATA
+    """
     request_id = uuid.uuid4().hex
 
     account_request = {
@@ -305,33 +332,53 @@ async def get_spot_account(ws) -> dict | None:
     logger.info(f"📤 发送获取现货账户请求")
     await ws.send(json.dumps(account_request))
 
-    # 等待响应
-    response = await wait_for_message(ws, timeout=10, expected_request_id=request_id)
-    if response is None:
-        logger.error("❌ 未收到账户信息响应")
-        return None
+    # 等待 ACCOUNT_DATA 响应（忽略中间的 ACK）
+    while True:
+        response = await wait_for_message(ws, timeout=30, expected_request_id=request_id)
+        if response is None:
+            logger.error("❌ 未收到账户信息响应")
+            return None
 
-    data = json.loads(response)
-    logger.info(f"📥 收到现货账户响应")
+        data = json.loads(response)
+        msg_type = data.get("type")
+        logger.info(f"📥 收到消息类型: {msg_type}")
 
-    if data.get("type") == "ACCOUNT_DATA":
-        return data.get("data", {}).get("account", {})
+        if msg_type == "ACK":
+            logger.info("📝 收到 ACK，继续等待 ACCOUNT_DATA...")
+            continue
 
-    logger.error(f"❌ 获取账户信息失败: {data}")
-    return None
+        if msg_type == "ACCOUNT_DATA":
+            logger.info(f"📥 收到现货账户响应")
+            return data.get("data", {}).get("account", {})
+
+        if msg_type == "ERROR":
+            logger.error(f"❌ 获取账户信息失败: {data}")
+            return None
+
+        logger.warning(f"⚠️ 收到意外消息类型: {msg_type}，继续等待")
 
 
 async def main():
-    """主测试函数"""
+    """主测试函数 - 纯监听模式
+
+    测试流程：
+    1. 连接 WebSocket
+    2. 获取初始账户信息
+    3. 订阅现货账户
+    4. 监听 30 秒，用户在此期间手动下单
+    5. 验证是否收到账户更新推送
+    """
     logger.info("=" * 60)
-    logger.info("🚀 现货账户订阅 E2E 测试")
+    logger.info("🚀 现货账户订阅 E2E 测试（纯监听模式）")
     logger.info(f"📡 WebSocket URL: {WS_URL}")
     logger.info(f"📊 订阅键: {SPOT_ACCOUNT_SUBSCRIPTION}")
+    logger.info("⏱️  监听时长: 30 秒")
+    logger.info("💡 请在 30 秒内通过币安 App 或其他渠道手动下单")
     logger.info("=" * 60)
 
     test_passed = False
     account_updates: list[dict] = []
-    btc_balance_after_buy: float = 0
+    subscribe_success = False
 
     try:
         async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=60) as ws:
@@ -360,81 +407,42 @@ async def main():
                 logger.error("❌ 订阅失败，测试终止")
                 return
 
-            # Step 3: 创建市价买单（买入 200 USDT 的 BTC）
+            # Step 3: 启动账户更新监听（等待 30 秒）
             logger.info("=" * 60)
-            logger.info("Step 3: 创建市价买单 (买入 200 USDT BTCUSDT)")
-            logger.info("=" * 60)
-
-            buy_order_id = await create_market_buy_order(ws, "BTCUSDT", 200)
-
-            if buy_order_id:
-                logger.info(f"✅ 市价买单已创建，orderId: {buy_order_id}")
-            else:
-                logger.warning("⚠️ 市价买单创建失败，但继续监听账户更新")
-
-            # Step 4: 启动账户更新监听（同时等待订单成交）
-            logger.info("=" * 60)
-            logger.info("Step 4: 监听账户更新 (等待 30 秒)")
+            logger.info("Step 3: 开始监听账户更新 (30 秒)")
+            logger.info("💡 请在此期间手动下单...")
             logger.info("=" * 60)
 
-            # 并行执行：监听账户更新 + 等待5秒后尝试卖出
-            async def listen_task():
-                return await listen_for_account_updates(ws, timeout=30)
+            account_updates = await listen_for_account_updates(ws, timeout=30)
 
-            async def sell_task():
-                # 等待5秒让订单成交
-                logger.info("⏳ 等待 5 秒后检查BTC余额...")
-                await asyncio.sleep(5)
-
-                # 获取当前账户信息
-                current_account = await get_spot_account(ws)
-                if current_account:
-                    balances = current_account.get("account", {}).get("balances", [])
-                    for b in balances:
-                        if b.get("asset") == "BTC":
-                            btc_balance = float(b.get("free", 0))
-                            logger.info(f"📊 当前 BTC 余额: {btc_balance}")
-                            if btc_balance > 0.0001:  # 至少有一点BTC
-                                logger.info("=" * 60)
-                                logger.info("Step 5: 卖出所有 BTC")
-                                logger.info("=" * 60)
-                                sell_order_id = await create_market_sell_order(ws, "BTCUSDT", btc_balance)
-                                if sell_order_id:
-                                    logger.info(f"✅ 市价卖单已创建，orderId: {sell_order_id}")
-                                else:
-                                    logger.warning("⚠️ 市价卖单创建失败")
-                            else:
-                                logger.info("⚠️ BTC 余额不足，跳过卖出")
-
-            # 并行执行两个任务
-            listen_task_handle = asyncio.create_task(listen_task())
-            sell_task_handle = asyncio.create_task(sell_task())
-
-            # 等待监听任务完成
-            account_updates = await listen_task_handle
-
-            # 取消卖出任务（如果还在等待）
-            if not sell_task_handle.done():
-                sell_task_handle.cancel()
-                try:
-                    await sell_task_handle
-                except asyncio.CancelledError:
-                    pass
-
-            # Step 6: 验证结果
+            # Step 4: 验证结果
             logger.info("=" * 60)
-            logger.info("Step 6: 验证结果")
+            logger.info("Step 4: 验证结果")
             logger.info("=" * 60)
 
             if len(account_updates) > 0:
                 logger.info(f"✅ 测试通过！共收到 {len(account_updates)} 条账户更新")
 
                 # 检查事件类型
+                # 消息结构（使用 alias 输出币安原始短字段名）:
+                # {
+                #     "type": "UPDATE",
+                #     "timestamp": 1704067205000,
+                #     "subscriptionKey": "BINANCE:SPOT@ACCOUNT",
+                #     "content": {
+                #         "e": "outboundAccountPosition",  // 币安原始事件类型（alias）
+                #         "E": 1564034571105,
+                #         "u": 1564034571073,
+                #         "B": [...]
+                #     }
+                # }
                 event_types = set()
                 for update in account_updates:
                     content = update.get("content", {})
-                    event_type = content.get("event_type", "unknown")
+                    # 使用 alias，字段名为 "e"（不是 "eventType"）
+                    event_type = content.get("e", "unknown")
                     event_types.add(event_type)
+                    logger.debug(f"提取事件类型: {event_type}")
 
                 logger.info(f"📊 收到的事件类型: {event_types}")
 
@@ -445,14 +453,9 @@ async def main():
                     logger.info(f"✅ 收到预期的事件: {actual_events}")
                     test_passed = True
                 else:
-                    logger.warning(f"⚠️ 未收到预期的事件类型，收到: {event_types}")
+                    logger.error(f"❌ 未收到预期的事件类型，收到: {event_types}")
             else:
-                logger.warning("⚠️ 未收到任何账户更新")
-
-                # 即使没收到更新，只要订阅和下单成功，也认为基本测试通过
-                if buy_order_id:
-                    logger.info("✅ 但订单创建成功，基本测试通过")
-                    test_passed = True
+                logger.error("❌ 未收到任何账户更新，测试失败")
 
     except Exception as e:
         logger.error(f"测试异常: {e}")
@@ -464,8 +467,7 @@ async def main():
     logger.info("📋 测试总结:")
     logger.info(f"  - WebSocket 连接: ✅")
     logger.info(f"  - 账户订阅: {'✅' if subscribe_success else '❌'}")
-    logger.info(f"  - 市价买单: {'✅' if buy_order_id else '⚠️'}")
-    logger.info(f"  - 账户更新推送: {'✅' if len(account_updates) > 0 else '⚠️ (无推送但订单成功)'}")
+    logger.info(f"  - 账户更新推送: {'✅' if len(account_updates) > 0 else '❌'}")
     logger.info(f"  - 总体结果: {'✅ 通过' if test_passed else '❌ 失败'}")
     logger.info("=" * 60)
 

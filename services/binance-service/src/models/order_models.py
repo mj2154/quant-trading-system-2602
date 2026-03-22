@@ -56,7 +56,7 @@ class BinanceSpotExecutionReportEvent(BaseModel):
     commission_asset: str | None = Field(alias="N", description="手续费资产")
     transaction_time: int = Field(alias="T", description="成交时间")
     trade_id: int = Field(alias="t", description="成交 ID")
-    prevented_match_id: int = Field(alias="v", description="防止匹配 ID")
+    prevented_match_id: int | None = Field(default=None, alias="v", description="防止匹配 ID（仅订单因 STP 过期时）")
     execution_id: int = Field(alias="I", description="执行 ID")
     is_on_book: bool = Field(alias="w", description="订单是否在簿上")
     is_maker: bool = Field(alias="m", description="是否为做市商")
