@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Module C - 蓝色测试模块
+defineOptions({ name: 'ModuleC' })
 </script>
 
 <template>

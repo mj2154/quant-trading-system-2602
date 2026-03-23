@@ -16,6 +16,10 @@ import type {
   FuturesAccountData,
   FuturesAccountAsset,
   FuturesAccountPosition,
+  AccountUpdate,
+  SpotAccountUpdate,
+  SpotBalanceUpdateEvent,
+  SpotExecutionReportEvent,
 } from '../types/api'
 
 // 类型别名，保持向后兼容
@@ -67,6 +71,9 @@ export const useAccountStore = defineStore('account', () => {
 
   // DataService 连接状态
   const wsConnected = ref(false)
+
+  // 账户订阅状态
+  let spotUnsubscribe: (() => void) | null = null
 
   // ==================== 计算属性 ====================
 
@@ -245,21 +252,156 @@ export const useAccountStore = defineStore('account', () => {
     futuresError.value = null
   }
 
+  // ==================== 账户订阅 ====================
+
+  /**
+   * 处理现货账户增量更新
+   *
+   * @param update - 账户更新消息
+   */
+  function handleSpotAccountUpdate(update: AccountUpdate): void {
+    // 判断事件类型并分别处理
+    if (isSpotAccountUpdate(update)) {
+      handleOutboundAccountPosition(update)
+    } else if (isSpotBalanceUpdateEvent(update)) {
+      handleBalanceUpdate(update)
+    } else if (isSpotExecutionReportEvent(update)) {
+      handleExecutionReport(update)
+    }
+  }
+
+  /**
+   * 判断是否为 outboundAccountPosition 事件
+   */
+  function isSpotAccountUpdate(update: AccountUpdate): update is SpotAccountUpdate {
+    return (update as SpotAccountUpdate).e === 'outboundAccountPosition'
+  }
+
+  /**
+   * 判断是否为 balanceUpdate 事件
+   */
+  function isSpotBalanceUpdateEvent(update: AccountUpdate): update is SpotBalanceUpdateEvent {
+    return (update as SpotBalanceUpdateEvent).e === 'balanceUpdate'
+  }
+
+  /**
+   * 判断是否为 executionReport 事件
+   */
+  function isSpotExecutionReportEvent(update: AccountUpdate): update is SpotExecutionReportEvent {
+    return (update as SpotExecutionReportEvent).e === 'executionReport'
+  }
+
+  /**
+   * 处理账户余额变化事件 (outboundAccountPosition)
+   *
+   * 币安推送: 当账户余额发生变化时推送，包含所有余额
+   */
+  function handleOutboundAccountPosition(update: SpotAccountUpdate): void {
+    if (!spotAccount.value || !update.B) return
+
+    // 更新余额：遍历更新列表，直接替换对应资产的余额
+    for (const balanceUpdate of update.B) {
+      const existingBalance = spotAccount.value.balances?.find(
+        b => b.asset === balanceUpdate.a
+      )
+
+      if (existingBalance) {
+        // 更新现有资产余额
+        existingBalance.free = balanceUpdate.f
+        existingBalance.locked = balanceUpdate.l
+      } else {
+        // 添加新资产余额
+        if (spotAccount.value.balances) {
+          spotAccount.value.balances.push({
+            asset: balanceUpdate.a,
+            free: balanceUpdate.f,
+            locked: balanceUpdate.l,
+          })
+        }
+      }
+    }
+
+    // 更新账户时间戳
+    spotAccount.value.updateTime = update.u
+
+    console.debug('[AccountStore] 现货账户余额更新:', update.B)
+  }
+
+  /**
+   * 处理余额变化事件 (balanceUpdate)
+   *
+   * 币安推送: 充值/提现/转账时推送，包含单个资产变化
+   */
+  function handleBalanceUpdate(update: SpotBalanceUpdateEvent): void {
+    if (!spotAccount.value) return
+
+    // 查找现有余额
+    const existingBalance = spotAccount.value.balances?.find(
+      b => b.asset === update.a
+    )
+
+    if (existingBalance) {
+      // 应用增量变化
+      const delta = parseFloat(update.d)
+      const currentFree = parseFloat(existingBalance.free)
+      existingBalance.free = (currentFree + delta).toString()
+    } else {
+      // 新资产，创建余额记录
+      if (spotAccount.value.balances) {
+        spotAccount.value.balances.push({
+          asset: update.a,
+          free: update.d,
+          locked: '0',
+        })
+      }
+    }
+
+    console.debug('[AccountStore] 现货余额变化:', update.a, update.d)
+  }
+
+  /**
+   * 处理订单执行报告事件 (executionReport)
+   *
+   * 币安推送: 订单状态变化时推送（新建/成交/取消等）
+   * 注意：此事件不直接更新余额，余额通过 outboundAccountPosition 更新
+   */
+  function handleExecutionReport(update: SpotExecutionReportEvent): void {
+    console.debug('[AccountStore] 现货订单执行报告:', {
+      symbol: update.s,
+      orderId: update.i,
+      side: update.S,
+      type: update.o,
+      status: update.X,
+      executedQty: update.q,
+    })
+  }
+
   // ==================== 初始化 ====================
 
   /**
-   * 初始化 Store - 连接 DataService
+   * 初始化 Store - 连接 DataService 并订阅账户增量
    */
   function initialize() {
     console.debug('[AccountStore] 初始化 Store')
-    // DataService 会自动连接，不需要手动调用
-    // 首次调用 fetchSpotAccount 或 fetchFuturesAccount 时会自动连接
+
+    // 订阅现货账户增量更新
+    spotUnsubscribe = dataService.subscribeAccount('SPOT', (update) => {
+      handleSpotAccountUpdate(update)
+    })
+
+    console.debug('[AccountStore] 已订阅现货账户增量更新')
   }
 
   /**
    * 重置 Store
    */
   function reset() {
+    // 清理订阅
+    if (spotUnsubscribe) {
+      spotUnsubscribe()
+      spotUnsubscribe = null
+    }
+
     spotAccount.value = null
     spotLoading.value = false
     spotError.value = null

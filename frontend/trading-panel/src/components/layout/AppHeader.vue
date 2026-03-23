@@ -10,7 +10,7 @@ const tabStore = useTabStore()
 const dropdownOptions = [
   {
     label: 'K线图表',
-    key: 'module-a',
+    key: 'kline-chart',
     props: {
       style: { display: 'flex', alignItems: 'center', gap: '8px' }
     }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Module B - 绿色测试模块
+defineOptions({ name: 'ModuleB' })
 </script>
 
 <template>

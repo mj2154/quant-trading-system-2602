@@ -2,6 +2,8 @@
 import { NGrid, NGridItem, NCard, NTabs, NTabPane } from 'naive-ui'
 import SpotOrderForm from '../components/trading/SpotOrderForm.vue'
 
+defineOptions({ name: 'TradingDashboard' })
+
 // Development mode flag
 const isDev = import.meta.env.DEV
 

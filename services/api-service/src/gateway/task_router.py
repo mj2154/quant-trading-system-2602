@@ -934,6 +934,13 @@ class TaskRouter:
             f"新增数据库记录 {inserted_count} 个"
         )
 
+        # 专门监控账户信息订阅（BINANCE:SPOT@ACCOUNT 或 BINANCE:FUTURES@ACCOUNT）
+        account_subs = [s for s in subscriptions if "@ACCOUNT" in s]
+        if account_subs:
+            logger.info(
+                f"[账户订阅监控] 客户端 {client_id} 订阅账户信息: {account_subs}"
+            )
+
         return self._response(
             msg_type="SUBSCRIPTION_DATA",  # 遵循07-websocket-protocol.md规范
             request_id=request_id,
@@ -962,6 +969,14 @@ class TaskRouter:
             # 取消所有订阅
             deleted_keys = await self._subscription_manager.unsubscribe_all(client_id)
             logger.info(f"客户端 {client_id} 取消全部 {len(deleted_keys)} 个订阅")
+
+            # 专门监控账户信息取消订阅
+            account_unsubs = [k for k in deleted_keys if "@ACCOUNT" in k]
+            if account_unsubs:
+                logger.info(
+                    f"[账户订阅监控] 客户端 {client_id} 取消全部账户信息订阅: {account_unsubs}"
+                )
+
             return self._response(
                 msg_type="SUBSCRIPTION_DATA",  # 遵循07-websocket-protocol.md规范
                 request_id=request_id,
@@ -985,6 +1000,13 @@ class TaskRouter:
             f"客户端 {client_id} 取消 {len(subscriptions)} 个订阅，"
             f"删除数据库记录 {deleted_count} 个"
         )
+
+        # 专门监控账户信息取消订阅（BINANCE:SPOT@ACCOUNT 或 BINANCE:FUTURES@ACCOUNT）
+        account_unsubs = [s for s in subscriptions if "@ACCOUNT" in s]
+        if account_unsubs:
+            logger.info(
+                f"[账户订阅监控] 客户端 {client_id} 取消账户信息订阅: {account_unsubs}"
+            )
 
         return self._response(
             msg_type="UNSUBSCRIBE_DATA",  # 遵循07-websocket-protocol.md规范

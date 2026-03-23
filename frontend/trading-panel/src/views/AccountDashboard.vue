@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref, h, computed } from 'vue'
+import { onMounted, onUnmounted, onActivated, onDeactivated, ref, h, computed } from 'vue'
 import { NCard, NStatistic, NGrid, NGi, NSpin, NEmpty, NTag, NDataTable, NButton, NIcon, NProgress, NTabs, NTabPane, NTooltip, NBadge, NAlert, NCollapse, NCollapseItem, NAvatar, NSpace, NDivider } from 'naive-ui'
+
+// 定义组件名称，使 keep-alive 能够正确识别和缓存
+defineOptions({ name: 'AccountDashboard' })
 import { RefreshOutline, WalletOutline, TrendingUpOutline, TrendingDownOutline, ShieldCheckmarkOutline, AlertCircleOutline, SwapHorizontalOutline, PersonOutline, KeyOutline, FlameOutline, CashOutline, DocumentTextOutline, GitNetworkOutline, TimeOutline, StatsChartOutline, PricetagOutline, EllipseOutline } from '@vicons/ionicons5'
 import { useAccountStore } from '../stores/account-store'
 
@@ -103,6 +106,24 @@ async function handleRefresh() {
 onMounted(() => {
   store.initialize()
   store.refreshAccounts()
+})
+
+// keep-alive 激活时（从缓存恢复）
+onActivated(() => {
+  // 如果订阅已存在，不需要重新初始化
+  // DataService 是全局单例，订阅会自动保持
+})
+
+// keep-alive 停用时（进入缓存）
+onDeactivated(() => {
+  // keep-alive 缓存时不清理订阅，因为 DataService 是全局单例
+  // 切换回来时订阅仍然有效
+})
+
+// 组件真正销毁时清理
+onUnmounted(() => {
+  // 重置 Store 状态并取消订阅
+  store.reset()
 })
 
 // 计算账户风险等级

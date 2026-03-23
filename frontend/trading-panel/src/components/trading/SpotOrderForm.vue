@@ -442,8 +442,7 @@ function formatPrice(value: number | undefined): string {
 
 // Initialize data on mount
 onMounted(async () => {
-  // Initialize account store and fetch account data
-  accountStore.initialize()
+  // Fetch account data (no subscription needed for spot order form)
   await accountStore.refreshAccounts()
 
   // Fetch quotes once via DataService

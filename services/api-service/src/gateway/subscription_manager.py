@@ -207,7 +207,14 @@ class SubscriptionManager:
         Args:
             client_id: 客户端ID
         """
-        await self.unsubscribe_all(client_id)
+        deleted_keys = await self.unsubscribe_all(client_id)
+
+        # 专门监控账户信息取消订阅（客户端断开连接时）
+        account_unsubs = [k for k in deleted_keys if "@ACCOUNT" in k]
+        if account_unsubs:
+            logger.info(
+                f"[账户订阅监控] 客户端断开连接 {client_id} 取消账户信息订阅: {account_unsubs}"
+            )
 
     # ========== 广播接口 ==========
 

@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { NCard, NButton, NSpace, NGrid, NGridItem, NSwitch, NSlider, NSelect, NText, NDivider, useNotification } from 'naive-ui'
 import { useAlertSettings, SOUND_TYPE_NAMES, type SoundType } from '../composables/useAlertSettings'
+
+// 定义组件名称，使 keep-alive 能够正确识别和缓存
+defineOptions({ name: 'AlertTest' })
+
+// 组件销毁时记录日志
+onUnmounted(() => {
+  console.log('[AlertTest] 组件已销毁 ✓')
+})
 
 const { settings, playAlertSound } = useAlertSettings()
 const notification = useNotification()

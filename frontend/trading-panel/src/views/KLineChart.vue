@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// Module A - K线图表模块
+// K线图表模块
 import TradingViewChart from '../components/TradingViewChart/index.vue'
+
+defineOptions({ name: 'KLineChart' })
 
 const handleChartReady = (widget: any) => {
 }
@@ -10,7 +12,7 @@ const handleChartError = (error: any) => {
 </script>
 
 <template>
-  <div class="module module-a">
+  <div class="module kline-chart">
     <TradingViewChart
       height="100%"
       width="100%"
@@ -21,7 +23,7 @@ const handleChartError = (error: any) => {
 </template>
 
 <style scoped>
-.module-a {
+.kline-chart {
   width: 100%;
   height: 100%;
   background-color: #1e1e1e;
