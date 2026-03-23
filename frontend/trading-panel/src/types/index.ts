@@ -60,6 +60,14 @@ export type {
   FuturesAccountPosition,
   FuturesAccountDetail,
   FuturesAccountData,
+  SpotBalanceUpdate,
+  SpotAccountUpdate,
+  SpotBalanceUpdateEvent,
+  SpotExecutionReportEvent,
+  FuturesAccountUpdateContent,
+  FuturesAccountUpdate,
+  AccountUpdateMessage,
+  AccountUpdate,
 } from './api/account'
 
 // 信号类型
@@ -98,7 +106,6 @@ export type {
   SubscriptionInfo,
   QuotesValue,
   TradeData,
-  AccountUpdate,
   KlineSubscriptionOptions,
   QuotesSubscriptionOptions,
   AccountSubscriptionOptions,

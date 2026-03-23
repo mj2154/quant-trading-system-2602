@@ -242,23 +242,15 @@ def _create_futures_account_update(event_data: dict) -> CamelCaseModel:
     Returns:
         FuturesAccountUpdate 实例
     """
-    from ..models.trading.account_models import (
-        FuturesAccountUpdate,
-        FuturesAccountUpdateContent,
-    )
+    from ..models.trading.account_models import FuturesAccountUpdate
 
-    # 构建content内容
-    content = FuturesAccountUpdateContent(
-        event_type=event_data.get("e", "ACCOUNT_UPDATE"),
-        event_time=event_data.get("E", 0),
-        transaction_time=event_data.get("T", 0),
-        a=event_data.get("a", {}),
-    )
+    # 从 a 字段提取余额和持仓更新
+    a_data = event_data.get("a", {})
 
     return FuturesAccountUpdate(
-        event_type="account_update",
-        subscription_key="BINANCE:FUTURES@ACCOUNT",
-        content=content,
+        reason=a_data.get("m", ""),
+        balances=a_data.get("B", []),
+        positions=a_data.get("P", []),
     )
 
 

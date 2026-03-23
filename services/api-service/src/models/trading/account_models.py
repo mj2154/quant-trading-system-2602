@@ -249,37 +249,22 @@ class FuturesPositionUpdate(CamelCaseModel):
     position_side: str = Field(default="BOTH", description="持仓方向：LONG, SHORT, BOTH")
 
 
-class FuturesAccountUpdateContent(CamelCaseModel):
-    """期货账户更新内容
-
-    对应 ACCOUNT_UPDATE 事件的 content 字段。
-    币安字段: e, E, T, a
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    event_type: str = Field(default="ACCOUNT_UPDATE", description="事件类型")
-    event_time: int = Field(default=0, description="事件时间（毫秒）")
-    transaction_time: int = Field(default=0, description="事务时间（毫秒）")
-    a: dict[str, Any] = Field(default_factory=dict, description="更新数据（币安原始格式）")
-
-
 class FuturesAccountUpdate(CamelCaseModel):
     """期货账户增量推送（WS订阅）
 
     对应 WS协议 ACCOUNT_UPDATE 事件。
     数据来源: Binance WebSocket User Data Stream (ACCOUNT_UPDATE)。
+    使用 alias 直接输出币安原始短字段名 (m, B, P)。
 
     使用场景: 订阅期货账户实时增量更新。
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    event_type: str = Field(default="account_update", description="事件类型")
-    subscription_key: str = Field(
-        default="BINANCE:FUTURES@ACCOUNT", description="订阅键"
-    )
-    content: FuturesAccountUpdateContent = Field(description="推送内容")
+    # 直接使用 alias 输出币安短字段名
+    reason: str = Field(alias="m", default="", description="余额变动原因：ORDER, FUNDING_FEE, WITHDRAW, DEPOSIT等")
+    balances: list[dict[str, Any]] = Field(alias="B", default_factory=list, description="余额更新列表")
+    positions: list[dict[str, Any]] = Field(alias="P", default_factory=list, description="持仓更新列表")
 
     @classmethod
     def from_account_update_event(cls, event_data: dict[str, Any]) -> "FuturesAccountUpdate":
@@ -291,21 +276,10 @@ class FuturesAccountUpdate(CamelCaseModel):
         Returns:
             FuturesAccountUpdate 实例
         """
-        # 直接使用原始 a 字段数据
-        a_data = event_data.get("a", {})
-
-        # 构建content内容
-        content = FuturesAccountUpdateContent(
-            event_type=event_data.get("e", "ACCOUNT_UPDATE"),
-            event_time=event_data.get("E", 0),
-            transaction_time=event_data.get("T", 0),
-            a=a_data,
-        )
-
         return cls(
-            event_type="account_update",
-            subscription_key="BINANCE:FUTURES@ACCOUNT",
-            content=content,
+            reason=event_data.get("m", ""),
+            balances=event_data.get("B", []),
+            positions=event_data.get("P", []),
         )
 
 

@@ -21,7 +21,6 @@ DataProcessor 是 API 服务内部的数据处理中枢，负责：
 | `task_failed` | 任务状态更新为 failed | 推送错误消息给客户端 |
 | `realtime_update` | realtime_data.data 更新 | 解析数据，广播给订阅该 subscription_key 的客户端 |
 | `signal_new` | strategy_signals 插入新记录 | 广播给订阅对应 SIGNAL:{alert_id} 的客户端 |
-| `config.new/update/delete` | strategy_config 变更 | 广播给订阅 strategy:* 的客户端 |
 | `alert_config.new/update/delete` | alert_configs 变更 | 仅记录日志，前端通过 CRUD 响应更新状态 |
 | `order.new` | trading_orders 新增记录 | 记录日志（binance-service执行下单） |
 | `order.update` | trading_orders 数据更新 | 推送给订阅订单的客户端 |
@@ -36,7 +35,7 @@ DataProcessor 是 API 服务内部的数据处理中枢，负责：
 
 ```
 DataProcessor
-├── _on_notification()          # 业务事件处理 (signal_new, config.*, alert_config.*)
+├── _on_notification()          # 业务事件处理 (signal_new, alert_config.*)
 ├── _on_task_notification()    # 任务事件处理 (task_completed, task_failed)
 ├── _on_subscription_notification()  # 订阅变更处理 (记录日志)
 ├── _on_realtime_notification() # 实时数据处理 (realtime_update)
@@ -196,9 +195,9 @@ class DataProcessor:
             "task_failed",
             "realtime_update",
             "signal_new",
-            "config.new",
-            "config.update",
-            "config.delete",
+            "alert_config.new",
+            "alert_config.update",
+            "alert_config.delete",
         ]
 
         for channel in channels:
@@ -223,8 +222,6 @@ class DataProcessor:
                 await self._on_realtime_notification(data)
             elif channel == "signal_new":
                 await self._on_signal_notification(data)
-            elif channel.startswith("config."):
-                await self._on_config_notification(channel, data)
             elif channel.startswith("alert_config."):
                 await self._on_alert_config_notification(channel, data)
         except Exception as e:

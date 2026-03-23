@@ -10,8 +10,8 @@ pytest 风格测试基类
 - 请求: {"protocolVersion": "2.0", "type": "SUBSCRIBE", "requestId": "...", "timestamp": ..., "data": {...}}
 - ACK: {"protocolVersion": "2.0", "type": "ACK", "requestId": "...", "timestamp": ..., "data": {}}
 - SUCCESS: {"protocolVersion": "2.0", "type": "KLINES_DATA", "requestId": "...", "timestamp": ..., "data": {...}}
-- UPDATE: {"protocolVersion": "2.0", "type": "UPDATE", "timestamp": ..., "data": {"subscriptionKey": "...", "content": {...}}}
-  注意：UPDATE 推送不包含 requestId
+- UPDATE: {"protocolVersion": "2.0", "type": "UPDATE", "timestamp": ..., "subscriptionKey": "...", "data": {...}}
+  注意：UPDATE 推送不包含 requestId，subscriptionKey 在顶层，data 直接作为载荷
 """
 
 import pytest
@@ -36,8 +36,8 @@ class RealtimeTestMixin:
         关键验证点（严格遵循协议）：
         1. type 必须是 "UPDATE"（在顶层）
         2. 不包含 requestId（实时推送是无状态的）
-        3. 包含 data.subscriptionKey
-        4. 包含 data.content 数据
+        3. 包含顶层 subscriptionKey
+        4. data 直接作为载荷（无 content 包装）
         """
         # 验证 type（协议要求在顶层）
         msg_type = message.get("type")
@@ -50,15 +50,10 @@ class RealtimeTestMixin:
                 f"UPDATE 推送不应包含 requestId 字段，实际收到: {message.get('requestId')}"
             )
 
-        # 验证 data 字段
-        data = message.get("data")
-        if not data:
-            pytest.fail("UPDATE 消息缺少 data 字段")
-
-        # 验证 subscriptionKey
-        subscription_key_received = data.get("subscriptionKey")
+        # 验证 subscriptionKey（在顶层）
+        subscription_key_received = message.get("subscriptionKey")
         if not subscription_key_received:
-            pytest.fail("UPDATE 消息缺少 subscriptionKey 字段")
+            pytest.fail("UPDATE 消息缺少顶层 subscriptionKey 字段")
 
         if subscription_key and subscription_key not in subscription_key_received:
             pytest.fail(
@@ -66,10 +61,10 @@ class RealtimeTestMixin:
                 f"实际为 '{subscription_key_received}'"
             )
 
-        # 验证 content
-        content = data.get("content")
-        if content is None:
-            pytest.fail("UPDATE 消息缺少 content 字段")
+        # 验证 data 字段存在
+        data = message.get("data")
+        if not data:
+            pytest.fail("UPDATE 消息缺少 data 字段")
 
         return True
 
@@ -94,28 +89,27 @@ class RealtimeTestMixin:
         self.assert_is_realtime_update(message, f"KLINE_{resolution}")
 
         data = message.get("data", {})
-        content = data.get("content", {})
 
         # 必填字段
         required_fields = ["time", "open", "high", "low", "close"]
         for field in required_fields:
-            if field not in content:
+            if field not in data:
                 pytest.fail(f"K线数据缺少必填字段: {field}")
-            if not isinstance(content[field], (int, float)):
+            if not isinstance(data[field], (int, float)):
                 pytest.fail(f"K线字段 {field} 必须是数值类型")
 
         # 时间戳应该是毫秒级的
-        time_value = content.get("time", 0)
+        time_value = data.get("time", 0)
         if time_value < 1000000000000:
             pytest.fail(
                 f"K线时间戳应该是毫秒级 (>= 1000000000000), 实际为 {time_value}"
             )
 
         # 验证OHLC逻辑
-        high = content.get("high", 0)
-        low = content.get("low", 0)
-        open_price = content.get("open", 0)
-        close_price = content.get("close", 0)
+        high = data.get("high", 0)
+        low = data.get("low", 0)
+        open_price = data.get("open", 0)
+        close_price = data.get("close", 0)
 
         if high < max(open_price, close_price, low):
             pytest.fail(f"high 值不正确: high={high} < max(open,close,low)")
@@ -149,29 +143,37 @@ class RealtimeTestMixin:
         self.assert_is_realtime_update(message, "QUOTES")
 
         data = message.get("data", {})
-        content = data.get("content", {})
 
-        # 兼容单条和批量格式
-        if isinstance(content, list):
-            # 批量格式，取第一条
-            if not content:
-                pytest.fail("QUOTES 批量数据为空")
-            content = content[0]
+        # 兼容两种格式：data 直接是 quotes 列表，或 data 包含 quotes 字段
+        quotes_list: list
+        if isinstance(data, list):
+            # data 直接是列表格式
+            quotes_list = data
+        elif isinstance(data, dict):
+            # data 是 QuotesData 格式，包含 quotes 字段
+            quotes_list = data.get("quotes", [])
+        else:
+            pytest.fail(f"QUOTES data 格式无效: {type(data)}")
+
+        # 兼容单条和批量格式 - 取第一条
+        if not quotes_list:
+            pytest.fail("QUOTES 数据为空")
+        quote_item = quotes_list[0]
 
         # 必填字段
-        if "n" not in content:
+        if "n" not in quote_item:
             pytest.fail("QUOTES 数据缺少 'n' 字段 (标的全名)")
-        if "s" not in content:
+        if "s" not in quote_item:
             pytest.fail("QUOTES 数据缺少 's' 字段 (状态)")
-        if "v" not in content:
+        if "v" not in quote_item:
             pytest.fail("QUOTES 数据缺少 'v' 字段 (报价值对象)")
 
         # 验证 symbol 匹配
-        if symbol and content.get("n") != symbol:
-            pytest.fail(f"symbol 不匹配，期望 '{symbol}', 实际为 '{content.get('n')}'")
+        if symbol and quote_item.get("n") != symbol:
+            pytest.fail(f"symbol 不匹配，期望 '{symbol}', 实际为 '{quote_item.get('n')}'")
 
         # 验证 v 字段
-        v = content.get("v", {})
+        v = quote_item.get("v", {})
         if not isinstance(v, dict):
             pytest.fail("QUOTES v 字段必须是字典类型")
 

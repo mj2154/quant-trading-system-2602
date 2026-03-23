@@ -11,7 +11,7 @@ pytest Fixtures - WebSocket 连接管理
 - 请求: {"protocolVersion": "2.0", "type": "SUBSCRIBE", "requestId": "...", "timestamp": ..., "data": {...}}
 - ACK: {"protocolVersion": "2.0", "type": "ACK", "requestId": "...", "timestamp": ..., "data": {}}
 - SUCCESS: {"protocolVersion": "2.0", "type": "KLINES_DATA", "requestId": "...", "timestamp": ..., "data": {...}}
-- UPDATE: {"protocolVersion": "2.0", "type": "UPDATE", "timestamp": ..., "data": {"subscriptionKey": "...", "content": {...}}}
+- UPDATE: {"protocolVersion": "2.0", "type": "UPDATE", "timestamp": ..., "subscriptionKey": "...", "data": {...}}
   注意：UPDATE 推送不包含 requestId
 """
 
@@ -195,7 +195,7 @@ class WebSocketTestClient:
         协议要求：
         - UPDATE 消息的 type="UPDATE"
         - UPDATE 消息不包含 requestId
-        - UPDATE 消息包含 subscriptionKey 和 content
+        - UPDATE 消息包含 subscriptionKey 和 data（data 直接作为载荷，无 content 包装）
 
         Args:
             timeout: 超时时间（秒）

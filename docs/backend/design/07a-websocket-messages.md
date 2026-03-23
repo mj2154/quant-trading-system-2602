@@ -966,14 +966,12 @@
     "timestamp": 1703123456790,
     "subscriptionKey": "BINANCE:BTCUSDT@KLINE_1",
     "data": {
-        "content": {
-            "time": 1703123400000,
-            "open": 97000.00,
-            "high": 97600.00,
-            "low": 96800.00,
-            "close": 97500.00,
-            "volume": 125.43
-        }
+        "time": 1703123400000,
+        "open": 97000.00,
+        "high": 97600.00,
+        "low": 96800.00,
+        "close": 97500.00,
+        "volume": 125.43
     }
 }
 ```
@@ -986,15 +984,13 @@
     "timestamp": 1703123456790,
     "subscriptionKey": "BINANCE:BTCUSDT@QUOTES",
     "data": {
-        "content": {
-            "n": "BINANCE:BTCUSDT",
-            "s": "ok",
-            "v": {
-                "lp": 97500.00,
-                "ask": 97501.00,
-                "bid": 97499.00,
-                "volume": 45678.90
-            }
+        "n": "BINANCE:BTCUSDT",
+        "s": "ok",
+        "v": {
+            "lp": 97500.00,
+            "ask": 97501.00,
+            "bid": 97499.00,
+            "volume": 45678.90
         }
     }
 }
@@ -1008,18 +1004,15 @@
     "timestamp": 1704067205000,
     "subscriptionKey": "SIGNAL:550e8400e29b41d4a716446655440001",
     "data": {
-        "eventType": "signal_new",
-        "content": {
-            "id": 123,
-            "alertId": "550e8400e29b41d4a716446655440001",
-            "name": "BTC MACD共振",
-            "strategyType": "MACDResonanceStrategyV5",
-            "symbol": "BINANCE:BTCUSDT",
-            "interval": "60",
-            "signalValue": true,
-            "signalReason": "建仓信号",
-            "computedAt": "2026-02-13T10:00:05Z"
-        }
+        "id": 123,
+        "alertId": "550e8400e29b41d4a716446655440001",
+        "name": "BTC MACD共振",
+        "strategyType": "MACDResonanceStrategyV5",
+        "symbol": "BINANCE:BTCUSDT",
+        "interval": "60",
+        "signalValue": true,
+        "signalReason": "建仓信号",
+        "computedAt": "2026-02-13T10:00:05Z"
     }
 }
 ```
@@ -1031,22 +1024,17 @@
 
 #### 期货账户（ACCOUNT_UPDATE）
 
+> **说明**: 直接透传币安原始 `a` 字段，包含余额更新 `B` 和持仓更新 `P`。
+
 ```json
 {
     "type": "UPDATE",
     "timestamp": 1704067205000,
     "subscriptionKey": "BINANCE:FUTURES@ACCOUNT",
     "data": {
-        "eventType": "account_update",
-        "content": {
-            "e": "ACCOUNT_UPDATE",
-            "E": 1704067205000,
-            "a": {
-                "m": "ORDER",
-                "B": [{ "a": "USDT", "wb": "5200.00", "cw": "4200.00" }],
-                "P": [{ "s": "BTCUSDT", "pa": "0.500", "ep": "50000.00" }]
-            }
-        }
+        "m": "ORDER",
+        "B": [{ "a": "USDT", "wb": "5200.00", "cw": "4200.00" }],
+        "P": [{ "s": "BTCUSDT", "pa": "0.500", "ep": "50000.00" }]
     }
 }
 ```
@@ -1168,19 +1156,16 @@
     "timestamp": 1704067205000,
     "subscriptionKey": "BINANCE:FUTURES@ACCOUNT",
     "data": {
-        "eventType": "order_update",
-        "content": {
-            "e": "ORDER_TRADE_UPDATE",
-            "E": 1704067205000,
-            "s": "BTCUSDT",
-            "i": 123456789,
-            "X": "FILLED",
-            "l": "0.002",
-            "z": "0.002",
-            "L": "50000.00",
-            "n": "10.00",
-            "T": 1704067205000
-        }
+        "e": "ORDER_TRADE_UPDATE",
+        "E": 1704067205000,
+        "s": "BTCUSDT",
+        "i": 123456789,
+        "X": "FILLED",
+        "l": "0.002",
+        "z": "0.002",
+        "L": "50000.00",
+        "n": "10.00",
+        "T": 1704067205000
     }
 }
 ```

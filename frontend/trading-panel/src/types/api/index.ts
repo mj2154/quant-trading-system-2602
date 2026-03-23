@@ -86,6 +86,19 @@ export type {
   FuturesAccountData,
 } from './account'
 
+// ==================== 账户增量更新类型（WS订阅） ====================
+
+export type {
+  SpotBalanceUpdate,
+  SpotAccountUpdate,
+  SpotBalanceUpdateEvent,
+  SpotExecutionReportEvent,
+  FuturesAccountUpdateContent,
+  FuturesAccountUpdate,
+  AccountUpdateMessage,
+  AccountUpdate,
+} from './account'
+
 // ==================== 信号类型 ====================
 
 export type {
@@ -122,6 +135,7 @@ import type { KlineBar } from './kline'
 import type { SignalRecord } from './signal'
 import type { OrderData } from './order'
 import type { QuotesValue } from './quote'
+import type { AccountUpdate } from './account'
 
 /**
  * 订阅选项配置
@@ -150,19 +164,6 @@ export interface TradeData {
   time: number
   isBuyerMaker: boolean
   tradeId: string
-}
-
-/**
- * 账户增量更新数据
- */
-export interface AccountUpdate {
-  accountType: 'SPOT' | 'FUTURES'
-  balances: Array<{
-    asset: string
-    free: number
-    locked: number
-  }>
-  timestamp: number
 }
 
 /**

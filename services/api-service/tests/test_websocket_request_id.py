@@ -13,7 +13,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.models.websocket import (
+from src.models.protocol.ws_message import (
     WebSocketMessage,
     MessageRequest,
     MessageUpdate,
@@ -125,19 +125,22 @@ class TestMessageUpdateRequestId:
         """测试 MessageUpdate 不需要 request_id（服务器主动推送）"""
         update = MessageUpdate(
             timestamp=1234567890,
-            data={
-                "subscriptionKey": "btcusdt@kline_1m",
-                "payload": {"open": 50000, "high": 50100, "low": 49900, "close": 50050}
-            }
+            subscription_key="btcusdt@kline_1m",
+            data={"open": 50000, "high": 50100, "low": 49900, "close": 50050}
         )
-        assert update.action == "update"
+        assert update.type == "UPDATE"
         assert update.timestamp == 1234567890
-        assert "subscriptionKey" in update.data
+        assert update.subscription_key == "btcusdt@kline_1m"
+        assert update.data is not None
 
     def test_message_update_not_inherits_websocket_message(self):
         """验证 MessageUpdate 是独立模型，不继承 WebSocketMessage"""
         # MessageUpdate 不应该有 request_id 字段
-        update = MessageUpdate(timestamp=1234567890, data={"test": "data"})
+        update = MessageUpdate(
+            timestamp=1234567890,
+            subscription_key="test",
+            data={"test": "data"}
+        )
         # 检查是否存在 request_id 属性
         has_request_id = hasattr(update, 'request_id')
         assert not has_request_id or getattr(update, 'request_id', None) is None

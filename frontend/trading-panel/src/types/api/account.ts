@@ -215,3 +215,201 @@ export interface FuturesAccountData {
   account: FuturesAccountDetail
 }
 
+// ==================== 账户增量更新类型（WS订阅） ====================
+// 后端使用 alias 输出币安原始短字段名，参考 account_models.py
+// 消息结构: { type: "UPDATE", timestamp, subscriptionKey, data }
+
+/**
+ * 现货余额更新
+ *
+ * 对应后端 SpotBalanceUpdate
+ * 对应 outboundAccountPosition 事件中的 B 字段
+ * 使用币安原始短字段名
+ */
+export interface SpotBalanceUpdate {
+  /** 资产名称 (alias: a) */
+  a: string
+  /** 可用余额 (alias: f) */
+  f: string
+  /** 冻结余额 (alias: l) */
+  l: string
+}
+
+/**
+ * 现货账户增量推送
+ *
+ * 对应后端 SpotAccountUpdate
+ * 对应 WS协议 outboundAccountPosition 事件
+ * 使用 alias 输出币安原始短字段名
+ * 设计文档: 08-api-models.md
+ *
+ * 消息格式（实际收到的字段名）:
+ * {
+ *   "e": "outboundAccountPosition",
+ *   "E": 1564034571105,
+ *   "u": 1564034571073,
+ *   "B": [{ "a": "BTC", "f": "1.0", "l": "0.5" }]
+ * }
+ */
+export interface SpotAccountUpdate {
+  /** 事件类型 (alias: e) */
+  e: string
+  /** 事件时间 (alias: E) */
+  E: number
+  /** 账户最后更新时间 (alias: u) */
+  u: number
+  /** 余额列表 (alias: B) */
+  B: SpotBalanceUpdate[]
+}
+
+/**
+ * 现货余额更新事件
+ *
+ * 对应后端 SpotBalanceUpdateEvent
+ * 对应 WS协议 balanceUpdate 事件
+ * 设计文档: 08-api-models.md
+ *
+ * 消息格式:
+ * {
+ *   "e": "balanceUpdate",
+ *   "E": 1564034571105,
+ *   "a": "BTC",
+ *   "d": "1.0",
+ *   "T": 1564034571000
+ * }
+ */
+export interface SpotBalanceUpdateEvent {
+  /** 事件类型 (alias: e) */
+  e: string
+  /** 事件时间 (alias: E) */
+  E: number
+  /** 资产名称 (alias: a) */
+  a: string
+  /** 余额变化量 (alias: d) */
+  d: string
+  /** 清算时间 (alias: T) */
+  T: number
+}
+
+/**
+ * 现货订单执行报告事件
+ *
+ * 对应后端 SpotExecutionReportEvent
+ * 对应 WS协议 executionReport 事件
+ * 设计文档: 08-api-models.md
+ */
+export interface SpotExecutionReportEvent {
+  /** 事件类型 (alias: e) */
+  e: string
+  /** 事件时间 (alias: E) */
+  E: number
+  /** 交易对 (alias: s) */
+  s: string
+  /** 客户端订单ID (alias: c) */
+  c: string
+  /** 订单方向 (alias: S) */
+  S: string
+  /** 订单类型 (alias: o) */
+  o: string
+  /** 订单状态 (alias: X) */
+  X: string
+  /** ... 更多字段见后端模型 */
+}
+
+/**
+ * 期货账户更新内容
+ *
+ * 对应后端 FuturesAccountUpdateContent
+ * 对应 ACCOUNT_UPDATE 事件的 content 字段
+ * 使用币安原始短字段名
+ *
+ * 消息格式（实际收到的字段名）:
+ * {
+ *   "e": "ACCOUNT_UPDATE",
+ *   "E": 1564034571105,
+ *   "T": 1564034571000,
+ *   "a": {
+ *     "B": [...],  // 余额更新
+ *     "P": [...]   // 持仓更新
+ *   }
+ * }
+ */
+export interface FuturesAccountUpdateContent {
+  /** 事件类型 (alias: e) */
+  e: string
+  /** 事件时间 (alias: E) */
+  E: number
+  /** 事务时间 (alias: T) */
+  T: number
+  /** 更新数据 (alias: a) */
+  a: {
+    /** 余额更新列表 (alias: B) */
+    B?: Array<{
+      /** 资产名称 (alias: a) */
+      a: string
+      /** 钱包余额 (alias: wb) */
+      wb: string
+      /** 全仓钱包余额 (alias: cw) */
+      cw: string
+      /** 余额变动 (alias: bc) */
+      bc: string
+      /** 变动原因 (alias: m) */
+      m: string
+    }>
+    /** 持仓更新列表 (alias: P) */
+    P?: Array<{
+      /** 交易对 (alias: s) */
+      s: string
+      /** 持仓数量 (alias: pa) */
+      pa: string
+      /** 开仓价格 (alias: ep) */
+      ep: string
+      /** 持仓方向 (alias: ps) */
+      ps: string
+    }>
+  }
+}
+
+/**
+ * 期货账户增量推送
+ *
+ * 对应后端 FuturesAccountUpdate
+ * 对应 WS协议 ACCOUNT_UPDATE 事件
+ * 设计文档: 08-api-models.md
+ */
+export interface FuturesAccountUpdate {
+  /** 订阅键 */
+  subscriptionKey: string
+  /** 更新内容 */
+  content: FuturesAccountUpdateContent
+}
+
+/**
+ * 统一账户更新 WS 消息格式
+ *
+ * 对应后端 MessageUpdate 消息
+ * 外层结构: { type, timestamp, subscriptionKey, data }
+ *
+ * data 类型根据 subscriptionKey 区分:
+ * - "BINANCE:SPOT@ACCOUNT" -> SpotAccountUpdate | SpotBalanceUpdateEvent | SpotExecutionReportEvent
+ * - "BINANCE:FUTURES@ACCOUNT" -> FuturesAccountUpdate
+ */
+export interface AccountUpdateMessage {
+  /** 消息类型 (固定值 "UPDATE") */
+  type: 'UPDATE'
+  /** 时间戳 */
+  timestamp: number
+  /** 订阅键 */
+  subscriptionKey: string
+  /** 更新内容 */
+  data: SpotAccountUpdate | FuturesAccountUpdate | SpotBalanceUpdateEvent | SpotExecutionReportEvent
+}
+
+/**
+ * 统一账户更新类型（兼容期货和现货）
+ *
+ * 用于 SubscriptionData 联合类型
+ * 注意：此类型是 WS 消息中的 content 部分
+ */
+export type AccountUpdate = SpotAccountUpdate | FuturesAccountUpdate | SpotBalanceUpdateEvent | SpotExecutionReportEvent
+

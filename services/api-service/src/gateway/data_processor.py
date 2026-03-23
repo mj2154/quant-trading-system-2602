@@ -4,7 +4,7 @@
 使用 PostgreSQL LISTEN/NOTIFY 机制监听数据库事件：
 - 任务事件: task_completed, task_failed
 - 实时数据: realtime_update
-- 业务事件: signal_new, config.new/update/delete
+- 业务事件: signal_new
 - 告警配置: alert_config.new/update/delete
 
 遵循 QUANT_TRADING_SYSTEM_ARCHITECTURE.md 设计。
@@ -27,6 +27,7 @@ from ..models.protocol.constants import PROTOCOL_VERSION
 from ..models.protocol.ws_message import MessageError, MessageSuccess, MessageUpdate
 from ..models.protocol.ws_payload import ErrorData, ServerTimeData
 from ..models.protocol.ws_payload import SignalData
+from ..models.db.alert_config_models import AlertConfigData
 from ..models.trading.kline_models import KlineBar, KlineBars
 from ..models.trading.quote_models import QuotesData, QuotesList, QuotesValue
 from .client_manager import ClientManager
@@ -72,9 +73,6 @@ REALTIME_CHANNELS = [
 # 业务事件频道列表
 BUSINESS_CHANNELS = [
     "signal_new",
-    "config.new",
-    "config.update",
-    "config.delete",
     # 告警配置事件频道
     "alert_config.new",
     "alert_config.update",
@@ -220,8 +218,6 @@ class DataProcessor:
             # 格式：{ event_type, timestamp, data: { alert_id, ... } }
             if channel in ("signal_new",):
                 event_data = data.get("data", data)
-            elif channel in ("config.new", "config.update", "config.delete"):
-                event_data = data
             else:
                 event_data = data.get("data", {})
 
@@ -244,23 +240,27 @@ class DataProcessor:
 
             # 构建推送消息
             # 使用 MessageUpdate 模型确保符合协议规范
-            # 严格遵循07-websocket-protocol.md：subscription_key 提升到顶层，content 作为数据载荷
+            # 严格遵循07-websocket-protocol.md：subscription_key 在顶层，data 直接作为数据载荷
             subscription_key = self._get_subscription_key(event_type, event_data)
 
             # 根据事件类型创建相应的数据模型
-            # signal_new 使用 SignalData，其他事件使用 dict
+            # 严格遵循设计规范：所有数据必须转换为 CamelCaseModel
             content_model: BaseModel
             if channel == "signal_new":
                 content_model = SignalData(**event_data)
+            elif channel in ("alert_config.new", "alert_config.update", "alert_config.delete"):
+                # alert_config 事件使用 AlertConfigData 模型
+                content_model = AlertConfigData(**event_data)
             else:
-                # 其他事件使用 dict（动态数据）
-                content_model = event_data if event_data else {}
+                # 其他事件（理论上不应该到达这里，因为只剩 signal_new 和 alert_config）
+                # 保留防护性处理
+                raise ValueError(f"Unsupported channel: {channel}")
 
             message = MessageUpdate(
                 type="UPDATE",
                 timestamp=self._timestamp_ms(),
                 subscription_key=subscription_key,
-                content=content_model,
+                data=content_model,
             )
 
             logger.info(
@@ -288,13 +288,8 @@ class DataProcessor:
                     symbol,
                 )
 
-            # 对于信号和配置事件，广播到通用的策略频道
-            if channel in (
-                "signal_new",
-                "config.new",
-                "config.update",
-                "config.delete",
-            ):
+            # 对于信号事件，广播到通用的策略频道
+            if channel == "signal_new":
                 await self._client_manager.broadcast(
                     "strategy:all",
                     message,
@@ -1090,13 +1085,13 @@ class DataProcessor:
                         )
 
             # 使用 MessageUpdate 模型确保符合协议规范
-            # 严格遵循07-websocket-protocol.md：subscription_key 提升到顶层，content 作为数据载荷
+            # 严格遵循07-websocket-protocol.md：subscription_key 在顶层，data 直接作为数据载荷
             # tv_content 现在是 CamelCaseModel，确保类型安全
             message = MessageUpdate(
                 type="UPDATE",
                 timestamp=self._timestamp_ms(),
                 subscription_key=subscription_key,
-                content=tv_content,
+                data=tv_content,
             )
 
             await self._client_manager.broadcast(subscription_key, message)
@@ -1151,9 +1146,6 @@ class DataProcessor:
                 alert_id_str = str(alert_id)
                 return f"SIGNAL:{alert_id_str}"
             return "SIGNAL:unknown"
-        elif event_type.startswith("config."):
-            # config.new, config.update, config.delete
-            return f"strategy:{event_type}"
         elif event_type == "realtime_update":
             # realtime_update 事件的 subscription_key 在 event_data 中
             # 格式: { "subscription_key": "BINANCE:FUTURES@ACCOUNT", "data_type": "ACCOUNT", ... }

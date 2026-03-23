@@ -6,7 +6,6 @@
 
 命名规范：
 - data: 通用数据容器
-- content: 实时推送的实际数据内容（避免与数据库 payload 混淆）
 - payload: 数据库任务表的载荷字段
 """
 
@@ -186,7 +185,7 @@ def format_error_response(
 
 def format_update_message(
     subscription_key: str,
-    content: BaseModel,
+    data: BaseModel,
 ) -> MessageUpdate:
     """格式化更新消息（服务器推送）
 
@@ -194,19 +193,15 @@ def format_update_message(
 
     严格遵循07-websocket-protocol.md规范：
     - type 字段值为 "UPDATE"
-    - subscriptionKey 提升到顶层
-    - content 作为数据载荷（不是 payload，避免与数据库 payload 混淆）
+    - subscriptionKey 在顶层
+    - data 直接作为数据载荷（无 content 包装）
     - 不包含 requestId 字段（服务器主动推送）
 
-    结构设计遵循"信封和信"原则：
-    - subscriptionKey: 信封（标识数据类型）
-    - content: 信（实际数据内容）
-
-    注意：此函数强制要求 content 为 Pydantic 模型，不接受字典。
+    注意：此函数强制要求 data 为 Pydantic 模型，不接受字典。
 
     Args:
         subscription_key: 订阅键（标识数据类型）
-        content: 实时数据内容，必须是 Pydantic 模型
+        data: 实时数据内容，必须是 Pydantic 模型
 
     Returns:
         MessageUpdate 模型实例
@@ -214,7 +209,7 @@ def format_update_message(
     return MessageUpdate(
         timestamp=_timestamp_ms(),
         subscription_key=subscription_key,
-        content=content,
+        data=data,
     )
 
 

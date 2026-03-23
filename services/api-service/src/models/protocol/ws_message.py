@@ -245,17 +245,25 @@ class MessageUpdate(CamelCaseModel):
     严格遵循07-websocket-protocol.md规范：
     - type 字段值为 "UPDATE"
     - subscriptionKey 提升到顶层
-    - content 作为数据载荷（不是 payload，避免与数据库 payload 混淆）
+    - data 直接作为数据载荷（与设计文档保持一致，无 content 包装）
     - 注意：不包含 requestId 字段（服务器主动推送）
 
     内部使用snake_case，序列化输出camelCase。
+
+    JSON 结构：
+    {
+        "type": "UPDATE",
+        "timestamp": 123,
+        "subscriptionKey": "...",
+        "data": {...}
+    }
     """
 
     protocol_version: str = PROTOCOL_VERSION
     type: str = "UPDATE"
     timestamp: int
     subscription_key: str
-    content: CamelCaseModel  # 使用 CamelCaseModel 以确保类型安全
+    data: CamelCaseModel  # 直接作为数据载荷，无 content 包装
 
     def __str__(self) -> str:
         return f"MessageUpdate(key={self.subscription_key})"

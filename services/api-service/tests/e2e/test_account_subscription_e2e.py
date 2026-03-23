@@ -390,7 +390,8 @@ async def main():
             logger.info("=" * 60)
             initial_account = await get_spot_account(ws)
             if initial_account:
-                initial_balances = initial_account.get("account", {}).get("balances", [])
+                # get_spot_account already returns account object (data.data.account)
+                initial_balances = initial_account.get("balances", [])
                 logger.info(f"✅ 初始账户信息获取成功")
                 for b in initial_balances:
                     if float(b.get("free", 0)) > 0 or float(b.get("locked", 0)) > 0:
@@ -424,23 +425,24 @@ async def main():
                 logger.info(f"✅ 测试通过！共收到 {len(account_updates)} 条账户更新")
 
                 # 检查事件类型
-                # 消息结构（使用 alias 输出币安原始短字段名）:
+                # 消息结构（严格遵循07-websocket-protocol.md）：
                 # {
                 #     "type": "UPDATE",
                 #     "timestamp": 1704067205000,
                 #     "subscriptionKey": "BINANCE:SPOT@ACCOUNT",
-                #     "content": {
+                #     "data": {
                 #         "e": "outboundAccountPosition",  // 币安原始事件类型（alias）
                 #         "E": 1564034571105,
                 #         "u": 1564034571073,
                 #         "B": [...]
                 #     }
                 # }
+                # 注意：data 直接作为载荷，无 content 包装
                 event_types = set()
                 for update in account_updates:
-                    content = update.get("content", {})
+                    data = update.get("data", {})
                     # 使用 alias，字段名为 "e"（不是 "eventType"）
-                    event_type = content.get("e", "unknown")
+                    event_type = data.get("e", "unknown")
                     event_types.add(event_type)
                     logger.debug(f"提取事件类型: {event_type}")
 

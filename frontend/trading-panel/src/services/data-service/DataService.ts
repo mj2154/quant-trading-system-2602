@@ -372,8 +372,8 @@ export class DataService {
       return
     }
 
-    // 从消息顶层获取 content
-    const content = (message as unknown as { content?: unknown }).content
+    // 从消息获取 data（直接载荷，无 content 包装）
+    const content = message.data
 
     const handlers = this.messageHandlers.get(subscriptionKey)
 
