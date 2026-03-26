@@ -1266,6 +1266,209 @@ class OrderData(CamelCaseModel):
 
 ---
 
+### 5. 期货用户数据增量推送扩展事件
+
+> **数据来源**: Binance WebSocket User Data Stream 各扩展事件
+>
+> **适用场景**: 高级交易功能（条件单、策略、网格交易等）
+
+#### FuturesTradeLiteEvent（简化交易事件）
+
+> **WS 事件**: `TRADE_LITE`
+> **说明**: 简化版交易事件，仅包含核心交易信息
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"tradeLite"` |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `transaction_time` | `T` | int | 事务时间（毫秒） |
+| `symbol` | `s` | str | 交易对 |
+| `original_quantity` | `q` | str | 原始数量 |
+| `original_price` | `p` | str | 原始价格 |
+| `is_maker` | `m` | bool | 是否为做市商 |
+| `client_order_id` | `c` | str | 客户端订单 ID |
+| `side` | `S` | str | 订单方向：`BUY` / `SELL` |
+| `last_filled_price` | `L` | str | 最近成交价格 |
+| `last_filled_quantity` | `l` | str | 最近成交数量 |
+| `trade_id` | `t` | int | 成交 ID |
+| `order_id` | `i` | int | 订单 ID |
+
+#### FuturesMarginCallEvent（保证金追缴事件）
+
+> **WS 事件**: `MARGIN_CALL`
+> **说明**: 账户保证金不足，需要追加保证金
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"marginCall"` |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `cross_wallet_balance` | `cw` | str | 跨账户钱包余额 |
+| `positions` | `p` | list[FuturesMarginCallPosition] | 追缴持仓列表 |
+
+**FuturesMarginCallPosition（追缴持仓）**：
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `symbol` | `s` | str | 交易对 |
+| `position_side` | `ps` | str | 持仓方向：`LONG` / `SHORT` / `BOTH` |
+| `position_amt` | `pa` | str | 持仓数量 |
+| `margin_type` | `mt` | str | 保证金类型：`isolated` / `cross` |
+| `isolated_wallet` | `iw` | str | 逐仓钱包余额 |
+| `mark_price` | `mp` | str | 标记价格 |
+| `unrealized_profit` | `up` | str | 未实现盈亏 |
+| `maintenance_margin_required` | `mm` | str | 维持保证金要求 |
+
+#### FuturesAlgoUpdateEvent（条件单更新事件）
+
+> **WS 事件**: `ALGO_UPDATE`
+> **说明**: 条件单（止损单、追踪止损单等）状态更新
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"algoUpdate"` |
+| `transaction_time` | `T` | int | 事务时间（毫秒） |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `order_data` | `o` | FuturesAlgoOrderData | 订单数据 |
+
+**FuturesAlgoOrderData（条件单数据）**：
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `client_algo_id` | `caid` | str | 客户端算法订单 ID |
+| `algo_id` | `aid` | int | 算法订单 ID |
+| `algo_type` | `at` | str | 算法类型 |
+| `order_type` | `o` | str | 订单类型 |
+| `symbol` | `s` | str | 交易对 |
+| `side` | `S` | str | 订单方向 |
+| `position_side` | `ps` | str | 持仓方向 |
+| `time_in_force` | `f` | str | 有效期限 |
+| `quantity` | `q` | str | 数量 |
+| `algo_status` | `X` | str | 算法订单状态 |
+| `algo_order_id` | `ai` | str | 算法订单 ID |
+| `avg_fill_price` | `ap` | str | 平均成交价格 |
+| `executed_quantity` | `aq` | str | 已成交数量 |
+| `actual_order_type` | `act` | str | 实际订单类型 |
+| `trigger_price` | `tp` | str | 触发价格 |
+| `order_price` | `p` | str | 订单价格 |
+| `stp_mode` | `V` | str | STP 模式 |
+| `working_type` | `wt` | str | 工作类型 |
+| `price_match` | `pm` | str | 价格匹配模式 |
+| `if_close_all` | `cp` | bool | 是否全平 |
+| `if_price_protect` | `pP` | bool | 是否开启价格保护 |
+| `is_reduce_only` | `R` | bool | 是否仅减仓 |
+| `trigger_time` | `tt` | int | 触发时间 |
+| `good_till_date` | `gtd` | int | GTD 有效期 |
+| `reject_reason` | `rm` | str | 拒绝原因 |
+
+#### FuturesStrategyUpdateEvent（策略更新事件）
+
+> **WS 事件**: `STRATEGY_UPDATE`
+> **说明**: 策略（如 GRID）状态更新
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"strategyUpdate"` |
+| `transaction_time` | `T` | int | 事务时间（毫秒） |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `strategy_data` | `su` | FuturesStrategyData | 策略数据 |
+
+**FuturesStrategyData（策略数据）**：
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `strategy_id` | `si` | int | 策略 ID |
+| `strategy_type` | `st` | str | 策略类型 |
+| `strategy_status` | `ss` | str | 策略状态 |
+| `symbol` | `s` | str | 交易对 |
+| `update_time` | `ut` | int | 更新时间 |
+| `op_code` | `c` | int | 操作代码 |
+
+#### FuturesGridUpdateEvent（网格更新事件）
+
+> **WS 事件**: `GRID_UPDATE`
+> **说明**: 网格策略订单更新
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"gridUpdate"` |
+| `transaction_time` | `T` | int | 事务时间（毫秒） |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `grid_data` | `gu` | FuturesGridData | 网格数据 |
+
+**FuturesGridData（网格数据）**：
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `strategy_id` | `si` | int | 策略 ID |
+| `strategy_type` | `st` | str | 策略类型 |
+| `strategy_status` | `ss` | str | 策略状态 |
+| `symbol` | `s` | str | 交易对 |
+| `realized_pnl` | `r` | str | 已实现盈亏 |
+| `unmatched_avg_price` | `up` | str | 未成交平均价格 |
+| `unmatched_qty` | `uq` | str | 未成交数量 |
+| `unmatched_fee` | `uf` | str | 未成交手续费 |
+| `matched_pnl` | `mp` | str | 已匹配盈亏 |
+| `update_time` | `ut` | int | 更新时间 |
+
+#### FuturesConditionalOrderTriggerRejectEvent（条件单触发拒绝事件）
+
+> **WS 事件**: `CONDITIONAL_ORDER_TRIGGER_REJECT`
+> **说明**: 条件单触发时被拒绝
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"conditionalOrderTriggerReject"` |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `transaction_time` | `T` | int | 事务时间（毫秒） |
+| `reject_data` | `or` | FuturesConditionalOrderRejectData | 拒绝数据 |
+
+**FuturesConditionalOrderRejectData（拒绝数据）**：
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `symbol` | `s` | str | 交易对 |
+| `order_id` | `i` | int | 订单 ID |
+| `reject_reason` | `r` | str | 拒绝原因 |
+
+#### FuturesAccountConfigUpdate（账户配置更新事件）
+
+> **WS 事件**: `ACCOUNT_CONFIG_UPDATE`
+> **说明**: 账户杠杆或multi-asset模式的更新
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"accountConfigUpdate"` |
+| `event_time` | `E` | int | 事件时间（毫秒） |
+| `transaction_time` | `T` | int | 事务时间（毫秒） |
+| `leverage_config` | `ac` | FuturesAccountConfigLeverageUpdate | 杠杆配置（可选） |
+| `multi_asset_config` | `ai` | FuturesAccountConfigMultiAssetUpdate | 多资产模式配置（可选） |
+
+**FuturesAccountConfigLeverageUpdate（杠杆配置）**：
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `symbol` | `s` | str | 交易对 |
+| `leverage` | `l` | int | 杠杆倍数 |
+
+**FuturesAccountConfigMultiAssetUpdate（多资产模式配置）**：
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `multi_asset_mode` | `j` | bool | 多资产模式 |
+
+#### FuturesListenKeyExpired（ListenKey 过期事件）
+
+> **WS 事件**: `listenKeyExpired`
+> **说明**: 用户数据流 ListenKey 过期，需要重新开启
+
+| 字段名 | alias | 类型 | 说明 |
+|--------|-------|------|------|
+| `event_type` | `e` | str | 事件类型：`"listenKeyExpired"` |
+| `event_time` | `E` | str | 事件时间 |
+| `listen_key` | `listenKey` | str | 过期的 ListenKey |
+
+---
+
 ### constants.py - 协议常量
 
 | 常量名称 | 用途 | 值 |

@@ -404,6 +404,14 @@ WebSocket 协议本身提供了 ping/pong 机制，浏览器会自动处理：
 |---------|---------|------|
 | `FuturesAccountUpdate` | `ACCOUNT_UPDATE` | 账户余额/持仓变更 |
 | `FuturesOrderTradeUpdate` | `ORDER_TRADE_UPDATE` | 订单/成交更新 |
+| `FuturesTradeLiteEvent` | `TRADE_LITE` | 简化交易事件 |
+| `FuturesMarginCallEvent` | `MARGIN_CALL` | 保证金追缴事件 |
+| `FuturesAlgoUpdateEvent` | `ALGO_UPDATE` | 条件单更新事件 |
+| `FuturesStrategyUpdateEvent` | `STRATEGY_UPDATE` | 策略更新事件 |
+| `FuturesGridUpdateEvent` | `GRID_UPDATE` | 网格更新事件 |
+| `FuturesConditionalOrderTriggerRejectEvent` | `CONDITIONAL_ORDER_TRIGGER_REJECT` | 条件单触发拒绝事件 |
+| `FuturesAccountConfigUpdate` | `ACCOUNT_CONFIG_UPDATE` | 账户配置更新事件（杠杆/多资产模式） |
+| `FuturesListenKeyExpiredWSModel` | `listenKeyExpired` | ListenKey 过期事件 |
 
 ---
 
