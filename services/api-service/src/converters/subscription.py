@@ -52,7 +52,7 @@ class ParsedSubscription:
     exchange: str
     symbol: str
     data_type: str
-    params: dict[str, Any] = None
+    params: dict[str, Any] | None = None
 
 
 @dataclass
@@ -187,7 +187,7 @@ class SubscriptionKeyParser:
         parsed_subs: dict[str, ParsedSubscription],
     ) -> dict[str, list[str]]:
         """按交易所分组订阅键"""
-        grouped = {}
+        grouped: dict[str, list[str]] = {}
         for sub_key, parsed in parsed_subs.items():
             if parsed.exchange not in grouped:
                 grouped[parsed.exchange] = []
@@ -307,7 +307,7 @@ class StreamParser:
         # 构建订阅键
         if parsed.data_type == "kline":
             # 需要转换间隔到 TradingView 分辨率格式（用于订阅键）
-            resolution = StreamParser._interval_to_resolution(parsed.interval)
+            resolution = StreamParser._interval_to_resolution(parsed.interval or "")
             return f"{exchange}:{parsed.symbol}@KLINE_{resolution}"
         else:
             return f"{exchange}:{parsed.symbol}@{parsed.data_type.upper()}"

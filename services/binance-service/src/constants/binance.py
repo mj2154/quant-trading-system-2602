@@ -8,20 +8,24 @@ from typing import List
 
 
 class BinanceAccountSubscriptionKey:
-    """账户信息订阅键常量
+    """币安用户数据流订阅键常量
 
-    订阅键格式：BINANCE:{ACCOUNT_TYPE}@ACCOUNT
+    订阅键格式：BINANCE:{ACCOUNT_TYPE}@USERDATA
 
     用途：
-    - 现货账户: BINANCE:SPOT@ACCOUNT
-    - 期货账户: BINANCE:FUTURES@ACCOUNT
+    - 现货用户数据流: BINANCE:SPOT@USERDATA
+    - 期货用户数据流: BINANCE:FUTURES@USERDATA
+
+    说明：
+    - USERDATA 键对应 Binance User Data Stream WebSocket 端点
+    - 该端点同时推送账户更新和订单交易更新事件
     """
 
-    # 现货账户订阅键
-    SPOT = "BINANCE:SPOT@ACCOUNT"
+    # 现货用户数据流订阅键
+    SPOT = "BINANCE:SPOT@USERDATA"
 
-    # 期货账户订阅键
-    FUTURES = "BINANCE:FUTURES@ACCOUNT"
+    # 期货用户数据流订阅键
+    FUTURES = "BINANCE:FUTURES@USERDATA"
 
     @classmethod
     def get_all(cls) -> list[str]:

@@ -66,6 +66,21 @@ export type {
   SpotExecutionReportEvent,
   FuturesAccountUpdateContent,
   FuturesAccountUpdate,
+  FuturesAccountConfigUpdate,
+  FuturesAccountConfigLeverageUpdate,
+  FuturesAccountConfigMultiAssetUpdate,
+  FuturesOrderTradeUpdate,
+  FuturesTradeLiteEvent,
+  FuturesMarginCall,
+  FuturesMarginCallPosition,
+  FuturesAlgoUpdate,
+  FuturesAlgoOrderData,
+  FuturesStrategyUpdate,
+  FuturesStrategyData,
+  FuturesGridUpdate,
+  FuturesGridData,
+  FuturesConditionalOrderTriggerReject,
+  FuturesConditionalOrderRejectData,
   AccountUpdateMessage,
   AccountUpdate,
 } from './api/account'
@@ -119,3 +134,15 @@ export type {
   TradingMessageType,
   TradingMessage,
 } from './trading-types'
+
+// ==================== UI显示模型类型 ====================
+// 这些类型专门用于前端UI展示，与API原始数据分离
+
+export type {
+  SpotBalanceDisplay,
+  SpotAccountDisplay,
+  FuturesAssetDisplay,
+  FuturesPositionDisplay,
+  FuturesAccountDisplay,
+  FuturesPositionMode,
+} from './display/account-display'

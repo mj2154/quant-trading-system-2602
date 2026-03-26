@@ -4,7 +4,6 @@
 查询 exchange_info 表中的交易对信息。
 """
 
-from typing import Any
 
 import asyncpg
 

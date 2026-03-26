@@ -1,19 +1,20 @@
 """
-现货账户订阅 E2E 测试（纯监听模式）
+期货账户订阅 E2E 测试（纯监听模式）
 
-测试通过 WebSocket 连接 API 服务，订阅现货账户信息，
-然后监听 30 秒，期间用户手动下单，验证是否能收到账户更新推送。
+测试通过 WebSocket 连接 API 服务，订阅期货账户信息，
+然后监听 30 秒，期间用户手动下单或平仓，验证是否能收到账户更新推送。
 
 测试流程：
 1. 连接 WebSocket
-2. 获取初始账户信息
-3. 订阅现货账户: BINANCE:SPOT@ACCOUNT
-4. 监听 30 秒（用户在此时手动下单）
-5. 验证账户更新事件
+2. 获取初始期货账户信息
+3. 订阅期货账户: BINANCE:FUTURES@ACCOUNT
+4. 监听 30 秒（用户在此时手动下单/平仓/转账）
+5. 验证账户更新事件（ACCOUNT_UPDATE 或 ORDER_TRADE_UPDATE）
 
 参考文档：
-- docs/backend/design/VERIFICATION_REPORT_USER_STREAM.md - 现货 WS API 账户订阅验证
+- docs/backend/design/VERIFICATION_REPORT_USER_STREAM.md - WS 用户流验证
 - docs/backend/design/07-websocket-protocol.md - WS协议规范
+- docs/backend/design/09-binance-models.md - 币安数据模型
 """
 
 import asyncio
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 WS_URL = "ws://localhost:8000/ws"
 
 # 账户订阅键
-SPOT_ACCOUNT_SUBSCRIPTION = "BINANCE:SPOT@USERDATA"
+FUTURES_ACCOUNT_SUBSCRIPTION = "BINANCE:FUTURES@USERDATA"
 
 
 async def wait_for_message(ws, timeout=10, expected_request_id: str | None = None):
@@ -81,50 +82,47 @@ async def subscribe_account(ws, subscription: str) -> bool:
         },
     }
 
-    logger.info(f"📤 发送订阅请求: {subscription}")
+    logger.info(f"发送订阅请求: {subscription}")
     await ws.send(json.dumps(subscribe_request))
 
     # 等待 SUBSCRIPTION_DATA 响应（忽略中间的 ACK）
     while True:
         response = await wait_for_message(ws, timeout=30, expected_request_id=request_id)
         if response is None:
-            logger.error("❌ 未收到订阅响应")
+            logger.error("未收到订阅响应")
             return False
 
         data = json.loads(response)
         msg_type = data.get("type")
-        logger.info(f"📥 收到消息类型: {msg_type}")
+        logger.info(f"收到消息类型: {msg_type}")
 
         if msg_type == "ACK":
-            logger.info("📝 收到 ACK，继续等待订阅结果...")
+            logger.info("收到 ACK，继续等待订阅结果...")
             continue
 
         if msg_type == "SUBSCRIPTION_DATA":
             status = data.get("data", {}).get("status")
             if status == "success":
-                logger.info("✅ 订阅成功")
+                logger.info("订阅成功")
                 return True
             else:
-                logger.error(f"❌ 订阅失败: status={status}")
+                logger.error(f"订阅失败: status={status}")
                 return False
 
         if msg_type == "ERROR":
             error_msg = data.get("data", {}).get("errorMessage", "Unknown error")
-            logger.error(f"❌ 订阅失败: {error_msg}")
+            logger.error(f"订阅失败: {error_msg}")
             return False
 
-        if msg_type == "ACK":
-            continue
-
-        logger.warning(f"⚠️ 收到意外消息类型: {msg_type}，继续等待")
+        logger.warning(f"收到意外消息类型: {msg_type}，继续等待")
 
 
 async def create_market_buy_order(ws, symbol: str, quantity: float) -> str | None:
-    """创建市价买单
+    """创建期货市价买单
 
     Args:
         ws: WebSocket 连接
-        symbol: 交易对，如 BTCUSDT
+        symbol: 交易对，如 BTCUSDT.PERP
         quantity: 购买数量
 
     Returns:
@@ -133,7 +131,7 @@ async def create_market_buy_order(ws, symbol: str, quantity: float) -> str | Non
     request_id = uuid.uuid4().hex
     new_client_order_id = uuid.uuid4().hex
 
-    # 现货市价买单使用 quantity（数量）
+    # 期货市价买单使用 quantity
     order_request = {
         "type": "CREATE_ORDER",
         "requestId": request_id,
@@ -147,38 +145,38 @@ async def create_market_buy_order(ws, symbol: str, quantity: float) -> str | Non
         },
     }
 
-    logger.info(f"📝 requestId: {request_id}")
-    logger.info(f"📝 newClientOrderId: {new_client_order_id}")
-    logger.info(f"📤 发送市价买单请求: {json.dumps(order_request, ensure_ascii=False)}")
+    logger.info(f"requestId: {request_id}")
+    logger.info(f"newClientOrderId: {new_client_order_id}")
+    logger.info(f"发送期货市价买单请求: {json.dumps(order_request, ensure_ascii=False)}")
     await ws.send(json.dumps(order_request))
 
     # 等待 ACK
     ack_msg = await wait_for_message(ws, timeout=5, expected_request_id=request_id)
     if ack_msg is None:
-        logger.error("❌ 未收到 ACK 确认")
+        logger.error("未收到 ACK 确认")
         return None
 
     ack_data = json.loads(ack_msg)
-    logger.info(f"📥 收到 ACK: {json.dumps(ack_data, ensure_ascii=False)}")
+    logger.info(f"收到 ACK: {json.dumps(ack_data, ensure_ascii=False)}")
 
     if ack_data.get("type") != "ACK":
-        logger.error(f"❌ 期望 ACK 消息，实际收到: {ack_data.get('type')}")
+        logger.error(f"期望 ACK 消息，实际收到: {ack_data.get('type')}")
         return None
 
-    logger.info("✅ ACK 确认正确")
+    logger.info("ACK 确认正确")
 
     # 等待订单响应
     order_msg = await wait_for_message(ws, timeout=30, expected_request_id=request_id)
     if order_msg is None:
-        logger.error("❌ 未收到订单响应")
+        logger.error("未收到订单响应")
         return None
 
     order_data = json.loads(order_msg)
-    logger.info(f"📥 收到订单响应: {json.dumps(order_data, ensure_ascii=False)}")
+    logger.info(f"收到订单响应: {json.dumps(order_data, ensure_ascii=False)}")
 
     if order_data.get("type") == "ERROR":
         error_msg = order_data.get("data", {}).get("errorMessage", "Unknown error")
-        logger.error(f"❌ 订单创建失败: {error_msg}")
+        logger.error(f"订单创建失败: {error_msg}")
         return None
 
     if order_data.get("type") == "ORDER_DATA":
@@ -186,14 +184,14 @@ async def create_market_buy_order(ws, symbol: str, quantity: float) -> str | Non
         order_id = result.get("orderId")
         status = result.get("status")
         executed_qty = result.get("executedQty", "0")
-        price = result.get("price", "0")
+        avg_price = result.get("avgPrice", "0")
 
-        logger.info(f"✅ 市价买单创建成功")
+        logger.info(f"期货市价买单创建成功")
         logger.info(f"   orderId: {order_id}")
         logger.info(f"   symbol: {symbol}")
         logger.info(f"   status: {status}")
         logger.info(f"   executedQty: {executed_qty}")
-        logger.info(f"   price: {price}")
+        logger.info(f"   avgPrice: {avg_price}")
 
         return order_id
 
@@ -201,11 +199,11 @@ async def create_market_buy_order(ws, symbol: str, quantity: float) -> str | Non
 
 
 async def create_market_sell_order(ws, symbol: str, quantity: float) -> str | None:
-    """创建市价卖单
+    """创建期货市价卖单
 
     Args:
         ws: WebSocket 连接
-        symbol: 交易对，如 BTCUSDT
+        symbol: 交易对，如 BTCUSDT.PERP
         quantity: 卖出数量
 
     Returns:
@@ -227,38 +225,38 @@ async def create_market_sell_order(ws, symbol: str, quantity: float) -> str | No
         },
     }
 
-    logger.info(f"📝 requestId: {request_id}")
-    logger.info(f"📝 newClientOrderId: {new_client_order_id}")
-    logger.info(f"📤 发送市价卖单请求: {json.dumps(order_request, ensure_ascii=False)}")
+    logger.info(f"requestId: {request_id}")
+    logger.info(f"newClientOrderId: {new_client_order_id}")
+    logger.info(f"发送期货市价卖单请求: {json.dumps(order_request, ensure_ascii=False)}")
     await ws.send(json.dumps(order_request))
 
     # 等待 ACK
     ack_msg = await wait_for_message(ws, timeout=5, expected_request_id=request_id)
     if ack_msg is None:
-        logger.error("❌ 未收到 ACK 确认")
+        logger.error("未收到 ACK 确认")
         return None
 
     ack_data = json.loads(ack_msg)
-    logger.info(f"📥 收到 ACK: {json.dumps(ack_data, ensure_ascii=False)}")
+    logger.info(f"收到 ACK: {json.dumps(ack_data, ensure_ascii=False)}")
 
     if ack_data.get("type") != "ACK":
-        logger.error(f"❌ 期望 ACK 消息，实际收到: {ack_data.get('type')}")
+        logger.error(f"期望 ACK 消息，实际收到: {ack_data.get('type')}")
         return None
 
-    logger.info("✅ ACK 确认正确")
+    logger.info("ACK 确认正确")
 
     # 等待订单响应
     order_msg = await wait_for_message(ws, timeout=30, expected_request_id=request_id)
     if order_msg is None:
-        logger.error("❌ 未收到订单响应")
+        logger.error("未收到订单响应")
         return None
 
     order_data = json.loads(order_msg)
-    logger.info(f"📥 收到订单响应: {json.dumps(order_data, ensure_ascii=False)}")
+    logger.info(f"收到订单响应: {json.dumps(order_data, ensure_ascii=False)}")
 
     if order_data.get("type") == "ERROR":
         error_msg = order_data.get("data", {}).get("errorMessage", "Unknown error")
-        logger.error(f"❌ 订单创建失败: {error_msg}")
+        logger.error(f"订单创建失败: {error_msg}")
         return None
 
     if order_data.get("type") == "ORDER_DATA":
@@ -266,7 +264,7 @@ async def create_market_sell_order(ws, symbol: str, quantity: float) -> str | No
         order_id = result.get("orderId")
         status = result.get("status")
 
-        logger.info(f"✅ 市价卖单创建成功")
+        logger.info(f"期货市价卖单创建成功")
         logger.info(f"   orderId: {order_id}")
         logger.info(f"   symbol: {symbol}")
         logger.info(f"   status: {status}")
@@ -277,7 +275,7 @@ async def create_market_sell_order(ws, symbol: str, quantity: float) -> str | No
 
 
 async def listen_for_account_updates(ws, timeout: float = 30) -> list[dict]:
-    """监听账户更新推送
+    """监听期货账户更新推送
 
     Args:
         ws: WebSocket 连接
@@ -289,18 +287,18 @@ async def listen_for_account_updates(ws, timeout: float = 30) -> list[dict]:
     updates: list[dict] = []
     start_time = time.time()
 
-    logger.info(f"🔔 开始监听账户更新推送 (超时: {timeout}秒)...")
+    logger.info(f"开始监听期货账户更新推送 (超时: {timeout}秒)...")
 
     while time.time() - start_time < timeout:
         try:
             message = await asyncio.wait_for(ws.recv(), timeout=1)
             message_dict = json.loads(message)
 
-            # 只处理 UPDATE 类型且是账户订阅的消息
+            # 只处理 UPDATE 类型且是期货账户订阅的消息
             if message_dict.get("type") == "UPDATE":
                 subscription_key = message_dict.get("subscriptionKey")
-                if subscription_key == SPOT_ACCOUNT_SUBSCRIPTION:
-                    logger.info(f"📥 收到账户更新: {json.dumps(message_dict, ensure_ascii=False)}")
+                if subscription_key == FUTURES_ACCOUNT_SUBSCRIPTION:
+                    logger.info(f"收到期货账户更新: {json.dumps(message_dict, ensure_ascii=False)}")
                     updates.append(message_dict)
 
         except asyncio.TimeoutError:
@@ -309,12 +307,12 @@ async def listen_for_account_updates(ws, timeout: float = 30) -> list[dict]:
             logger.warning(f"监听异常: {e}")
             break
 
-    logger.info(f"🔔 监听结束，共收到 {len(updates)} 条账户更新")
+    logger.info(f"监听结束，共收到 {len(updates)} 条期货账户更新")
     return updates
 
 
-async def get_spot_account(ws) -> dict | None:
-    """获取现货账户信息
+async def get_futures_account(ws) -> dict | None:
+    """获取期货账户信息
 
     异步任务采用三阶段模式：
     1. 发送请求后立即收到 ACK
@@ -323,39 +321,39 @@ async def get_spot_account(ws) -> dict | None:
     request_id = uuid.uuid4().hex
 
     account_request = {
-        "type": "GET_SPOT_ACCOUNT",
+        "type": "GET_FUTURES_ACCOUNT",
         "requestId": request_id,
         "timestamp": int(time.time() * 1000),
         "data": {},
     }
 
-    logger.info(f"📤 发送获取现货账户请求")
+    logger.info(f"发送获取期货账户请求")
     await ws.send(json.dumps(account_request))
 
     # 等待 ACCOUNT_DATA 响应（忽略中间的 ACK）
     while True:
         response = await wait_for_message(ws, timeout=30, expected_request_id=request_id)
         if response is None:
-            logger.error("❌ 未收到账户信息响应")
+            logger.error("未收到账户信息响应")
             return None
 
         data = json.loads(response)
         msg_type = data.get("type")
-        logger.info(f"📥 收到消息类型: {msg_type}")
+        logger.info(f"收到消息类型: {msg_type}")
 
         if msg_type == "ACK":
-            logger.info("📝 收到 ACK，继续等待 ACCOUNT_DATA...")
+            logger.info("收到 ACK，继续等待 ACCOUNT_DATA...")
             continue
 
         if msg_type == "ACCOUNT_DATA":
-            logger.info(f"📥 收到现货账户响应")
+            logger.info(f"收到期货账户响应")
             return data.get("data", {}).get("account", {})
 
         if msg_type == "ERROR":
-            logger.error(f"❌ 获取账户信息失败: {data}")
+            logger.error(f"获取账户信息失败: {data}")
             return None
 
-        logger.warning(f"⚠️ 收到意外消息类型: {msg_type}，继续等待")
+        logger.warning(f"收到意外消息类型: {msg_type}，继续等待")
 
 
 async def main():
@@ -363,17 +361,17 @@ async def main():
 
     测试流程：
     1. 连接 WebSocket
-    2. 获取初始账户信息
-    3. 订阅现货账户
-    4. 监听 30 秒，用户在此期间手动下单
-    5. 验证是否收到账户更新推送
+    2. 获取初始期货账户信息
+    3. 订阅期货账户
+    4. 监听 30 秒，用户在此期间手动下单/转账
+    5. 验证是否收到账户更新推送（ACCOUNT_UPDATE 或 ORDER_TRADE_UPDATE）
     """
     logger.info("=" * 60)
-    logger.info("🚀 现货账户订阅 E2E 测试（纯监听模式）")
-    logger.info(f"📡 WebSocket URL: {WS_URL}")
-    logger.info(f"📊 订阅键: {SPOT_ACCOUNT_SUBSCRIPTION}")
-    logger.info("⏱️  监听时长: 30 秒")
-    logger.info("💡 请在 30 秒内通过币安 App 或其他渠道手动下单")
+    logger.info("期货账户订阅 E2E 测试（纯监听模式）")
+    logger.info(f"WebSocket URL: {WS_URL}")
+    logger.info(f"订阅键: {FUTURES_ACCOUNT_SUBSCRIPTION}")
+    logger.info("监听时长: 30 秒")
+    logger.info("请在 30 秒内通过币安 App 或其他渠道手动下单/转账")
     logger.info("=" * 60)
 
     test_passed = False
@@ -382,36 +380,39 @@ async def main():
 
     try:
         async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=60) as ws:
-            logger.info(f"✅ 连接到 {WS_URL}")
+            logger.info(f"已连接到 {WS_URL}")
 
-            # Step 1: 获取初始账户信息
+            # Step 1: 获取初始期货账户信息
             logger.info("=" * 60)
-            logger.info("Step 1: 获取初始账户信息")
+            logger.info("Step 1: 获取初始期货账户信息")
             logger.info("=" * 60)
-            initial_account = await get_spot_account(ws)
+            initial_account = await get_futures_account(ws)
             if initial_account:
-                # get_spot_account already returns account object (data.data.account)
-                initial_balances = initial_account.get("balances", [])
-                logger.info(f"✅ 初始账户信息获取成功")
-                for b in initial_balances:
-                    if float(b.get("free", 0)) > 0 or float(b.get("locked", 0)) > 0:
-                        logger.info(f"   {b.get('asset')}: free={b.get('free')}, locked={b.get('locked')}")
+                initial_assets = initial_account.get("assets", [])
+                initial_positions = initial_account.get("positions", [])
+                logger.info(f"初始期货账户信息获取成功")
+                logger.info(f"  资产数: {len(initial_assets)}")
+                logger.info(f"  持仓数: {len(initial_positions)}")
+                for a in initial_assets[:3]:  # 只显示前3个
+                    logger.info(f"    {a.get('asset')}: walletBalance={a.get('walletBalance')}, crossWalletBalance={a.get('crossWalletBalance')}")
+                if len(initial_assets) > 3:
+                    logger.info(f"    ... 还有 {len(initial_assets) - 3} 个资产")
             else:
-                logger.warning("⚠️ 初始账户信息获取失败，继续测试")
+                logger.warning("初始期货账户信息获取失败，继续测试")
 
-            # Step 2: 订阅现货账户
+            # Step 2: 订阅期货账户
             logger.info("=" * 60)
-            logger.info("Step 2: 订阅现货账户")
+            logger.info("Step 2: 订阅期货账户")
             logger.info("=" * 60)
-            subscribe_success = await subscribe_account(ws, SPOT_ACCOUNT_SUBSCRIPTION)
+            subscribe_success = await subscribe_account(ws, FUTURES_ACCOUNT_SUBSCRIPTION)
             if not subscribe_success:
-                logger.error("❌ 订阅失败，测试终止")
+                logger.error("订阅失败，测试终止")
                 return
 
             # Step 3: 启动账户更新监听（等待 30 秒）
             logger.info("=" * 60)
-            logger.info("Step 3: 开始监听账户更新 (30 秒)")
-            logger.info("💡 请在此期间手动下单...")
+            logger.info("Step 3: 开始监听期货账户更新 (30 秒)")
+            logger.info("请在此期间手动下单/转账...")
             logger.info("=" * 60)
 
             account_updates = await listen_for_account_updates(ws, timeout=30)
@@ -422,22 +423,21 @@ async def main():
             logger.info("=" * 60)
 
             if len(account_updates) > 0:
-                logger.info(f"✅ 测试通过！共收到 {len(account_updates)} 条账户更新")
+                logger.info(f"测试通过！共收到 {len(account_updates)} 条期货账户更新")
 
                 # 检查事件类型
                 # 消息结构（严格遵循07-websocket-protocol.md）：
                 # {
                 #     "type": "UPDATE",
                 #     "timestamp": 1704067205000,
-                #     "subscriptionKey": "BINANCE:SPOT@ACCOUNT",
+                #     "subscriptionKey": "BINANCE:FUTURES@ACCOUNT",
                 #     "data": {
-                #         "e": "outboundAccountPosition",  // 币安原始事件类型（alias）
-                #         "E": 1564034571105,
-                #         "u": 1564034571073,
-                #         "B": [...]
+                #         "e": "ACCOUNT_UPDATE",  // 币安原始事件类型（alias）
+                #         "E": 1234567890,
+                #         "T": 1234567890,
+                #         "a": {...}
                 #     }
                 # }
-                # 注意：data 直接作为载荷，无 content 包装
                 event_types = set()
                 for update in account_updates:
                     data = update.get("data", {})
@@ -446,18 +446,18 @@ async def main():
                     event_types.add(event_type)
                     logger.debug(f"提取事件类型: {event_type}")
 
-                logger.info(f"📊 收到的事件类型: {event_types}")
+                logger.info(f"收到的事件类型: {event_types}")
 
                 # 验证是否包含预期的事件类型
-                expected_events = {"executionReport", "outboundAccountPosition", "balanceUpdate"}
+                expected_events = {"ACCOUNT_UPDATE", "ORDER_TRADE_UPDATE"}
                 actual_events = event_types & expected_events
                 if actual_events:
-                    logger.info(f"✅ 收到预期的事件: {actual_events}")
+                    logger.info(f"收到预期的事件: {actual_events}")
                     test_passed = True
                 else:
-                    logger.error(f"❌ 未收到预期的事件类型，收到: {event_types}")
+                    logger.error(f"未收到预期的事件类型，收到: {event_types}")
             else:
-                logger.error("❌ 未收到任何账户更新，测试失败")
+                logger.error("未收到任何期货账户更新，测试失败")
 
     except Exception as e:
         logger.error(f"测试异常: {e}")
@@ -466,11 +466,11 @@ async def main():
 
     # 测试总结
     logger.info("=" * 60)
-    logger.info("📋 测试总结:")
-    logger.info(f"  - WebSocket 连接: ✅")
-    logger.info(f"  - 账户订阅: {'✅' if subscribe_success else '❌'}")
-    logger.info(f"  - 账户更新推送: {'✅' if len(account_updates) > 0 else '❌'}")
-    logger.info(f"  - 总体结果: {'✅ 通过' if test_passed else '❌ 失败'}")
+    logger.info("测试总结:")
+    logger.info(f"  - WebSocket 连接: 通过")
+    logger.info(f"  - 账户订阅: {'通过' if subscribe_success else '失败'}")
+    logger.info(f"  - 账户更新推送: {'通过' if len(account_updates) > 0 else '失败'}")
+    logger.info(f"  - 总体结果: {'通过' if test_passed else '失败'}")
     logger.info("=" * 60)
 
     if not test_passed:

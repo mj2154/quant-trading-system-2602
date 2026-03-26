@@ -9,7 +9,8 @@ from .futures_private_http_client import BinanceFuturesPrivateHTTPClient
 from .spot_private_ws_client import BinanceSpotPrivateWSClient
 from .futures_private_ws_client import BinanceFuturesPrivateWSClient
 from .spot_user_stream_client import SpotUserStreamClient
-from .futures_user_stream_client import FuturesUserStreamClient
+from .futures_user_stream_client import FuturesUserDataStreamClient
+from .session_auth_ws_client import SessionAuthWSClient
 
 __all__ = [
     "BinanceSpotHTTPClient",
@@ -21,5 +22,6 @@ __all__ = [
     "BinanceSpotPrivateWSClient",
     "BinanceFuturesPrivateWSClient",
     "SpotUserStreamClient",
-    "FuturesUserStreamClient",
+    "FuturesUserDataStreamClient",
+    "SessionAuthWSClient",
 ]

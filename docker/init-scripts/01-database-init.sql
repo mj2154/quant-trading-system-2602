@@ -724,7 +724,7 @@ BEGIN
                 'params', NEW.params,
                 'is_enabled', NEW.is_enabled,
                 'created_by', NEW.created_by,
-                'created_at', NEW.created_at::TEXT
+                'created_at', TO_CHAR(NEW.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM')
             )
         )::TEXT);
     END IF;
@@ -750,7 +750,8 @@ BEGIN
             'trigger_type', NEW.trigger_type,
             'params', NEW.params,
             'is_enabled', NEW.is_enabled,
-            'updated_at', NEW.updated_at::TEXT,
+            'created_at', TO_CHAR(NEW.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM'),
+            'updated_at', TO_CHAR(NEW.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM'),
             'created_by', NEW.created_by
         )
     )::TEXT);

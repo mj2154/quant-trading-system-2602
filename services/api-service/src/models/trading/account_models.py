@@ -20,7 +20,6 @@ from pydantic import ConfigDict, Field
 
 from ..base import CamelCaseModel
 
-
 # =============================================================================
 # 期货账户信息（GET请求 - 完整快照）
 # =============================================================================
@@ -218,35 +217,49 @@ class FuturesBalanceUpdate(CamelCaseModel):
     """期货余额更新
 
     对应 ACCOUNT_UPDATE 事件中的 B 字段。
-    币安字段: a(asset), wb(wallet_balance), cw(cross_wallet_balance), bc(balance_change), m(reason)
+    使用 alias 输出币安原始短字段名，与官方文档一致。
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    asset: str = Field(description="资产名称")
-    wallet_balance: str = Field(default="0", description="钱包余额")
-    cross_wallet_balance: str = Field(default="0", description="全仓钱包余额")
-    change_amount: str = Field(default="0", description="余额变动（不含盈亏和手续费）")
-    reason: str = Field(default="", description="余额变动原因：DEPOSIT, WITHDRAW, ORDER, FUNDING_FEE等")
+    asset: str = Field(alias="a", description="资产名称")
+    wallet_balance: str = Field(alias="wb", default="0", description="钱包余额")
+    cross_wallet_balance: str = Field(alias="cw", default="0", description="全仓钱包余额")
+    change_amount: str = Field(alias="bc", default="0", description="余额变动（不含盈亏和手续费）")
+    reason: str = Field(alias="m", default="", description="余额变动原因：DEPOSIT, WITHDRAW, ORDER, FUNDING_FEE等")
 
 
 class FuturesPositionUpdate(CamelCaseModel):
     """期货持仓更新
 
     对应 ACCOUNT_UPDATE 事件中的 P 字段。
+    使用 alias 输出币安原始短字段名，与官方文档一致。
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    symbol: str = Field(description="交易对")
-    position_amt: str = Field(default="0", description="持仓数量")
-    entry_price: str = Field(default="0", description="开仓价格")
-    break_even_price: str = Field(default="0", description="盈亏平衡价格")
-    cum_realized_pnl: str = Field(default="0", description="费前累计实现盈亏")
-    unrealized_pnl: str = Field(default="0", description="未实现盈亏")
-    margin_type: str = Field(default="cross", description="保证金类型：isolated(逐仓) / cross(全仓)")
-    isolated_wallet: str = Field(default="0", description="逐仓钱包余额")
-    position_side: str = Field(default="BOTH", description="持仓方向：LONG, SHORT, BOTH")
+    symbol: str = Field(alias="s", description="交易对")
+    position_amt: str = Field(alias="pa", default="0", description="持仓数量")
+    entry_price: str = Field(alias="ep", default="0", description="开仓价格")
+    break_even_price: str = Field(alias="bep", default="0", description="盈亏平衡价格")
+    cum_realized_pnl: str = Field(alias="cr", default="0", description="费前累计实现盈亏")
+    unrealized_pnl: str = Field(alias="up", default="0", description="未实现盈亏")
+    margin_type: str = Field(alias="mt", default="cross", description="保证金类型：isolated(逐仓) / cross(全仓)")
+    isolated_wallet: str = Field(alias="iw", default="0", description="逐仓钱包余额")
+    position_side: str = Field(alias="ps", default="BOTH", description="持仓方向：LONG, SHORT, BOTH")
+
+
+class FuturesAccountUpdateContent(CamelCaseModel):
+    """期货账户更新内容（对应 a 字段）
+
+    严格遵循币安官方文档格式。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    reason: str = Field(alias="m", default="", description="余额变动原因：ORDER, FUNDING_FEE, WITHDRAW, DEPOSIT等")
+    balances: list[FuturesBalanceUpdate] = Field(alias="B", default_factory=list, description="余额更新列表")
+    positions: list[FuturesPositionUpdate] = Field(alias="P", default_factory=list, description="持仓更新列表")
 
 
 class FuturesAccountUpdate(CamelCaseModel):
@@ -254,33 +267,59 @@ class FuturesAccountUpdate(CamelCaseModel):
 
     对应 WS协议 ACCOUNT_UPDATE 事件。
     数据来源: Binance WebSocket User Data Stream (ACCOUNT_UPDATE)。
-    使用 alias 直接输出币安原始短字段名 (m, B, P)。
+
+    严格遵循币安官方文档格式：
+    - e: 事件类型 (ACCOUNT_UPDATE)
+    - E: 事件时间（毫秒）
+    - T: 事务时间（毫秒）
+    - a: 更新数据（含 m, B, P）
 
     使用场景: 订阅期货账户实时增量更新。
     """
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    # 直接使用 alias 输出币安短字段名
-    reason: str = Field(alias="m", default="", description="余额变动原因：ORDER, FUNDING_FEE, WITHDRAW, DEPOSIT等")
-    balances: list[dict[str, Any]] = Field(alias="B", default_factory=list, description="余额更新列表")
-    positions: list[dict[str, Any]] = Field(alias="P", default_factory=list, description="持仓更新列表")
+    # 币安原始字段 - 严格按官方文档定义
+    event_type: str = Field(alias="e", default="", description="事件类型：ACCOUNT_UPDATE")
+    event_time: int = Field(alias="E", default=0, description="事件时间（毫秒）")
+    transaction_time: int = Field(alias="T", default=0, description="事务时间（毫秒）")
+
+    # 更新数据内容（对应 a 字段 - 嵌套结构）
+    update_data: FuturesAccountUpdateContent = Field(alias="a", description="更新数据")
 
     @classmethod
-    def from_account_update_event(cls, event_data: dict[str, Any]) -> "FuturesAccountUpdate":
+    def from_account_update_event(cls, event_data: dict[str, Any]) -> FuturesAccountUpdate:
         """从币安 ACCOUNT_UPDATE 事件创建模型
 
         Args:
-            event_data: 币安 WebSocket 推送的原始事件数据（简写字段格式）
+            event_data: 币安 WebSocket 推送的原始事件数据
+                包含 e, E, T, a 字段
 
         Returns:
             FuturesAccountUpdate 实例
         """
-        return cls(
-            reason=event_data.get("m", ""),
-            balances=event_data.get("B", []),
-            positions=event_data.get("P", []),
-        )
+        # 构建嵌套的 update_data 结构
+        update_data_dict = {
+            "m": event_data.get("a", {}).get("m", ""),
+            "B": [
+                FuturesBalanceUpdate.model_validate(b).model_dump(by_alias=True)
+                for b in event_data.get("a", {}).get("B", [])
+            ],
+            "P": [
+                FuturesPositionUpdate.model_validate(p).model_dump(by_alias=True)
+                for p in event_data.get("a", {}).get("P", [])
+            ],
+        }
+
+        # 构建完整的 event_data 字典，使用 alias 作为键
+        full_dict = {
+            "e": event_data.get("e", ""),
+            "E": event_data.get("E", 0),
+            "T": event_data.get("T", 0),
+            "a": update_data_dict,
+        }
+
+        return cls.model_validate(full_dict)
 
 
 # =============================================================================
@@ -336,7 +375,7 @@ class SpotAccountUpdate(CamelCaseModel):
     balances: list[SpotBalanceUpdate] = Field(alias="B", default_factory=list, description="余额列表")
 
     @classmethod
-    def from_outbound_account_position(cls, event_data: dict[str, Any]) -> "SpotAccountUpdate":
+    def from_outbound_account_position(cls, event_data: dict[str, Any]) -> SpotAccountUpdate:
         """从币安 outboundAccountPosition 事件创建模型
 
         Args:
@@ -351,12 +390,12 @@ class SpotAccountUpdate(CamelCaseModel):
             for b in event_data.get("B", [])
         ]
 
-        return cls(
-            event_type=event_data.get("e", "outboundAccountPosition"),
-            event_time=event_data.get("E", 0),
-            last_update_time=event_data.get("u", 0),
-            balances=balances,
-        )
+        # 构建更新后的 event_data（包含解析后的 balances）
+        full_data = {
+            **event_data,
+            "B": [b.model_dump(by_alias=True) for b in balances],
+        }
+        return cls.model_validate(full_data)
 
 
 class SpotBalanceUpdateEvent(CamelCaseModel):
@@ -378,7 +417,7 @@ class SpotBalanceUpdateEvent(CamelCaseModel):
     clear_time: int = Field(alias="T", default=0, description="清算时间（毫秒）")
 
     @classmethod
-    def from_balance_update(cls, event_data: dict[str, Any]) -> "SpotBalanceUpdateEvent":
+    def from_balance_update(cls, event_data: dict[str, Any]) -> SpotBalanceUpdateEvent:
         """从币安 balanceUpdate 事件创建模型
 
         Args:
@@ -387,13 +426,7 @@ class SpotBalanceUpdateEvent(CamelCaseModel):
         Returns:
             SpotBalanceUpdateEvent 实例
         """
-        return cls(
-            event_type=event_data.get("e", "balanceUpdate"),
-            event_time=event_data.get("E", 0),
-            asset=event_data.get("a", ""),
-            balance_delta=event_data.get("d", "0"),
-            clear_time=event_data.get("T", 0),
-        )
+        return cls.model_validate(event_data)
 
 
 class SpotExecutionReportEvent(CamelCaseModel):
@@ -449,7 +482,7 @@ class SpotExecutionReportEvent(CamelCaseModel):
     self_trade_prevention: str = Field(alias="V", default="NONE", description="自成交防止模式")
 
     @classmethod
-    def from_execution_report(cls, event_data: dict[str, Any]) -> "SpotExecutionReportEvent":
+    def from_execution_report(cls, event_data: dict[str, Any]) -> SpotExecutionReportEvent:
         """从币安 executionReport 事件创建模型
 
         Args:
@@ -458,39 +491,388 @@ class SpotExecutionReportEvent(CamelCaseModel):
         Returns:
             SpotExecutionReportEvent 实例
         """
-        return cls(
-            event_type=event_data.get("e", "executionReport"),
-            event_time=event_data.get("E", 0),
-            symbol=event_data.get("s", ""),
-            client_order_id=event_data.get("c", ""),
-            side=event_data.get("S", ""),
-            order_type=event_data.get("o", ""),
-            order_id=event_data.get("i", 0),
-            order_status=event_data.get("X", ""),
-            execution_type=event_data.get("x", ""),
-            time_in_force=event_data.get("f", "GTC"),
-            order_quantity=event_data.get("q", "0"),
-            order_price=event_data.get("p", "0"),
-            stop_price=event_data.get("P", "0"),
-            iceberg_quantity=event_data.get("F", "0"),
-            order_list_id=event_data.get("g", -1),
-            original_client_order_id=event_data.get("C", ""),
-            order_reject_reason=event_data.get("r", "NONE"),
-            last_executed_quantity=event_data.get("l", "0"),
-            cumulative_filled_quantity=event_data.get("z", "0"),
-            last_executed_price=event_data.get("L", "0"),
-            commission_amount=event_data.get("n", "0"),
-            commission_asset=event_data.get("N"),
-            transaction_time=event_data.get("T", 0),
-            trade_id=event_data.get("t", -1),
-            execution_id=event_data.get("I", 0),
-            is_on_book=event_data.get("w", False),
-            is_maker_side=event_data.get("m", False),
-            is_ignore=event_data.get("M", False),
-            order_creation_time=event_data.get("O", 0),
-            cumulative_quote_qty=event_data.get("Z", "0"),
-            last_quote_qty=event_data.get("Y", "0"),
-            quote_order_qty=event_data.get("Q", "0"),
-            working_time=event_data.get("W", 0),
-            self_trade_prevention=event_data.get("V", "NONE"),
-        )
+        return cls.model_validate(event_data)
+
+
+class FuturesOrderTradeUpdate(CamelCaseModel):
+    """期货订单成交更新（WS订阅）
+
+    对应 WS协议 ORDER_TRADE_UPDATE 事件。
+    数据来源: Binance WebSocket User Data Stream (ORDER_TRADE_UPDATE)。
+
+    严格遵循币安官方文档格式：
+    - e: 事件类型 (ORDER_TRADE_UPDATE)
+    - E: 事件时间（毫秒）
+    - T: 事务时间（毫秒）
+    - o: 订单数据
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    event_type: str = Field(alias="e", default="", description="事件类型：ORDER_TRADE_UPDATE")
+    event_time: int = Field(alias="E", default=0, description="事件时间（毫秒）")
+    transaction_time: int = Field(alias="T", default=0, description="事务时间（毫秒）")
+    order_data: dict = Field(alias="o", description="订单数据")
+
+    @classmethod
+    def from_order_trade_update_event(cls, event_data: dict[str, Any]) -> FuturesOrderTradeUpdate:
+        return cls.model_validate(event_data)
+
+
+class FuturesTradeLiteEvent(CamelCaseModel):
+    """期货简化交易事件（WS订阅）
+
+    对应 WS协议 TRADE_LITE 事件。
+    数据来源: Binance WebSocket User Data Stream (TRADE_LITE)。
+
+    严格遵循币安官方文档格式（参考 BinanceFuturesTradeLiteWSModel）：
+    - e: 事件类型 (TRADE_LITE)
+    - E: 事件时间（毫秒）
+    - T: 事务时间（毫秒）
+    - s: 交易对
+    - t: 成交ID
+    - i: 订单ID
+    - p: 原始价格
+    - q: 原始数量
+    - S: 订单方向
+    - m: 是否为做市商
+    - c: 客户端订单ID
+    - L: 最近成交价格
+    - l: 最近成交数量
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    event_type: str = Field(alias="e", default="", description="事件类型：TRADE_LITE")
+    event_time: int = Field(alias="E", default=0, description="事件时间（毫秒）")
+    transaction_time: int = Field(alias="T", default=0, description="事务时间（毫秒）")
+    symbol: str = Field(alias="s", default="", description="交易对")
+    trade_id: int = Field(alias="t", default=0, description="成交ID")
+    order_id: int = Field(alias="i", default=0, description="订单ID")
+    original_price: str = Field(alias="p", default="0", description="原始价格")
+    original_quantity: str = Field(alias="q", default="0", description="原始数量")
+    side: str = Field(alias="S", default="", description="订单方向：BUY/SELL")
+    is_maker: bool = Field(alias="m", default=False, description="是否为做市商")
+    client_order_id: str = Field(alias="c", default="", description="客户端订单ID")
+    last_filled_price: str = Field(alias="L", default="0", description="最近成交价格")
+    last_filled_quantity: str = Field(alias="l", default="0", description="最近成交数量")
+
+
+# =============================================================================
+# 期货账户配置更新（WS订阅）
+# =============================================================================
+
+
+class FuturesAccountConfigLeverageUpdate(CamelCaseModel):
+    """期货账户配置 - 杠杆更新
+
+    对应 ACCOUNT_CONFIG_UPDATE 事件中的 ac 字段。
+    使用 alias 输出币安原始短字段名。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    symbol: str = Field(alias="s", default="", description="交易对符号")
+    leverage: int = Field(alias="l", default=1, description="杠杆倍数")
+
+
+class FuturesAccountConfigMultiAssetUpdate(CamelCaseModel):
+    """期货账户配置 - 多资产模式更新
+
+    对应 ACCOUNT_CONFIG_UPDATE 事件中的 ai 字段。
+    使用 alias 输出币安原始短字段名。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    multi_asset_mode: bool = Field(alias="j", default=False, description="多资产模式")
+
+
+class FuturesAccountConfigUpdate(CamelCaseModel):
+    """期货账户配置更新（WS订阅）
+
+    对应 WS协议 ACCOUNT_CONFIG_UPDATE 事件。
+    数据来源: Binance WebSocket User Data Stream (ACCOUNT_CONFIG_UPDATE)。
+
+    严格遵循币安官方文档格式：
+    - e: 事件类型 (ACCOUNT_CONFIG_UPDATE)
+    - E: 事件时间（毫秒）
+    - T: 事务时间（毫秒）
+    - ac: 杠杆配置（可选）
+    - ai: 多资产模式配置（可选）
+
+    注意：事件可能只包含 ac 或 ai 之一，不会同时包含。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    event_type: str = Field(alias="e", default="ACCOUNT_CONFIG_UPDATE", description="事件类型")
+    event_time: int = Field(alias="E", default=0, description="事件时间（毫秒）")
+    transaction_time: int = Field(alias="T", default=0, description="事务时间（毫秒）")
+    leverage_update: FuturesAccountConfigLeverageUpdate | None = Field(
+        default=None, alias="ac", description="杠杆配置更新"
+    )
+    multi_asset_update: FuturesAccountConfigMultiAssetUpdate | None = Field(
+        default=None, alias="ai", description="多资产模式更新"
+    )
+
+    @classmethod
+    def from_account_config_update_event(cls, event_data: dict[str, Any]) -> FuturesAccountConfigUpdate:
+        """从币安 ACCOUNT_CONFIG_UPDATE 事件创建模型
+
+        Args:
+            event_data: 币安 WebSocket 推送的原始事件数据
+
+        Returns:
+            FuturesAccountConfigUpdate 实例
+        """
+        leverage_update = None
+        if event_data.get("ac"):
+            leverage_update = FuturesAccountConfigLeverageUpdate.model_validate(event_data["ac"])
+
+        multi_asset_update = None
+        if event_data.get("ai"):
+            multi_asset_update = FuturesAccountConfigMultiAssetUpdate.model_validate(event_data["ai"])
+
+        return cls.model_validate(event_data)
+
+
+# =============================================================================
+# 期货保证金追缴（WS订阅）
+# =============================================================================
+
+
+class FuturesMarginCallPosition(CamelCaseModel):
+    """期货保证金追缴持仓项
+
+    对应 MARGIN_CALL 事件中的 p 字段。
+    使用 alias 输出币安原始短字段名。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    symbol: str = Field(alias="s", default="", description="交易对")
+    position_side: str = Field(alias="ps", default="BOTH", description="持仓方向：LONG, SHORT, BOTH")
+    position_amt: str = Field(alias="pa", default="0", description="持仓数量")
+    margin_type: str = Field(alias="mt", default="cross", description="保证金类型：cross(全仓), isolated(逐仓)")
+    isolated_wallet: str = Field(alias="iw", default="0", description="逐仓钱包")
+    mark_price: str = Field(alias="mp", default="0", description="标记价格")
+    unrealized_profit: str = Field(alias="up", default="0", description="未实现盈亏")
+    maintenance_margin_required: str = Field(alias="mm", default="0", description="维持保证金要求")
+
+
+class FuturesMarginCallEvent(CamelCaseModel):
+    """期货保证金追缴事件（WS订阅）
+
+    对应 WS协议 MARGIN_CALL 事件。
+    数据来源: Binance WebSocket User Data Stream (MARGIN_CALL)。
+
+    严格遵循币安官方文档格式：
+    - e: 事件类型 (MARGIN_CALL)
+    - E: 事件时间（毫秒）
+    - cw: 跨账户钱包余额
+    - p: 追缴持仓列表
+
+    这是高优先级事件，涉及强平风险，需要及时告警。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    event_type: str = Field(alias="e", default="MARGIN_CALL", description="事件类型")
+    event_time: int = Field(alias="E", default=0, description="事件时间（毫秒）")
+    cross_wallet_balance: str = Field(alias="cw", default="0", description="跨账户钱包余额")
+    positions: list[FuturesMarginCallPosition] = Field(
+        alias="p", default_factory=list, description="追缴持仓列表"
+    )
+
+
+# =============================================================================
+# 期货条件单更新（WS订阅）
+# =============================================================================
+
+
+class FuturesAlgoOrderData(CamelCaseModel):
+    """期货条件单数据
+
+    对应 ALGO_UPDATE 事件中的 o 字段。
+    使用 alias 输出币安原始短字段名。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    client_algo_id: str = Field(alias="caid", default="", description="客户端算法订单ID")
+    algo_id: int = Field(alias="aid", default=0, description="算法订单ID")
+    algo_type: str = Field(alias="at", default="", description="算法类型")
+    order_type: str = Field(alias="o", default="", description="订单类型")
+    symbol: str = Field(alias="s", default="", description="交易对")
+    side: str = Field(alias="S", default="", description="订单方向：BUY/SELL")
+    position_side: str = Field(alias="ps", default="BOTH", description="持仓方向")
+    time_in_force: str = Field(alias="f", default="GTC", description="有效期限")
+    quantity: str = Field(alias="q", default="0", description="数量")
+    algo_status: str = Field(alias="X", default="", description="算法订单状态")
+    algo_order_id: str = Field(alias="ai", default="", description="算法订单ID")
+    avg_fill_price: str = Field(alias="ap", default="0", description="平均成交价格")
+    executed_quantity: str = Field(alias="aq", default="0", description="已成交数量")
+    actual_order_type: str = Field(alias="act", default="", description="实际订单类型")
+    trigger_price: str = Field(alias="tp", default="0", description="触发价格")
+    order_price: str = Field(alias="p", default="0", description="订单价格")
+    stp_mode: str = Field(alias="V", default="", description="STP模式")
+    working_type: str = Field(alias="wt", default="", description="工作类型")
+    price_match: str = Field(alias="pm", default="", description="价格匹配模式")
+    if_close_all: bool = Field(alias="cp", default=False, description="是否全平")
+    if_price_protect: bool = Field(alias="pP", default=False, description="是否开启价格保护")
+    is_reduce_only: bool = Field(alias="R", default=False, description="是否仅减仓")
+    trigger_time: int = Field(alias="tt", default=0, description="触发时间")
+    good_till_date: int = Field(alias="gtd", default=0, description="GTD有效期")
+    reject_reason: str = Field(alias="rm", default="", description="拒绝原因")
+
+
+class FuturesAlgoUpdateEvent(CamelCaseModel):
+    """期货条件单更新事件（WS订阅）
+
+    对应 WS协议 ALGO_UPDATE 事件。
+    数据来源: Binance WebSocket User Data Stream (ALGO_UPDATE)。
+
+    严格遵循币安官方文档格式：
+    - e: 事件类型 (ALGO_UPDATE)
+    - T: 事务时间（毫秒）
+    - E: 事件时间（毫秒）
+    - o: 订单数据
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    event_type: str = Field(alias="e", default="ALGO_UPDATE", description="事件类型")
+    transaction_time: int = Field(alias="T", default=0, description="事务时间（毫秒）")
+    event_time: int = Field(alias="E", default=0, description="事件时间（毫秒）")
+    order_data: FuturesAlgoOrderData = Field(alias="o", description="订单数据")
+
+
+# =============================================================================
+# 期货策略更新（WS订阅）
+# =============================================================================
+
+
+class FuturesStrategyData(CamelCaseModel):
+    """期货策略数据
+
+    对应 STRATEGY_UPDATE 事件中的 su 字段。
+    使用 alias 输出币安原始短字段名。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    strategy_id: int = Field(alias="si", default=0, description="策略ID")
+    strategy_type: str = Field(alias="st", default="", description="策略类型")
+    strategy_status: str = Field(alias="ss", default="", description="策略状态")
+    symbol: str = Field(alias="s", default="", description="交易对")
+    update_time: int = Field(alias="ut", default=0, description="更新时间")
+    op_code: int = Field(alias="c", default=0, description="操作代码")
+
+
+class FuturesStrategyUpdateEvent(CamelCaseModel):
+    """期货策略更新事件（WS订阅）
+
+    对应 WS协议 STRATEGY_UPDATE 事件。
+    数据来源: Binance WebSocket User Data Stream (STRATEGY_UPDATE)。
+
+    严格遵循币安官方文档格式：
+    - e: 事件类型 (STRATEGY_UPDATE)
+    - T: 事务时间（毫秒）
+    - E: 事件时间（毫秒）
+    - su: 策略数据
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    event_type: str = Field(alias="e", default="STRATEGY_UPDATE", description="事件类型")
+    transaction_time: int = Field(alias="T", default=0, description="事务时间（毫秒）")
+    event_time: int = Field(alias="E", default=0, description="事件时间（毫秒）")
+    strategy_data: FuturesStrategyData = Field(alias="su", description="策略数据")
+
+
+# =============================================================================
+# 期货网格更新（WS订阅）
+# =============================================================================
+
+
+class FuturesGridData(CamelCaseModel):
+    """期货网格数据
+
+    对应 GRID_UPDATE 事件中的 gu 字段。
+    使用 alias 输出币安原始短字段名。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    strategy_id: int = Field(alias="si", default=0, description="策略ID")
+    strategy_type: str = Field(alias="st", default="", description="策略类型")
+    strategy_status: str = Field(alias="ss", default="", description="策略状态")
+    symbol: str = Field(alias="s", default="", description="交易对")
+    realized_pnl: str = Field(alias="r", default="0", description="已实现盈亏")
+    unmatched_avg_price: str = Field(alias="up", default="0", description="未成交平均价格")
+    unmatched_qty: str = Field(alias="uq", default="0", description="未成交数量")
+    unmatched_fee: str = Field(alias="uf", default="0", description="未成交手续费")
+    matched_pnl: str = Field(alias="mp", default="0", description="已匹配盈亏")
+    update_time: int = Field(alias="ut", default=0, description="更新时间")
+
+
+class FuturesGridUpdateEvent(CamelCaseModel):
+    """期货网格更新事件（WS订阅）
+
+    对应 WS协议 GRID_UPDATE 事件。
+    数据来源: Binance WebSocket User Data Stream (GRID_UPDATE)。
+
+    严格遵循币安官方文档格式：
+    - e: 事件类型 (GRID_UPDATE)
+    - T: 事务时间（毫秒）
+    - E: 事件时间（毫秒）
+    - gu: 网格数据
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    event_type: str = Field(alias="e", default="GRID_UPDATE", description="事件类型")
+    transaction_time: int = Field(alias="T", default=0, description="事务时间（毫秒）")
+    event_time: int = Field(alias="E", default=0, description="事件时间（毫秒）")
+    grid_data: FuturesGridData = Field(alias="gu", description="网格数据")
+
+
+# =============================================================================
+# 期货条件单触发拒绝（WS订阅）
+# =============================================================================
+
+
+class FuturesConditionalOrderRejectData(CamelCaseModel):
+    """期货条件单拒绝数据
+
+    对应 CONDITIONAL_ORDER_TRIGGER_REJECT 事件中的 or 字段。
+    使用 alias 输出币安原始短字段名。
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    symbol: str = Field(alias="s", default="", description="交易对")
+    order_id: int = Field(alias="i", default=0, description="订单ID")
+    reject_reason: str = Field(alias="r", default="", description="拒绝原因")
+
+
+class FuturesConditionalOrderTriggerRejectEvent(CamelCaseModel):
+    """期货条件单触发拒绝事件（WS订阅）
+
+    对应 WS协议 CONDITIONAL_ORDER_TRIGGER_REJECT 事件。
+    数据来源: Binance WebSocket User Data Stream (CONDITIONAL_ORDER_TRIGGER_REJECT)。
+
+    严格遵循币安官方文档格式：
+    - e: 事件类型 (CONDITIONAL_ORDER_TRIGGER_REJECT)
+    - E: 事件时间（毫秒）
+    - T: 事务时间（毫秒）
+    - or: 拒绝数据
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    event_type: str = Field(alias="e", default="CONDITIONAL_ORDER_TRIGGER_REJECT", description="事件类型")
+    event_time: int = Field(alias="E", default=0, description="事件时间（毫秒）")
+    transaction_time: int = Field(alias="T", default=0, description="事务时间（毫秒）")
+    reject_data: FuturesConditionalOrderRejectData = Field(alias="or", description="拒绝数据")

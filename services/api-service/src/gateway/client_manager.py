@@ -18,7 +18,6 @@ import logging
 import uuid
 
 from fastapi import WebSocket
-from pydantic import BaseModel
 
 from ..models.base import CamelCaseModel
 

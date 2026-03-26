@@ -5,12 +5,14 @@
 返回 Pydantic 模型以确保类型安全和数据验证。
 """
 
+import logging
 from typing import Any
 
 from ..models.base import CamelCaseModel
-
 from ..models.trading.kline_models import KlineBar
 from ..models.trading.quote_models import QuotesData, QuotesValue
+
+logger = logging.getLogger(__name__)
 
 
 def to_float(value: Any) -> float | None:
@@ -31,7 +33,7 @@ def convert_binance_to_tv(data_type: str, data: dict) -> CamelCaseModel:
     返回 CamelCaseModel 以确保类型安全和数据验证。
 
     Args:
-        data_type: 数据类型 (KLINE, QUOTES, TRADE, ACCOUNT)
+        data_type: 数据类型 (KLINE, QUOTES, TRADE, USERDATA)
         data: 币安原始数据
 
     Returns:
@@ -44,9 +46,9 @@ def convert_binance_to_tv(data_type: str, data: dict) -> CamelCaseModel:
     elif data_type == "TRADE":
         # Trade 数据直接转发，返回字典包装
         return convert_trade(data)
-    elif data_type == "ACCOUNT":
-        # 账户数据直接返回，不转换
-        return convert_account(data)
+    elif data_type == "USERDATA":
+        # 用户数据流事件（现货/期货账户更新和订单更新）
+        return convert_user_data_stream_event(data)
     return convert_unknown(data_type, data)
 
 
@@ -185,15 +187,16 @@ def convert_trade(data: dict) -> CamelCaseModel:
 
     返回: 使用通用模型包装的字典数据
     """
-    # Trade 数据直接转发，使用动态字典模型
-    return _DictWrapper(data=data)
+    # Trade 数据应该有对应的模型，未定义模型则抛出异常
+    logger.error(f"[convert_trade] Trade 数据未定义模型: {data}")
+    raise ValueError("Trade data model not implemented")
 
 
-def convert_account(data: dict) -> CamelCaseModel:
-    """将账户数据转换为符合协议的数据模型
+def convert_user_data_stream_event(data: dict) -> CamelCaseModel:
+    """将币安用户数据流事件转换为符合协议的数据模型
 
     根据 07-websocket-protocol.md 设计：
-    - 账户更新推送统一使用币安原始短字段名
+    - 用户数据流事件统一使用币安原始短字段名
     - 不包含 subscriptionId 等内部字段（已在 binance-service 中移除）
 
     币安数据格式（已统一）：
@@ -201,78 +204,73 @@ def convert_account(data: dict) -> CamelCaseModel:
     现货 balanceUpdate: {e: "balanceUpdate", E: 1704067205000, a: "BTC", d: "...", T: ...}
     现货 executionReport: {e: "executionReport", E: ..., s: ..., ...}
     期货 ACCOUNT_UPDATE: {e: "ACCOUNT_UPDATE", E: ..., T: ..., a: {...}}
-    期货 ORDER_TRADE_UPDATE: {e: "ORDER_TRADE_UPDATE", E: ..., s: ..., ...}
-
-    使用 SpotAccountUpdate / SpotBalanceUpdateEvent / SpotExecutionReportEvent 模型进行转换，
-    确保类型安全和符合协议定义。所有模型使用 alias 输出币安原始短字段名。
+    期货 ORDER_TRADE_UPDATE: {e: "ORDER_TRADE_UPDATE", E: ..., T: ..., o: {...}}
 
     Returns:
-        SpotAccountUpdate / SpotBalanceUpdateEvent / SpotExecutionReportEvent / FuturesAccountUpdate 实例
+        SpotAccountUpdate / SpotBalanceUpdateEvent / SpotExecutionReportEvent /
+        FuturesAccountUpdate / FuturesOrderTradeUpdate 实例
     """
-    # 数据已经是直接的事件对象，不需要再提取 event 字段
     event_type = data.get("e", "unknown")
 
-    # 根据事件类型选择对应的模型
     if event_type == "outboundAccountPosition":
-        # 现货账户余额更新事件
         from ..models.trading.account_models import SpotAccountUpdate
         return SpotAccountUpdate.from_outbound_account_position(data)
     elif event_type == "balanceUpdate":
-        # 现货余额更新事件
         from ..models.trading.account_models import SpotBalanceUpdateEvent
         return SpotBalanceUpdateEvent.from_balance_update(data)
     elif event_type == "executionReport":
-        # 现货订单执行报告事件
         from ..models.trading.account_models import SpotExecutionReportEvent
         return SpotExecutionReportEvent.from_execution_report(data)
-    elif event_type == "ACCOUNT_UPDATE" or event_type == "ORDER_TRADE_UPDATE":
-        # 期货账户更新事件
-        return _create_futures_account_update(data)
+    elif event_type == "ACCOUNT_UPDATE":
+        from ..models.trading.account_models import FuturesAccountUpdate
+        return FuturesAccountUpdate.from_account_update_event(data)
+    elif event_type == "ORDER_TRADE_UPDATE":
+        from ..models.trading.account_models import FuturesOrderTradeUpdate
+        return FuturesOrderTradeUpdate.from_order_trade_update_event(data)
+    elif event_type == "TRADE_LITE":
+        # 期货简化交易事件
+        from ..models.trading.account_models import FuturesTradeLiteEvent
+        return FuturesTradeLiteEvent.model_validate(data)
+    elif event_type == "ACCOUNT_CONFIG_UPDATE":
+        # 期货账户配置更新事件（杠杆/多资产模式变更）
+        from ..models.trading.account_models import FuturesAccountConfigUpdate
+        return FuturesAccountConfigUpdate.from_account_config_update_event(data)
+    elif event_type == "MARGIN_CALL":
+        # 期货保证金追缴事件（高优先级，涉及强平风险）
+        from ..models.trading.account_models import FuturesMarginCallEvent
+        return FuturesMarginCallEvent.model_validate(data)
+    elif event_type == "ALGO_UPDATE":
+        # 期货条件单更新事件
+        from ..models.trading.account_models import FuturesAlgoUpdateEvent
+        return FuturesAlgoUpdateEvent.model_validate(data)
+    elif event_type == "STRATEGY_UPDATE":
+        # 期货策略更新事件
+        from ..models.trading.account_models import FuturesStrategyUpdateEvent
+        return FuturesStrategyUpdateEvent.model_validate(data)
+    elif event_type == "GRID_UPDATE":
+        # 期货网格更新事件
+        from ..models.trading.account_models import FuturesGridUpdateEvent
+        return FuturesGridUpdateEvent.model_validate(data)
+    elif event_type == "CONDITIONAL_ORDER_TRIGGER_REJECT":
+        # 期货条件单触发拒绝事件
+        from ..models.trading.account_models import FuturesConditionalOrderTriggerRejectEvent
+        return FuturesConditionalOrderTriggerRejectEvent.model_validate(data)
     else:
-        # 未知事件类型，使用通用包装
-        return _DictWrapper(data=data)
-
-
-def _create_futures_account_update(event_data: dict) -> CamelCaseModel:
-    """创建期货账户更新模型
-
-    Args:
-        event_data: 币安期货事件数据 (e, E, T, a 字段)
-
-    Returns:
-        FuturesAccountUpdate 实例
-    """
-    from ..models.trading.account_models import FuturesAccountUpdate
-
-    # 从 a 字段提取余额和持仓更新
-    a_data = event_data.get("a", {})
-
-    return FuturesAccountUpdate(
-        reason=a_data.get("m", ""),
-        balances=a_data.get("B", []),
-        positions=a_data.get("P", []),
-    )
+        logger.error(f"[convert_user_data_stream_event] 未知事件类型: {event_type}, data: {data}")
+        raise ValueError(f"Unknown user data stream event type: {event_type}")
 
 
 def convert_unknown(data_type: str, data: dict) -> CamelCaseModel:
     """处理未知数据类型
 
-    返回 CamelCaseModel 以确保类型安全。
+    未知数据类型直接抛出异常，不进行后续处理。
 
     Args:
         data_type: 数据类型
         data: 原始数据
 
-    Returns: 使用通用模型包装的字典数据
+    Returns:
+        不返回任何值，直接抛出异常
     """
-    return _DictWrapper(data={"data_type": data_type, "data": data})
-
-
-class _DictWrapper(CamelCaseModel):
-    """通用字典包装器
-
-    用于包装无法用具体模型表示的原始数据。
-    确保返回类型始终为 CamelCaseModel。
-    """
-
-    data: dict[str, Any] = {}
+    logger.error(f"[convert_unknown] 未知数据类型: data_type={data_type}, data={data}")
+    raise ValueError(f"Unknown data type: {data_type}")

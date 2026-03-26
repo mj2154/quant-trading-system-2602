@@ -36,7 +36,7 @@ class SubscriptionRepository:
             RETURNING id
         """
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(
+            result = await conn.fetchval(
                 query,
                 client_id,
                 subscription_key,
@@ -45,6 +45,7 @@ class SubscriptionRepository:
                 data_type,
                 interval,  # 统一使用 interval
             )
+            return int(result) if result is not None else 0
 
     async def remove(self, client_id: str, subscription_key: str) -> bool:
         """移除订阅"""
@@ -54,7 +55,7 @@ class SubscriptionRepository:
             WHERE client_id = $1 AND subscription_key = $2
         """
         async with self._pool.acquire() as conn:
-            result = await conn.execute(query, client_id, subscription_key)
+            result: str = await conn.execute(query, client_id, subscription_key)
         return result != "UPDATE 0"
 
     async def remove_all(self, client_id: str) -> int:

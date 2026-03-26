@@ -9,21 +9,17 @@ WebSocket数据载荷模型
 版本: v2.0.0
 """
 
-from typing import Any
 
 from pydantic import Field
 
 # 使用本地基类进行命名转换
 from ..base import CamelCaseModel
 
-# 从 trading 模块导入数据模型
-from ..trading.account_models import FuturesAccountData, SpotAccountData
-from ..trading.kline_models import KlineBars
-from ..trading.quote_models import QuotesData
-from ..trading.symbol_models import SymbolInfo
-
 # 从 db 模块导入数据模型
 from ..db.signal_models import StrategyMetadataResponse
+
+# 从 trading 模块导入数据模型
+from ..trading.account_models import FuturesAccountData, SpotAccountData
 
 # ==================== 数据载荷模型 ====================
 

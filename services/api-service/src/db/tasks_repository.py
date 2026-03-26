@@ -76,7 +76,7 @@ class TasksRepository:
             payload_json = json.dumps(payload)
             async with self._pool.acquire() as conn:
                 task_id = await conn.fetchval(query, task_type, payload_json)
-        return task_id
+        return int(task_id) if task_id is not None else 0
 
     async def get_task(self, task_id: int) -> dict[str, Any] | None:
         """根据ID获取任务
@@ -120,8 +120,8 @@ class TasksRepository:
             WHERE id = $3
         """
         async with self._pool.acquire() as conn:
-            result = await conn.execute(query, result, status, task_id)
-        return result != "UPDATE 0"
+            exec_result: str = await conn.execute(query, result, status, task_id)
+        return exec_result != "UPDATE 0"
 
     async def get_task_result(self, task_id: int) -> dict[str, Any] | None:
         """获取任务结果
@@ -156,7 +156,8 @@ class TasksRepository:
             WHERE status = 'pending'
         """
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(query)
+            result = await conn.fetchval(query)
+            return int(result) if result is not None else 0
 
     async def get_stats(self) -> dict[str, int]:
         """获取任务统计

@@ -19,6 +19,7 @@
 | 现货 SPOT | 余额更新 | - | BinanceSpotBalanceUpdateWSModel |
 | 现货 SPOT | 外部锁定更新 | - | BinanceSpotExternalLockUpdateWSModel |
 | 现货 SPOT | 事件流终止 | - | BinanceSpotEventStreamTerminatedWSModel |
+| 现货 SPOT | 订单列表状态 | - | BinanceSpotListStatusWSModel |
 | 现货 SPOT | 订单执行报告 | - | BinanceSpotExecutionReportWSModel |
 | 现货 SPOT | 交易所信息 | BinanceSpotExchangeInfoGetModel | - |
 | 期货 FUTURES | K线 | BinanceFuturesKlineGetModel | BinanceFuturesKlineWSModel |
@@ -26,6 +27,14 @@
 | 期货 FUTURES | 账户信息 | BinanceFuturesAccountGetModel | - |
 | 期货 FUTURES | 账户更新 | - | BinanceFuturesAccountUpdateWSModel |
 | 期货 FUTURES | 订单成交更新 | - | BinanceFuturesOrderTradeUpdateWSModel |
+| 期货 FUTURES | 简化交易 | - | BinanceFuturesTradeLiteWSModel |
+| 期货 FUTURES | 保证金追缴 | - | BinanceFuturesMarginCallWSModel |
+| 期货 FUTURES | 条件单更新 | - | BinanceFuturesAlgoUpdateWSModel |
+| 期货 FUTURES | 策略更新 | - | BinanceFuturesStrategyUpdateWSModel |
+| 期货 FUTURES | 网格更新 | - | BinanceFuturesGridUpdateWSModel |
+| 期货 FUTURES | 条件单触发拒绝 | - | BinanceFuturesConditionalOrderTriggerRejectWSModel |
+| 期货 FUTURES | 账户配置更新 | - | BinanceFuturesAccountConfigUpdateWSModel |
+| 期货 FUTURES | ListenKey过期 | - | BinanceFuturesListenKeyExpiredWSModel |
 | 期货 FUTURES | 交易所信息 | BinanceFuturesExchangeInfoGetModel | - |
 
 ### 1.2 设计原则（强制）
@@ -1054,6 +1063,8 @@ class BinanceSpotExecutionReportEvent(BaseModel):
     pegged_offset_type: str | None = Field(default=None, alias="gOT", description="挂钩偏移类型")
     pegged_offset_value: int | None = Field(default=None, alias="gOV", description="挂钩偏移值")
     pegged_price: str | None = Field(default=None, alias="gp", description="挂钩价格（仅挂钩订单）")
+    # --- 订单过期原因（仅订单过期时出现）---
+    expiry_reason: str | None = Field(default=None, alias="eR", description="订单过期原因")
 
     model_config = ConfigDict(populate_by_name=True)
 ```
@@ -1669,8 +1680,12 @@ class BinanceFuturesOrderDataModel(BaseModel):
     original_order_type: str = Field(alias="ot", description="原始订单类型")
     position_side: str = Field(alias="ps", description="持仓方向")
     if_close_all: bool = Field(alias="cp", description="是否全平")
-    activation_price: Decimal = Field(alias="AP", description="激活价格")
-    callback_rate: Decimal = Field(alias="cr", description="回调率")
+    activation_price: Decimal | None = Field(
+        alias="AP", description="激活价格,仅TRAILING_STOP_MARKET订单有值", default=None
+    )
+    callback_rate: Decimal | None = Field(
+        alias="cr", description="回调率,仅TRAILING_STOP_MARKET订单有值", default=None
+    )
     if_price_protect: bool = Field(alias="pP", description="是否开启价格保护")
     ignore_1: int = Field(alias="si", description="忽略字段")
     ignore_2: int = Field(alias="ss", description="忽略字段")
@@ -1788,6 +1803,471 @@ class BinanceFuturesAccountUpdateWSModel(BaseModel):
     update_data: BinanceFuturesAccountUpdateDataModel = Field(
         alias="a", description="更新数据"
     )
+
+    model_config = ConfigDict(populate_by_name=True)
+```
+
+---
+
+### 5.4 期货 Trade Lite WS
+
+**Stream**: User Data Stream `TRADE_LITE` 事件
+**文档来源**: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Trade-Lite.md`
+
+**响应格式**：
+```json
+{
+    "e": "TRADE_LITE",
+    "E": 1721895408092,
+    "T": 1721895408214,
+    "s": "BTCUSDT",
+    "q": "0.001",
+    "p": "0",
+    "m": false,
+    "c": "z8hcUoOsqEdKMeKPSABslD",
+    "S": "BUY",
+    "L": "64089.20",
+    "l": "0.040",
+    "t": 109100866,
+    "i": 8886774
+}
+```
+
+**模型定义**：
+```python
+class BinanceFuturesTradeLiteWSModel(BaseModel):
+    """期货简化交易 WS 事件模型
+
+    Stream: User Data Stream TRADE_LITE 事件
+    文档来源: binance_futures_docs/01_USD-M Futures/02_User Data Streams/Event-Trade-Lite.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: int = Field(alias="E", description="事件时间")
+    transaction_time: int = Field(alias="T", description="交易时间")
+    symbol: str = Field(alias="s", description="交易对")
+    original_quantity: Decimal = Field(alias="q", description="原始数量")
+    original_price: Decimal = Field(alias="p", description="原始价格")
+    is_maker: bool = Field(alias="m", description="是否为做市商")
+    client_order_id: str = Field(alias="c", description="客户端订单 ID")
+    side: str = Field(alias="S", description="订单方向")
+    last_filled_price: Decimal = Field(alias="L", description="最近成交价格")
+    last_filled_quantity: Decimal = Field(alias="l", description="最近成交数量")
+    trade_id: int = Field(alias="t", description="成交 ID")
+    order_id: int = Field(alias="i", description="订单 ID")
+
+    model_config = ConfigDict(populate_by_name=True)
+```
+
+---
+
+### 5.5 期货保证金追缴 WS
+
+**Stream**: User Data Stream `MARGIN_CALL` 事件
+**文档来源**: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Margin-Call.md`
+
+**响应格式**：
+```json
+{
+    "e": "MARGIN_CALL",
+    "E": 1587727187525,
+    "cw": "3.16812045",
+    "p": [
+        {
+            "s": "ETHUSDT",
+            "ps": "LONG",
+            "pa": "1.327",
+            "mt": "CROSSED",
+            "iw": "0",
+            "mp": "187.17127",
+            "up": "-1.166074",
+            "mm": "1.614445"
+        }
+    ]
+}
+```
+
+**模型定义**：
+```python
+class BinanceFuturesMarginCallPositionModel(BaseModel):
+    """期货保证金追缴 - 持仓子模型"""
+
+    symbol: str = Field(alias="s", description="交易对")
+    position_side: str = Field(alias="ps", description="持仓方向")
+    position_amt: Decimal = Field(alias="pa", description="持仓数量")
+    margin_type: str = Field(alias="mt", description="保证金类型")
+    isolated_wallet: Decimal = Field(alias="iw", description="逐仓钱包")
+    mark_price: Decimal = Field(alias="mp", description="标记价格")
+    unrealized_profit: Decimal = Field(alias="up", description="未实现盈亏")
+    maintenance_margin_required: Decimal = Field(alias="mm", description="维持保证金要求")
+
+
+class BinanceFuturesMarginCallWSModel(BaseModel):
+    """期货保证金追缴 WS 事件模型
+
+    Stream: User Data Stream MARGIN_CALL 事件
+    文档来源: binance_futures_docs/01_USD-M Futures/02_User Data Streams/Event-Margin-Call.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: int = Field(alias="E", description="事件时间")
+    cross_wallet_balance: Decimal = Field(alias="cw", description="跨账户钱包余额")
+    positions: list[BinanceFuturesMarginCallPositionModel] = Field(
+        alias="p", description="追缴持仓列表"
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+```
+
+---
+
+### 5.6 期货条件单更新 WS
+
+**Stream**: User Data Stream `ALGO_UPDATE` 事件
+**文档来源**: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Algo-Order-Update.md`
+
+**响应格式**：
+```json
+{
+    "e": "ALGO_UPDATE",
+    "T": 1750515742297,
+    "E": 1750515742303,
+    "o": {
+        "caid": "Q5xaq5EGKgXXa0fD7fs0Ip",
+        "aid": 2148719,
+        "at": "CONDITIONAL",
+        "o": "TAKE_PROFIT",
+        "s": "BNBUSDT",
+        "S": "SELL",
+        "ps": "BOTH",
+        "f": "GTC",
+        "q": "0.01",
+        "X": "CANCELED",
+        "ai": "",
+        "ap": "0.00000",
+        "aq": "0.00000",
+        "act": "0",
+        "tp": "750",
+        "p": "750",
+        "V": "EXPIRE_MAKER",
+        "wt": "CONTRACT_PRICE",
+        "pm": "NONE",
+        "cp": false,
+        "pP": false,
+        "R": false,
+        "tt": 0,
+        "gtd": 0,
+        "rm": "Reduce Only reject"
+    }
+}
+```
+
+**模型定义**：
+```python
+class BinanceFuturesAlgoOrderDataModel(BaseModel):
+    """期货条件单数据子模型"""
+
+    client_algo_id: str = Field(alias="caid", description="客户端算法订单 ID")
+    algo_id: int = Field(alias="aid", description="算法订单 ID")
+    algo_type: str = Field(alias="at", description="算法类型")
+    order_type: str = Field(alias="o", description="订单类型")
+    symbol: str = Field(alias="s", description="交易对")
+    side: str = Field(alias="S", description="订单方向")
+    position_side: str = Field(alias="ps", description="持仓方向")
+    time_in_force: str = Field(alias="f", description="有效期限")
+    quantity: Decimal = Field(alias="q", description="数量")
+    algo_status: str = Field(alias="X", description="算法订单状态")
+    algo_order_id: str = Field(alias="ai", description="算法订单 ID")
+    avg_fill_price: Decimal = Field(alias="ap", description="平均成交价格")
+    executed_quantity: Decimal = Field(alias="aq", description="已成交数量")
+    actual_order_type: str = Field(alias="act", description="实际订单类型")
+    trigger_price: Decimal = Field(alias="tp", description="触发价格")
+    order_price: Decimal = Field(alias="p", description="订单价格")
+    stp_mode: str = Field(alias="V", description="STP 模式")
+    working_type: str = Field(alias="wt", description="工作类型")
+    price_match: str = Field(alias="pm", description="价格匹配模式")
+    if_close_all: bool = Field(alias="cp", description="是否全平")
+    if_price_protect: bool = Field(alias="pP", description="是否开启价格保护")
+    is_reduce_only: bool = Field(alias="R", description="是否仅减仓")
+    trigger_time: int = Field(alias="tt", description="触发时间")
+    good_till_date: int = Field(alias="gtd", description="GTD 有效期")
+    reject_reason: str = Field(alias="rm", description="拒绝原因")
+
+
+class BinanceFuturesAlgoUpdateWSModel(BaseModel):
+    """期货条件单更新 WS 事件模型
+
+    Stream: User Data Stream ALGO_UPDATE 事件
+    文档来源: binance_futures_docs/01_USD-M Futures/02_User Data Streams/Event-Algo-Order-Update.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    transaction_time: int = Field(alias="T", description="交易时间")
+    event_time: int = Field(alias="E", description="事件时间")
+    order_data: BinanceFuturesAlgoOrderDataModel = Field(alias="o", description="订单数据")
+
+    model_config = ConfigDict(populate_by_name=True)
+```
+
+---
+
+### 5.7 期货策略更新 WS
+
+**Stream**: User Data Stream `STRATEGY_UPDATE` 事件
+**文档来源**: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-STRATEGY-UPDATE.md`
+
+**响应格式**：
+```json
+{
+    "e": "STRATEGY_UPDATE",
+    "T": 1669261797627,
+    "E": 1669261797628,
+    "su": {
+        "si": 176054594,
+        "st": "GRID",
+        "ss": "NEW",
+        "s": "BTCUSDT",
+        "ut": 1669261797627,
+        "c": 8007
+    }
+}
+```
+
+**模型定义**：
+```python
+class BinanceFuturesStrategyUpdateDataModel(BaseModel):
+    """期货策略更新数据子模型"""
+
+    strategy_id: int = Field(alias="si", description="策略 ID")
+    strategy_type: str = Field(alias="st", description="策略类型")
+    strategy_status: str = Field(alias="ss", description="策略状态")
+    symbol: str = Field(alias="s", description="交易对")
+    update_time: int = Field(alias="ut", description="更新时间")
+    op_code: int = Field(alias="c", description="操作代码")
+
+
+class BinanceFuturesStrategyUpdateWSModel(BaseModel):
+    """期货策略更新 WS 事件模型
+
+    Stream: User Data Stream STRATEGY_UPDATE 事件
+    文档来源: binance_futures_docs/01_USD-M Futures/02_User Data Streams/Event-STRATEGY-UPDATE.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    transaction_time: int = Field(alias="T", description="交易时间")
+    event_time: int = Field(alias="E", description="事件时间")
+    strategy_data: BinanceFuturesStrategyUpdateDataModel = Field(
+        alias="su", description="策略数据"
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+```
+
+---
+
+### 5.8 期货网格更新 WS
+
+**Stream**: User Data Stream `GRID_UPDATE` 事件
+**文档来源**: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-GRID-UPDATE.md`
+
+**响应格式**：
+```json
+{
+    "e": "GRID_UPDATE",
+    "T": 1669262908216,
+    "E": 1669262908218,
+    "gu": {
+        "si": 176057039,
+        "st": "GRID",
+        "ss": "WORKING",
+        "s": "BTCUSDT",
+        "r": "-0.00300716",
+        "up": "16720",
+        "uq": "-0.001",
+        "uf": "-0.00300716",
+        "mp": "0.0",
+        "ut": 1669262908197
+    }
+}
+```
+
+**模型定义**：
+```python
+class BinanceFuturesGridUpdateDataModel(BaseModel):
+    """期货网格更新数据子模型"""
+
+    strategy_id: int = Field(alias="si", description="策略 ID")
+    strategy_type: str = Field(alias="st", description="策略类型")
+    strategy_status: str = Field(alias="ss", description="策略状态")
+    symbol: str = Field(alias="s", description="交易对")
+    realized_pnl: str = Field(alias="r", description="已实现盈亏")
+    unmatched_avg_price: str = Field(alias="up", description="未成交平均价格")
+    unmatched_qty: str = Field(alias="uq", description="未成交数量")
+    unmatched_fee: str = Field(alias="uf", description="未成交手续费")
+    matched_pnl: str = Field(alias="mp", description="已匹配盈亏")
+    update_time: int = Field(alias="ut", description="更新时间")
+
+
+class BinanceFuturesGridUpdateWSModel(BaseModel):
+    """期货网格更新 WS 事件模型
+
+    Stream: User Data Stream GRID_UPDATE 事件
+    文档来源: binance_futures_docs/01_USD-M Futures/02_User Data Streams/Event-GRID-UPDATE.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    transaction_time: int = Field(alias="T", description="交易时间")
+    event_time: int = Field(alias="E", description="事件时间")
+    grid_data: BinanceFuturesGridUpdateDataModel = Field(alias="gu", description="网格数据")
+
+    model_config = ConfigDict(populate_by_name=True)
+```
+
+---
+
+### 5.9 期货条件单触发拒绝 WS
+
+**Stream**: User Data Stream `CONDITIONAL_ORDER_TRIGGER_REJECT` 事件
+**文档来源**: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Conditional-Order-Trigger-Reject.md`
+
+**响应格式**：
+```json
+{
+    "e": "CONDITIONAL_ORDER_TRIGGER_REJECT",
+    "E": 1685517224945,
+    "T": 1685517224955,
+    "or": {
+        "s": "ETHUSDT",
+        "i": 155618472834,
+        "r": "Due to the order could not be filled immediately, the FOK order has been rejected. The order will not be recorded in the order history"
+    }
+}
+```
+
+**模型定义**：
+```python
+class BinanceFuturesConditionalOrderRejectDataModel(BaseModel):
+    """期货条件单拒绝数据子模型"""
+
+    symbol: str = Field(alias="s", description="交易对")
+    order_id: int = Field(alias="i", description="订单 ID")
+    reject_reason: str = Field(alias="r", description="拒绝原因")
+
+
+class BinanceFuturesConditionalOrderTriggerRejectWSModel(BaseModel):
+    """期货条件单触发拒绝 WS 事件模型
+
+    Stream: User Data Stream CONDITIONAL_ORDER_TRIGGER_REJECT 事件
+    文档来源: binance_futures_docs/01_USD-M Futures/02_User Data Streams/Event-Conditional-Order-Trigger-Reject.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: int = Field(alias="E", description="事件时间")
+    transaction_time: int = Field(alias="T", description="消息发送时间")
+    reject_data: BinanceFuturesConditionalOrderRejectDataModel = Field(
+        alias="or", description="拒绝数据"
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+```
+
+---
+
+### 5.10 期货账户配置更新 WS
+
+**Stream**: User Data Stream `ACCOUNT_CONFIG_UPDATE` 事件
+**文档来源**: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Account-Configuration-Update-previous-Leverage-Update.md`
+
+**响应格式**（杠杆更新）：
+```json
+{
+    "e": "ACCOUNT_CONFIG_UPDATE",
+    "E": 1611646737479,
+    "T": 1611646737476,
+    "ac": {
+        "s": "BTCUSDT",
+        "l": 25
+    }
+}
+```
+
+**或**（多资产模式更新）：
+```json
+{
+    "e": "ACCOUNT_CONFIG_UPDATE",
+    "E": 1611646737479,
+    "T": 1611646737476,
+    "ai": {
+        "j": true
+    }
+}
+```
+
+**模型定义**：
+```python
+class BinanceFuturesAccountConfigLeverageModel(BaseModel):
+    """期货账户配置 - 杠杆子模型"""
+
+    symbol: str = Field(alias="s", description="交易对")
+    leverage: int = Field(alias="l", description="杠杆倍数")
+
+
+class BinanceFuturesAccountConfigMultiAssetModel(BaseModel):
+    """期货账户配置 - 多资产模式子模型"""
+
+    multi_asset_mode: bool = Field(alias="j", description="多资产模式")
+
+
+class BinanceFuturesAccountConfigUpdateWSModel(BaseModel):
+    """期货账户配置更新 WS 事件模型
+
+    Stream: User Data Stream ACCOUNT_CONFIG_UPDATE 事件
+    文档来源: binance_futures_docs/01_USD-M Futures/02_User Data Streams/Event-Account-Configuration-Update-previous-Leverage-Update.md
+
+    注意: 事件可能包含 ac(杠杆)或 ai(多资产模式)之一，不会同时包含
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: int = Field(alias="E", description="事件时间")
+    transaction_time: int = Field(alias="T", description="交易时间")
+    leverage_config: BinanceFuturesAccountConfigLeverageModel | None = Field(
+        default=None, alias="ac", description="杠杆配置"
+    )
+    multi_asset_config: BinanceFuturesAccountConfigMultiAssetModel | None = Field(
+        default=None, alias="ai", description="多资产模式配置"
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+```
+
+---
+
+### 5.11 期货 ListenKey 过期 WS
+
+**Stream**: User Data Stream `listenKeyExpired` 事件
+**文档来源**: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-User-Data-Stream-Expired.md`
+
+**响应格式**：
+```json
+{
+    "e": "listenKeyExpired",
+    "E": "1736996475556",
+    "listenKey": "WsCMN0a4KHUPTQuX6IUnqEZfB1inxmv1qR4kbf1LuEjur5VdbzqvyxqG9TSjVVxv"
+}
+```
+
+**模型定义**：
+```python
+class BinanceFuturesListenKeyExpiredWSModel(BaseModel):
+    """期货 ListenKey 过期 WS 事件模型
+
+    Stream: User Data Stream listenKeyExpired 事件
+    文档来源: binance_futures_docs/01_USD-M Futures/02_User Data Streams/Event-User-Data-Stream-Expired.md
+    """
+
+    event_type: str = Field(alias="e", description="事件类型")
+    event_time: str = Field(alias="E", description="事件时间")
+    listen_key: str = Field(alias="listenKey", description="过期的 ListenKey")
 
     model_config = ConfigDict(populate_by_name=True)
 ```
@@ -2354,6 +2834,21 @@ class BinanceFuturesModifyOrderResponse(BaseModel):
 | BinanceFuturesAccountUpdateDataModel | 期货账户更新数据子模型 |
 | BinanceFuturesOrderTradeUpdateWSModel | 期货订单成交更新 WS |
 | BinanceFuturesOrderDataModel | 期货订单数据子模型 |
+| BinanceFuturesTradeLiteWSModel | 期货简化交易 WS |
+| BinanceFuturesMarginCallWSModel | 期货保证金追缴 WS |
+| BinanceFuturesMarginCallPositionModel | 期货保证金追缴持仓子模型 |
+| BinanceFuturesAlgoUpdateWSModel | 期货条件单更新 WS |
+| BinanceFuturesAlgoOrderDataModel | 期货条件单数据子模型 |
+| BinanceFuturesStrategyUpdateWSModel | 期货策略更新 WS |
+| BinanceFuturesStrategyUpdateDataModel | 期货策略更新数据子模型 |
+| BinanceFuturesGridUpdateWSModel | 期货网格更新 WS |
+| BinanceFuturesGridUpdateDataModel | 期货网格更新数据子模型 |
+| BinanceFuturesConditionalOrderTriggerRejectWSModel | 期货条件单触发拒绝 WS |
+| BinanceFuturesConditionalOrderRejectDataModel | 期货条件单拒绝数据子模型 |
+| BinanceFuturesAccountConfigUpdateWSModel | 期货账户配置更新 WS |
+| BinanceFuturesAccountConfigLeverageModel | 期货账户配置杠杆子模型 |
+| BinanceFuturesAccountConfigMultiAssetModel | 期货账户配置多资产模式子模型 |
+| BinanceFuturesListenKeyExpiredWSModel | 期货 ListenKey 过期 WS |
 | BinanceFuturesOrderPlaceResult | 期货订单下单响应 |
 | BinanceFuturesModifyOrderResponse | 期货订单修改响应 |
 | BinanceFuturesExchangeInfoGetModel | 期货交易所信息 GET |
@@ -2382,6 +2877,14 @@ class BinanceFuturesModifyOrderResponse(BaseModel):
 - 期货 WebSocket: `binance_futures_docs/01_U本位合约/02_Websocket行情推送/`
 - 期货账户 REST API: `binance_futures_docs/01_U本位合约/02_账户接口/03_REST API/账户信息V3(USER-DATA).md`
 - 期货 User Data Stream:
-  - 订单交易更新: `binance_futures_docs/01_U本位合约/02_Websocket账户信息推送/订单交易更新推送.md`
-  - 账户余额/持仓更新: `binance_futures_docs/01_U本位合约/02_Websocket账户信息推送/Balance和Position更新推送.md`
+  - 订单交易更新: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Order-Update.md`
+  - 账户余额/持仓更新: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Balance-and-Position-Update.md`
+  - 简化交易: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Trade-Lite.md`
+  - 保证金追缴: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Margin-Call.md`
+  - 条件单更新: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Algo-Order-Update.md`
+  - 策略更新: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-STRATEGY-UPDATE.md`
+  - 网格更新: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-GRID-UPDATE.md`
+  - 条件单触发拒绝: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Conditional-Order-Trigger-Reject.md`
+  - 账户配置更新: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-Account-Configuration-Update-previous-Leverage-Update.md`
+  - ListenKey过期: `binance_futures_docs/01_USDⓈ-M Futures/02_User Data Streams/Event-User-Data-Stream-Expired.md`
 - 期货交易所信息: `binance_futures_docs/01_U本位合约/02_行情接口/03_REST API/获取交易规则和交易对.md`

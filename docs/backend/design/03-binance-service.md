@@ -603,11 +603,11 @@ await accountStore.fetchSpotAccount()
 await accountStore.refreshAccounts()
 ```
 
-## 8.10 账户订阅服务
+## 8.10 用户数据订阅服务
 
 ### 8.10.1 设计概述
 
-账户订阅服务通过 WebSocket 用户数据流实现账户信息的实时推送，采用"GET 完整 + 订阅增量"的策略确保数据一致性。
+用户数据订阅服务通过 WebSocket 用户数据流实现实时推送，采用"GET 完整 + 订阅增量"的策略确保数据一致性。
 
 **设计原则**：
 - 完整数据通过 REST API 获取，存储到 `account_info` 表（透传模式）
@@ -618,8 +618,8 @@ await accountStore.refreshAccounts()
 
 | 账户类型 | 订阅键 | 数据来源 |
 |---------|--------|----------|
-| 现货账户 | `BINANCE:SPOT@ACCOUNT` | 用户数据流 (stream.binance.com) |
-| 期货账户 | `BINANCE:FUTURES@ACCOUNT` | 用户数据流 (fstream.binance.com) |
+| 现货账户 | `BINANCE:SPOT@USERDATA` | 用户数据流 (stream.binance.com) |
+| 期货账户 | `BINANCE:FUTURES@USERDATA` | 用户数据流 (fstream.binance.com) |
 
 ### 8.10.3 数据更新策略
 
@@ -649,7 +649,7 @@ flowchart LR
 
 ### 8.10.4 币安 WebSocket 用户数据流
 
-账户订阅服务统一使用 **WebSocket API** 管理用户数据流，实现更优雅的连接管理。
+用户数据订阅服务统一使用 **WebSocket API** 管理用户数据流，实现更优雅的连接管理。
 
 #### 架构设计
 
@@ -687,11 +687,11 @@ flowchart TB
 
 **推荐**：使用 `userDataStream.subscribe.signature`，因为该方式支持 RSA/HMAC 密钥，无需事先认证。
 
-**账户数据订阅**：
+**用户数据订阅**：
 | 操作 | WebSocket 方法 | 说明 |
 |------|---------------|------|
 | 订阅 | `userDataStream.subscribe.signature` | 直接签名订阅，支持所有密钥类型 |
-| 取消订阅 | `userDataStream.unsubscribe` | 取消账户数据订阅 |
+| 取消订阅 | `userDataStream.unsubscribe` | 取消用户数据订阅 |
 
 **请求示例 - 签名订阅（推荐，用于RSA/HMAC密钥）**：
 ```json
@@ -757,7 +757,7 @@ flowchart TB
 }
 ```
 
-**订阅方式**：期货需要通过**独立的 WebSocket 连接**订阅账户数据流：
+**订阅方式**：期货需要通过**独立的 WebSocket 连接**订阅用户数据流：
 ```
 wss://fstream.binance.com/ws/<listenKey>
 ```
@@ -833,45 +833,41 @@ wss://fstream.binance.com/ws/<listenKey>
 
 ### 8.10.7 实现组件
 
-### 8.10.6 实现组件
-
-**用户数据流客户端**：
+**用户数据流客户端**（统一通过 `subscribe()` / `unsubscribe()` 接口）：
 ```python
 # 现货用户数据流客户端
-from clients.spot_user_stream_client import SpotUserStreamClient
+from clients.spot_private_ws_client import BinanceSpotPrivateWSClient
 
-client = SpotUserStreamClient(
+client = BinanceSpotPrivateWSClient(
     api_key="xxx",
     private_key_pem=private_key_pem,
 )
-client.set_data_callback(handle_data)
 await client.start()
 
 # 期货用户数据流客户端
-from clients.futures_user_stream_client import FuturesUserStreamClient
+from clients.futures_private_ws_client import BinanceFuturesPrivateWSClient
 
-client = FuturesUserStreamClient(
+client = BinanceFuturesPrivateWSClient(
     api_key="xxx",
     private_key_pem=private_key_pem,
 )
-client.set_data_callback(handle_data)
 await client.start()
 ```
 
-**账户订阅服务**：
-```python
-from services.account_subscription_service import AccountSubscriptionService
+**订阅流程**：
+- 用户数据流订阅由 `WSSubscriptionManager` 统一管理
+- 通过 `subscribe()` 方法触发订阅，`unsubscribe()` 方法取消订阅
+- 市场数据和用户数据流使用**统一的订阅接口**
 
-service = AccountSubscriptionService(
-    pool=pool,
-    api_key=api_key,
-    futures_api_key=futures_api_key,
-    private_key_pem=private_key_pem,
-)
-await service.start()
+```python
+# WSSubscriptionManager 统一订阅接口
+await spot_private_ws.subscribe()      # 现货用户数据流
+await futures_private_ws.subscribe()   # 期货用户数据流
+await spot_ws.subscribe(request)        # 现货市场数据
+await futures_ws.subscribe(request)     # 期货市场数据
 ```
 
-### 8.10.7 前端使用约定
+### 8.10.8 前端使用约定
 
 ```javascript
 // 前端正确用法
@@ -881,7 +877,7 @@ async function init() {
   render(account);
 
   // 2. 再订阅增量更新
-  ws.subscribe('BINANCE:SPOT@ACCOUNT', (data) => {
+  ws.subscribe('BINANCE:SPOT@USERDATA', (data) => {
     // 增量更新 - 直接覆盖
     updateAccount(data);
   });

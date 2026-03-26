@@ -13,6 +13,7 @@
 """
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import ValidationError
@@ -97,6 +98,113 @@ class OrderTaskHandler:
         if self._spot_ws_client:
             return self._spot_ws_client
         return self._spot_http_client
+
+    def _build_futures_order_params(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        time_in_force: Optional[str] = None,
+        stop_price: Optional[float] = None,
+        reduce_only: bool = False,
+        position_side: Optional[str] = None,
+        new_client_order_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """构建期货订单参数（用于 WebSocket API）
+
+        期货 session.logon 模式下无需签名。
+
+        Args:
+            symbol: 交易对
+            side: 买卖方向 BUY/SELL
+            order_type: 订单类型 LIMIT/MARKET/STOP/TAKE_PROFIT
+            quantity: 订单数量
+            price: 订单价格（ 市价单不需要）
+            time_in_force: 有效期限 GTC/IOC/FOK
+            stop_price: 止损价格
+            reduce_only: 是否仅减仓
+            position_side: 持仓方向 LONG/SHORT
+            new_client_order_id: 客户端订单ID
+
+        Returns:
+            订单参数字典
+        """
+        params: dict[str, Any] = {
+            "symbol": symbol.upper(),
+            "side": side.upper(),
+            "type": order_type.upper(),
+            "quantity": str(quantity),
+        }
+
+        if price is not None:
+            params["price"] = str(price)
+
+        if time_in_force is not None:
+            params["timeInForce"] = time_in_force.upper()
+
+        if stop_price is not None:
+            params["stopPrice"] = str(stop_price)
+
+        if reduce_only:
+            params["reduceOnly"] = True
+
+        if position_side is not None:
+            params["positionSide"] = position_side.upper()
+
+        if new_client_order_id is not None:
+            params["newClientOrderId"] = new_client_order_id
+
+        return params
+
+    def _build_spot_order_params(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        time_in_force: Optional[str] = None,
+        stop_price: Optional[float] = None,
+        new_client_order_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """构建现货订单参数（用于 WebSocket API）
+
+        Args:
+            symbol: 交易对
+            side: 买卖方向 BUY/SELL
+            order_type: 订单类型 LIMIT/MARKET/STOP/TAKE_PROFIT
+            quantity: 订单数量
+            price: 订单价格（市价单不需要）
+            time_in_force: 有效期限 GTC/IOC/FOK
+            stop_price: 止损价格
+            new_client_order_id: 客户端订单ID
+
+        Returns:
+            订单参数字典
+        """
+        params: dict[str, Any] = {
+            "symbol": symbol.upper(),
+            "side": side.upper(),
+            "type": order_type.upper(),
+            "quantity": str(quantity),
+            "timestamp": int(time.time() * 1000),
+        }
+
+        if price is not None:
+            params["price"] = str(price)
+
+        if time_in_force is not None:
+            params["timeInForce"] = time_in_force.upper()
+
+        if stop_price is not None:
+            params["stopPrice"] = str(stop_price)
+
+        if new_client_order_id is not None:
+            params["newClientOrderId"] = new_client_order_id
+
+        return params
 
     def _parse_symbol(self, symbol: str) -> tuple[str, str]:
         """解析语义化交易对符号，返回 (干净symbol, 市场类型)
@@ -233,9 +341,8 @@ class OrderTaskHandler:
             # 优先使用WS客户端回调模式
             if self._futures_ws_client:
                 try:
-                    # 使用 _build_order_params 构建带签名的参数
-                    # 注意：不再使用 to_binance_params()，因为它不包含 timestamp 和 signature
-                    binance_params = self._futures_ws_client._build_order_params(
+                    # 使用 _build_futures_order_params 构建参数
+                    binance_params = self._build_futures_order_params(
                         symbol=symbol,
                         side=side,
                         order_type=order_type,
@@ -267,9 +374,8 @@ class OrderTaskHandler:
                 return
 
             try:
-                # 使用 _build_order_params 构建带签名的参数
-                # 注意：不再使用 to_binance_params()，因为它不包含 timestamp 和 signature
-                binance_params = self._spot_ws_client._build_order_params(
+                # 使用 _build_spot_order_params 构建参数
+                binance_params = self._build_spot_order_params(
                     symbol=symbol,
                     side=side,
                     order_type=order_type,
@@ -452,6 +558,11 @@ class OrderTaskHandler:
             price_match = params.get("price_match")
             recv_window = params.get("recv_window")
 
+            # 类型安全：确保数值字段不是 None
+            if quantity is None or price is None or timestamp is None:
+                await self._repo.fail(task_id, "quantity/price/timestamp 不能为 None")
+                return
+
             # 优先使用WS客户端回调模式
             if self._futures_ws_client:
                 try:
@@ -510,6 +621,11 @@ class OrderTaskHandler:
             timestamp = params.get("timestamp")
             new_client_order_id = params.get("new_client_order_id")
             recv_window = params.get("recv_window")
+
+            # 类型安全：确保数值字段不是 None
+            if new_qty is None or timestamp is None:
+                await self._repo.fail(task_id, "new_qty/timestamp 不能为 None")
+                return
 
             # 优先使用WS客户端回调模式
             if self._spot_ws_client:

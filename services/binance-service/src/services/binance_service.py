@@ -45,8 +45,8 @@ from clients import (
     BinanceFuturesPrivateHTTPClient,
     BinanceFuturesPrivateWSClient,
     BinanceSpotPrivateWSClient,
-    SpotUserStreamClient,
 )
+from clients.base_ws_client import WSDataPackage
 from storage import ExchangeInfoRepository
 from db.tasks_repository import TasksRepository
 from db.realtime_data_repository import RealtimeDataRepository
@@ -122,11 +122,9 @@ class BinanceService:
         self._futures_private_http: Optional[BinanceFuturesPrivateHTTPClient] = None
         self._spot_ws: Optional[BinanceSpotWSClient] = None
         self._futures_ws: Optional[BinanceFuturesWSClient] = None
-        # 私有WebSocket客户端（用于订单功能）
+        # 私有WebSocket客户端（用于订单功能和用户数据流）
         self._spot_private_ws: Optional[BinanceSpotPrivateWSClient] = None
         self._futures_private_ws: Optional[BinanceFuturesPrivateWSClient] = None
-        # 用户数据流客户端（用于账户订阅）
-        self._spot_user_stream: Optional[SpotUserStreamClient] = None
         self._exchange_repo: Optional[ExchangeInfoRepository] = None
         self._tasks_repo: Optional[TasksRepository] = None  # Tasks表仓储
         self._realtime_repo: Optional[RealtimeDataRepository] = (
@@ -141,6 +139,7 @@ class BinanceService:
         self._ws_manager: Optional[WSSubscriptionManager] = None
 
         self._running = False
+        self._futures_listen_key_renew_task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
         """启动服务"""
@@ -220,6 +219,7 @@ class BinanceService:
         self._futures_ws = BinanceFuturesWSClient(proxy_url=self._proxy_ws)
 
         # 注册断线重连回调（用于全量恢复订阅）
+        # 4个WS客户端统一通过 _on_ws_reconnect → full_sync() 恢复订阅
         self._spot_ws.set_reconnect_callback(self._on_ws_reconnect)
         self._futures_ws.set_reconnect_callback(self._on_ws_reconnect)
 
@@ -227,17 +227,22 @@ class BinanceService:
         # 从环境变量读取配置
         futures_api_key = os.environ.get("BINANCE_FUTURES_API_KEY", api_key)
         if api_key and private_key_pem:
-            # 现货私有WebSocket客户端
+            # 现货私有WebSocket客户端（集成用户数据流）
             self._spot_private_ws = BinanceSpotPrivateWSClient(
                 api_key=api_key,
                 private_key_pem=private_key_pem,
                 proxy_url=self._proxy_ws,
             )
             logger.info("现货私有WebSocket客户端已初始化")
-            # 连接私有WebSocket并进行认证
+            # 连接并进行 session.logon 认证（使用 start() 方法）
             try:
-                await self._spot_private_ws.connect()
-                logger.info("现货私有WebSocket已连接并认证")
+                auth_success = await self._spot_private_ws.start()
+                if auth_success:
+                    logger.info("现货私有WebSocket已连接并认证")
+                    # 注意：用户数据流订阅通过 WSSubscriptionManager 调用 subscribe() 触发
+                else:
+                    logger.error("现货私有WebSocket认证失败")
+                    self._spot_private_ws = None
             except Exception as e:
                 logger.error(f"现货私有WebSocket连接失败: {e}")
                 self._spot_private_ws = None
@@ -252,27 +257,26 @@ class BinanceService:
                 proxy_url=self._proxy_ws,
             )
             logger.info("期货私有WebSocket客户端已初始化")
-            # 连接私有WebSocket并进行认证
+            # 连接并认证（使用 start() 方法，它会先 connect 再 session.logon）
             try:
-                await self._futures_private_ws.connect()
-                logger.info("期货私有WebSocket已连接并认证")
+                auth_success = await self._futures_private_ws.start()
+                if auth_success:
+                    logger.info("期货私有WebSocket已连接并认证")
+                    # 注意：用户数据流订阅通过 WSSubscriptionManager 调用 subscribe() 触发
+                else:
+                    logger.error("期货私有WebSocket认证失败")
+                    self._futures_private_ws = None
             except Exception as e:
                 logger.error(f"期货私有WebSocket连接失败: {e}")
                 self._futures_private_ws = None
         else:
             logger.warning("期货私有WebSocket客户端未初始化（缺少API Key或私钥）")
 
-        # 初始化用户数据流客户端（用于账户订阅）
-        # SpotUserStreamClient 独立处理 session.logon + userDataStream.subscribe
-        if api_key and private_key_pem:
-            self._spot_user_stream = SpotUserStreamClient(
-                api_key=api_key,
-                private_key_pem=private_key_pem,
-                proxy_url=self._proxy_ws,
-            )
-            logger.info("现货用户数据流客户端已初始化")
-        else:
-            logger.warning("现货用户数据流客户端未初始化（缺少API Key或私钥）")
+        # 私有WS客户端也统一注册重连回调
+        if self._spot_private_ws:
+            self._spot_private_ws.set_reconnect_callback(self._on_ws_reconnect)
+        if self._futures_private_ws:
+            self._futures_private_ws.set_reconnect_callback(self._on_ws_reconnect)
 
         # 初始化存储层
         self._exchange_repo = ExchangeInfoRepository(self._pool)
@@ -344,12 +348,19 @@ class BinanceService:
         self._ws_manager.register_client("binance-spot-ws-001", self._spot_ws)
         self._ws_manager.register_client("binance-futures-ws-001", self._futures_ws)
 
-        # 注册用户数据流客户端到订阅管理器（用于账户订阅）
-        if self._spot_user_stream:
+        # 注册现货私有WebSocket客户端（用户数据流）到订阅管理器
+        if self._spot_private_ws:
             self._ws_manager.register_user_stream_client(
-                "binance-spot-user-stream-001", self._spot_user_stream
+                "binance-spot-private-ws-001", self._spot_private_ws
             )
             logger.info("现货用户数据流客户端已注册到WS管理器")
+
+        # 注册期货私有WebSocket客户端（用户数据流）到订阅管理器
+        if self._futures_private_ws:
+            self._ws_manager.register_user_stream_client(
+                "binance-futures-private-ws-001", self._futures_private_ws
+            )
+            logger.info("期货用户数据流客户端已注册到WS管理器")
 
         # 启动WS订阅管理器
         await self._ws_manager.start()
@@ -1128,3 +1139,4 @@ class BinanceService:
             logger.debug(f"已写入实时数据: {subscription_key} ({data_type})")
         except Exception as e:
             logger.error(f"写入实时数据失败: {e}")
+

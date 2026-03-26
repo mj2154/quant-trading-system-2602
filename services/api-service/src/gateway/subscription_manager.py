@@ -210,7 +210,7 @@ class SubscriptionManager:
         deleted_keys = await self.unsubscribe_all(client_id)
 
         # 专门监控账户信息取消订阅（客户端断开连接时）
-        account_unsubs = [k for k in deleted_keys if "@ACCOUNT" in k]
+        account_unsubs = [k for k in deleted_keys if "@USERDATA" in k]
         if account_unsubs:
             logger.info(
                 f"[账户订阅监控] 客户端断开连接 {client_id} 取消账户信息订阅: {account_unsubs}"
@@ -222,16 +222,19 @@ class SubscriptionManager:
         self,
         subscription_key: str,
         message: dict,
-    ) -> None:
+    ) -> list[str]:
         """广播消息给订阅指定键的所有客户端
 
         Args:
             subscription_key: 订阅键
             message: 消息字典
+
+        Returns:
+            订阅该键的客户端ID列表
         """
         clients = self._subscriptions.get(subscription_key, set())
         if not clients:
-            return
+            return []
 
         # TODO: 通过 ClientManager 发送消息
         # 这里只返回客户端列表，由调用方发送
@@ -322,8 +325,9 @@ class SubscriptionManager:
             return "QUOTES"
         elif data_part == "TRADE":
             return "TRADE"
-        elif data_part == "ACCOUNT":
-            return "ACCOUNT"
+        elif data_part == "USERDATA":
+            # 用户数据流订阅（现货/期货账户更新和订单更新）
+            return "USERDATA"
         else:
             return "UNKNOWN"
 

@@ -20,14 +20,11 @@ from uuid import UUID
 import asyncpg
 from pydantic import BaseModel
 
-from ..models.base import CamelCaseModel
-
 from ..converters import convert_binance_to_tv
+from ..models.db.alert_config_models import AlertConfigData
 from ..models.protocol.constants import PROTOCOL_VERSION
 from ..models.protocol.ws_message import MessageError, MessageSuccess, MessageUpdate
-from ..models.protocol.ws_payload import ErrorData, ServerTimeData
-from ..models.protocol.ws_payload import SignalData
-from ..models.db.alert_config_models import AlertConfigData
+from ..models.protocol.ws_payload import ErrorData, ServerTimeData, SignalData
 from ..models.trading.kline_models import KlineBar, KlineBars
 from ..models.trading.quote_models import QuotesData, QuotesList, QuotesValue
 from .client_manager import ClientManager
@@ -573,8 +570,8 @@ class DataProcessor:
             from ..models.protocol.ws_payload import AccountResponseData
             from ..models.trading.account_models import (
                 FuturesAccountData,
-                SpotAccountData,
                 FuturesAccountDetail,
+                SpotAccountData,
                 SpotAccountDetail,
             )
 
@@ -905,9 +902,9 @@ class DataProcessor:
                 else:
                     # order.create 或其他任务类型 - 使用通用 OrderResponseData 模型
                     from ..models.protocol.ws_payload import (
+                        OrderPayloadData,
                         OrderResponseData,
                         OrderResultData,
-                        OrderPayloadData,
                     )
 
                     # 转换 result 和 payload 为具体模型（确保 snake_case -> camelCase 转换）
@@ -1148,7 +1145,7 @@ class DataProcessor:
             return "SIGNAL:unknown"
         elif event_type == "realtime_update":
             # realtime_update 事件的 subscription_key 在 event_data 中
-            # 格式: { "subscription_key": "BINANCE:FUTURES@ACCOUNT", "data_type": "ACCOUNT", ... }
+            # 格式: { "subscription_key": "BINANCE:FUTURES@USERDATA", "data_type": "USERDATA", ... }
             subscription_key = event_data.get("subscription_key")
             if subscription_key:
                 return subscription_key

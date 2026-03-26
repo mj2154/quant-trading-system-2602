@@ -273,6 +273,7 @@ class KlineCreate(CamelCaseModel):
             first_trade_id=self.first_trade_id,
             last_trade_id=self.last_trade_id,
             is_closed=self.is_closed,
+            event_time=None,
         )
 
     model_config = ConfigDict(
@@ -354,20 +355,21 @@ class KlineResponse(CamelCaseModel):
         Returns:
             KlineResponse实例
         """
-        return cls(
-            open_time=int(kline.open_time.timestamp() * 1000),
-            open_price=str(kline.open_price),
-            high_price=str(kline.high_price),
-            low_price=str(kline.low_price),
-            close_price=str(kline.close_price),
-            volume=str(kline.volume),
-            close_time=int(kline.close_time.timestamp() * 1000),
-            quote_volume=str(kline.quote_volume),
-            number_of_trades=kline.number_of_trades,
-            taker_buy_base_volume=str(kline.taker_buy_base_volume),
-            taker_buy_quote_volume=str(kline.taker_buy_quote_volume),
-            ignore="0",
-        )
+        # 使用 model_validate 处理 alias 字段，mypy 无法理解数字 alias
+        return cls.model_validate({
+            "0": int(kline.open_time.timestamp() * 1000),
+            "1": str(kline.open_price),
+            "2": str(kline.high_price),
+            "3": str(kline.low_price),
+            "4": str(kline.close_price),
+            "5": str(kline.volume),
+            "6": int(kline.close_time.timestamp() * 1000),
+            "7": str(kline.quote_volume),
+            "8": kline.number_of_trades,
+            "9": str(kline.taker_buy_base_volume),
+            "10": str(kline.taker_buy_quote_volume),
+            "11": "0",
+        })
 
     def to_list(self) -> list:
         """

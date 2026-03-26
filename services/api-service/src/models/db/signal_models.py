@@ -10,7 +10,6 @@ API 服务只负责告警配置管理，信号由 signal-service 处理。
 
 from datetime import datetime
 from typing import Any
-from uuid import UUID
 
 from pydantic import Field
 

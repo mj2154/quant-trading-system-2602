@@ -378,11 +378,14 @@ export class DataService {
     const handlers = this.messageHandlers.get(subscriptionKey)
 
     if (handlers && handlers.size > 0) {
+      console.debug('[DataService] 收到推送消息, subscriptionKey:', subscriptionKey, 'handlers数量:', handlers.size)
       handlers.forEach((handler) => {
         handler(content, subscriptionKey)
       })
     } else {
       // 无 handler 静默忽略
+      console.debug('[DataService] subscriptionKey 没有 handler:', subscriptionKey)
+      console.debug('[DataService] 当前所有 subscriptionKeys:', Array.from(this.messageHandlers.keys()))
     }
   }
 
@@ -1147,8 +1150,8 @@ export class DataService {
     callback: (update: AccountUpdate) => void,
     options?: SubscriptionOptions
   ): () => void {
-    // 订阅键格式: BINANCE:SPOT@ACCOUNT 或 BINANCE:FUTURES@ACCOUNT (遵循WS协议文档)
-    const subscriptionKey = `BINANCE:${accountType}@ACCOUNT`
+    // 订阅键格式: BINANCE:SPOT@USERDATA 或 BINANCE:FUTURES@USERDATA (遵循WS协议文档)
+    const subscriptionKey = `BINANCE:${accountType}@USERDATA`
     const finalOptions: SubscriptionOptions = { reconnect: true, ...options }
 
     this.subscriptionInfos.set(subscriptionKey, {

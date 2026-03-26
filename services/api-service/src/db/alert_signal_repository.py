@@ -183,7 +183,7 @@ class AlertConfigRepository:
         if not updates:
             return False
 
-        # Add updated_at to the SET clause
+        # Add updated_at to the SET clause (always allowed)
         updates.append("updated_at = NOW()")
 
         # Build query with alert_id as the last parameter
@@ -196,7 +196,7 @@ class AlertConfigRepository:
         # Add alert_id to the end of values
         values.append(alert_id)
         async with self._pool.acquire() as conn:
-            result = await conn.execute(query, *values)
+            result: str = await conn.execute(query, *values)
         return result == "UPDATE 1"
 
     async def delete(self, alert_id: str) -> bool:
@@ -209,7 +209,7 @@ class AlertConfigRepository:
             Whether deletion was successful.
         """
         async with self._pool.acquire() as conn:
-            result = await conn.execute(
+            result: str = await conn.execute(
                 "DELETE FROM alert_configs WHERE id = $1",
                 alert_id,
             )
@@ -365,7 +365,8 @@ class AlertConfigRepository:
             Total number of alert signals.
         """
         async with self._pool.acquire() as conn:
-            return await conn.fetchval("SELECT COUNT(*) FROM alert_configs")
+            result = await conn.fetchval("SELECT COUNT(*) FROM alert_configs")
+            return int(result) if result is not None else 0
 
     async def enable(self, alert_id: str) -> bool:
         """Enable an alert signal.
@@ -377,7 +378,7 @@ class AlertConfigRepository:
             Whether enable was successful.
         """
         async with self._pool.acquire() as conn:
-            result = await conn.execute(
+            result: str = await conn.execute(
                 """
                 UPDATE alert_configs
                 SET is_enabled = TRUE, updated_at = NOW()
@@ -397,7 +398,7 @@ class AlertConfigRepository:
             Whether disable was successful.
         """
         async with self._pool.acquire() as conn:
-            result = await conn.execute(
+            result: str = await conn.execute(
                 """
                 UPDATE alert_configs
                 SET is_enabled = FALSE, updated_at = NOW()

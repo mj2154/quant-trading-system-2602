@@ -95,4 +95,4 @@ class KlineResponse(CamelCaseModel):
     meta: KlineMeta  # 元信息
 
     def __str__(self) -> str:
-        return f"KlineResponse({self.meta.symbol}, {self.meta.resolution}, {len(self.data)} bars)"
+        return f"KlineResponse({self.meta.symbol}, {self.meta.interval}, {len(self.data)} bars)"

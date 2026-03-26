@@ -57,14 +57,12 @@ from ..models.trading.order_models import (
     CancelOrderRequest,
     FuturesCreateOrderRequest,
     FuturesModifyOrderRequest,
-    FuturesModifyOrderResponseData,
     GetOrderRequest,
     OpenOrdersResponseData,
     OrderCancelResponseData,
     OrderData,
     OrderListResponseData,
     SpotAmendOrderRequest,
-    SpotAmendOrderResponseData,
     SpotCreateOrderRequest,
 )
 from ..protocol.messages import MessageAck
@@ -934,8 +932,8 @@ class TaskRouter:
             f"新增数据库记录 {inserted_count} 个"
         )
 
-        # 专门监控账户信息订阅（BINANCE:SPOT@ACCOUNT 或 BINANCE:FUTURES@ACCOUNT）
-        account_subs = [s for s in subscriptions if "@ACCOUNT" in s]
+        # 专门监控账户信息订阅（BINANCE:SPOT@USERDATA 或 BINANCE:FUTURES@USERDATA）
+        account_subs = [s for s in subscriptions if "@USERDATA" in s]
         if account_subs:
             logger.info(
                 f"[账户订阅监控] 客户端 {client_id} 订阅账户信息: {account_subs}"
@@ -971,7 +969,7 @@ class TaskRouter:
             logger.info(f"客户端 {client_id} 取消全部 {len(deleted_keys)} 个订阅")
 
             # 专门监控账户信息取消订阅
-            account_unsubs = [k for k in deleted_keys if "@ACCOUNT" in k]
+            account_unsubs = [k for k in deleted_keys if "@USERDATA" in k]
             if account_unsubs:
                 logger.info(
                     f"[账户订阅监控] 客户端 {client_id} 取消全部账户信息订阅: {account_unsubs}"
@@ -1001,8 +999,8 @@ class TaskRouter:
             f"删除数据库记录 {deleted_count} 个"
         )
 
-        # 专门监控账户信息取消订阅（BINANCE:SPOT@ACCOUNT 或 BINANCE:FUTURES@ACCOUNT）
-        account_unsubs = [s for s in subscriptions if "@ACCOUNT" in s]
+        # 专门监控账户信息取消订阅（BINANCE:SPOT@USERDATA 或 BINANCE:FUTURES@USERDATA）
+        account_unsubs = [s for s in subscriptions if "@USERDATA" in s]
         if account_unsubs:
             logger.info(
                 f"[账户订阅监控] 客户端 {client_id} 取消账户信息订阅: {account_unsubs}"
@@ -1390,24 +1388,12 @@ class TaskRouter:
                 payload = validated_modify.model_dump()
                 payload["market_type"] = market_type
 
-                # 提取 orig_client_order_id 用于响应
-                orig_client_order_id = (
-                    validated_modify.orig_client_order_id
-                    or validated_modify.new_client_order_id
-                )
-
             else:
                 # 验证现货修改订单请求
                 validated_modify = SpotAmendOrderRequest.model_validate(data)
                 # 添加 market_type 到 payload（用于后续路由）
                 payload = validated_modify.model_dump()
                 payload["market_type"] = market_type
-
-                # 提取 orig_client_order_id 用于响应
-                orig_client_order_id = (
-                    validated_modify.orig_client_order_id
-                    or validated_modify.new_client_order_id
-                )
 
         except Exception as e:
             logger.error(f"验证修改订单请求失败: {e}")

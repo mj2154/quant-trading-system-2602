@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 # 使用本地基类进行命名转换
 from ..base import CamelCaseModel, SnakeCaseModel
@@ -232,7 +232,7 @@ class MessageError(MessageResponseBase):
     """
 
     type: str = "ERROR"
-    data: "ErrorData"
+    data: ErrorData
 
     def __str__(self) -> str:
         return f"MessageError(code={self.data.error_code}, message={self.data.error_message})"

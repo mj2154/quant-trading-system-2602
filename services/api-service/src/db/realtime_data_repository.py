@@ -58,7 +58,7 @@ class RealtimeDataRepository:
                 result = await conn.fetchval(
                     query, subscription_key, data_type, subscriber
                 )
-            return result  # True = INSERT (新行), False = UPDATE (已存在)
+            return bool(result)  # True = INSERT (新行), False = UPDATE (已存在)
         except asyncpg.UniqueViolationError:
             return False  # 已存在
 
@@ -101,7 +101,7 @@ class RealtimeDataRepository:
         """
         query = "DELETE FROM realtime_data WHERE subscription_key = $1"
         async with self._pool.acquire() as conn:
-            result = await conn.execute(query, subscription_key)
+            result: str = await conn.execute(query, subscription_key)
         return result != "DELETE 0"
 
     async def has_subscribers(self, subscription_key: str) -> bool:
@@ -121,7 +121,8 @@ class RealtimeDataRepository:
             )
         """
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(query, subscription_key)
+            result = await conn.fetchval(query, subscription_key)
+            return bool(result) if result is not None else False
 
     async def remove_api_service_subscriptions(self) -> int:
         """清理 api-service 创建的所有订阅（保留其他订阅源的数据）
@@ -212,7 +213,7 @@ class RealtimeDataRepository:
             WHERE subscription_key = $3
         """
         async with self._pool.acquire() as conn:
-            result = await conn.execute(query, data, event_time, subscription_key)
+            result: str = await conn.execute(query, data, event_time, subscription_key)
         return result != "UPDATE 0"
 
     async def truncate_all(self) -> int:
@@ -237,7 +238,8 @@ class RealtimeDataRepository:
         """
         query = "SELECT COUNT(*) FROM realtime_data"
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(query)
+            result = await conn.fetchval(query)
+            return int(result) if result is not None else 0
 
     async def get_subscriptions_by_type(
         self,

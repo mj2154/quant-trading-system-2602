@@ -134,6 +134,10 @@ class BinanceSpotExecutionReportEvent(BaseModel):
     pegged_price: str | None = Field(
         default=None, alias="gp", description="挂钩价格（仅挂钩订单）"
     )
+    # --- 订单过期原因（仅订单过期时出现）---
+    expiry_reason: str | None = Field(
+        default=None, alias="eR", description="订单过期原因"
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -191,8 +195,12 @@ class BinanceFuturesOrderDataModel(BaseModel):
     original_order_type: str = Field(alias="ot", description="原始订单类型")
     position_side: str = Field(alias="ps", description="持仓方向")
     if_close_all: bool = Field(alias="cp", description="是否全平")
-    activation_price: Decimal = Field(alias="AP", description="激活价格")
-    callback_rate: Decimal = Field(alias="cr", description="回调率")
+    activation_price: Decimal | None = Field(
+        alias="AP", description="激活价格,仅TRAILING_STOP_MARKET订单有值", default=None
+    )
+    callback_rate: Decimal | None = Field(
+        alias="cr", description="回调率,仅TRAILING_STOP_MARKET订单有值", default=None
+    )
     if_price_protect: bool = Field(alias="pP", description="是否开启价格保护")
     ignore_1: int = Field(alias="si", description="忽略字段")
     ignore_2: int = Field(alias="ss", description="忽略字段")

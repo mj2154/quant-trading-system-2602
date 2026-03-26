@@ -89,7 +89,7 @@ class OrderTasksRepository:
             f"Created order task: id={task_id}, type={task_type}, request_id={request_id}, "
             f"symbol={payload.get('symbol')}, side={payload.get('side')}"
         )
-        return task_id
+        return int(task_id) if task_id is not None else 0
 
     async def get_order_task(self, task_id: int) -> dict[str, Any] | None:
         """根据ID获取订单任务
@@ -133,8 +133,8 @@ class OrderTasksRepository:
             WHERE id = $3
         """
         async with self._pool.acquire() as conn:
-            result = await conn.execute(query, result, status, task_id)
-        return result != "UPDATE 0"
+            exec_result: str = await conn.execute(query, result, status, task_id)
+        return exec_result != "UPDATE 0"
 
     async def get_order_task_result(self, task_id: int) -> dict[str, Any] | None:
         """获取订单任务结果
@@ -169,7 +169,8 @@ class OrderTasksRepository:
             WHERE status = 'pending'
         """
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(query)
+            result = await conn.fetchval(query)
+            return int(result) if result is not None else 0
 
     async def get_stats(self) -> dict[str, int]:
         """获取订单任务统计
@@ -293,7 +294,7 @@ class OrderTasksRepository:
             ORDER BY created_at DESC
             LIMIT ${param_idx} OFFSET ${param_idx + 1}
         """
-        params.extend([limit, offset])
+        params.extend([str(limit), str(offset)])
 
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query, *params)

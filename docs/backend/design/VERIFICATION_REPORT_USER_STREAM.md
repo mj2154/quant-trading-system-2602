@@ -1,7 +1,7 @@
-# 账户数据流订阅验证报告
+# 用户数据流订阅验证报告
 
 **日期**: 2026-03-20
-**验证目标**: 验证现货和期货账户 WebSocket 订阅功能可行性
+**验证目标**: 验证现货和期货用户数据 WebSocket 订阅功能可行性
 
 ---
 
@@ -14,7 +14,7 @@
 
 ---
 
-## 现货账户订阅 (WebSocket API 方式)
+## 现货用户数据订阅 (WebSocket API 方式)
 
 ### 端点
 
@@ -102,7 +102,7 @@
 
 ---
 
-## 期货账户订阅 (listenKey 方式)
+## 期货用户数据订阅 (listenKey 方式)
 
 ### 端点
 
@@ -205,7 +205,7 @@
 - 验证脚本: `src/verify_user_stream.py`
 - 现货客户端: `src/clients/spot_user_stream_client.py` ✅ 已重写为 WebSocket API 方式
 - 期货客户端: `src/clients/futures_user_stream_client.py` (listenKey 方式)
-- 账户订阅服务: `src/services/account_subscription_service.py`
+- 用户数据订阅服务: `src/services/account_subscription_service.py`
 
 ---
 
@@ -215,7 +215,7 @@
 
 1. **继承 BaseWSClient**：统一客户端模式，只负责连接、接收、打包、发送
 2. **session.logon 认证**：Ed25519 签名，建立会话级认证
-3. **userDataStream.subscribe**：订阅账户数据流
+3. **userDataStream.subscribe**：订阅用户数据流
 4. **无 listenKey**：无需 listenKey，无需续期
 
 ### 事件格式
@@ -253,4 +253,4 @@
 
 1. ✅ 现货 `SpotUserStreamClient` 已重写完成
 2. ✅ `AccountSubscriptionService` 已更新以适配新客户端
-3. 集成测试：在完整服务中验证现货账户订阅
+3. 集成测试：在完整服务中验证现货用户数据订阅

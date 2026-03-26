@@ -1128,7 +1128,7 @@ class OrderData(CamelCaseModel):
 
 ---
 
-##### 3. 期货账户增量推送（订阅）
+##### 3. 期货用户数据增量推送（订阅）
 
 **模型**: `FuturesAccountUpdate` - 对应 WS协议 `ACCOUNT_UPDATE` 事件
 
@@ -1137,7 +1137,7 @@ class OrderData(CamelCaseModel):
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | `event_type` | str | 固定值 `"account_update"` |
-| `subscription_key` | str | 订阅键，如 `"BINANCE:FUTURES@ACCOUNT"` |
+| `subscription_key` | str | 订阅键，如 `"BINANCE:FUTURES@USERDATA"` |
 | `content` | FuturesAccountUpdateContent | 推送内容 |
 
 **FuturesAccountUpdateContent 字段**：
@@ -1185,7 +1185,7 @@ class OrderData(CamelCaseModel):
 
 ---
 
-##### 4. 现货账户增量推送（订阅）
+##### 4. 现货用户数据增量推送（订阅）
 
 > **重要说明**：现货账户推送有三种事件类型，统一使用币安原始短字段名。
 
@@ -1336,7 +1336,7 @@ class OrderData(CamelCaseModel):
 | `KLINE` | K线数据 | `BINANCE:BTCUSDT@KLINE_1` |
 | `QUOTES` | 报价数据 | `BINANCE:BTCUSDT@QUOTES` |
 | `TRADE` | 交易数据 | `BINANCE:BTCUSDT@TRADE` |
-| `ACCOUNT` | 账户数据 | `BINANCE:SPOT@ACCOUNT` |
+| `USERDATA` | 用户数据 | `BINANCE:SPOT@USERDATA` |
 | `TICKER` | 24hr行情 | `BINANCE:BTCUSDT@TICKER` |
 
 **ProductType - 产品类型**：

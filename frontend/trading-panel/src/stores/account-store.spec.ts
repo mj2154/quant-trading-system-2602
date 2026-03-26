@@ -2,7 +2,7 @@
  * Account Store Tests - TDD
  *
  * Tests for account subscription functionality (SPOT only):
- * - initialize() should subscribe to SPOT account updates
+ * - initialize() should subscribe to SPOT and FUTURES account updates
  * - handleSpotAccountUpdate() for outboundAccountPosition events
  * - handleSpotAccountUpdate() for balanceUpdate events
  * - handleSpotAccountUpdate() for executionReport events
@@ -46,33 +46,55 @@ describe('AccountStore - Account Subscription', () => {
   })
 
   describe('initialize()', () => {
-    it('should subscribe to SPOT account updates only', () => {
+    it('should fetch accounts and subscribe to SPOT and FUTURES updates', async () => {
       // Arrange
       const unsubscribeFn = vi.fn()
       mockSubscribeAccount.mockReturnValue(unsubscribeFn)
+      mockGetSpotAccount.mockResolvedValue({
+        balances: [{ asset: 'BTC', free: '1.0', locked: '0.0' }],
+        updateTime: 1234567890,
+      })
+      mockGetFuturesAccount.mockResolvedValue({
+        assets: [],
+        positions: [],
+        updateTime: 1234567890,
+      })
       const store = useAccountStore()
 
       // Act
-      store.initialize()
-      nextTick()
+      await store.initialize()
+      await nextTick()
 
-      // Assert - only SPOT subscription
-      expect(mockSubscribeAccount).toHaveBeenCalledTimes(1)
+      // Assert - both SPOT and FUTURES subscriptions
+      expect(mockSubscribeAccount).toHaveBeenCalledTimes(2)
       expect(mockSubscribeAccount).toHaveBeenCalledWith(
         'SPOT',
         expect.any(Function)
       )
+      expect(mockSubscribeAccount).toHaveBeenCalledWith(
+        'FUTURES',
+        expect.any(Function)
+      )
     })
 
-    it('should store unsubscribe function for cleanup', () => {
+    it('should store unsubscribe functions for cleanup', async () => {
       // Arrange
       const unsubscribeFn = vi.fn()
       mockSubscribeAccount.mockReturnValue(unsubscribeFn)
+      mockGetSpotAccount.mockResolvedValue({
+        balances: [],
+        updateTime: 1234567890,
+      })
+      mockGetFuturesAccount.mockResolvedValue({
+        assets: [],
+        positions: [],
+        updateTime: 1234567890,
+      })
       const store = useAccountStore()
 
       // Act
-      store.initialize()
-      nextTick()
+      await store.initialize()
+      await nextTick()
 
       // Assert - store should have stored the unsubscribe function for reset()
       expect(mockSubscribeAccount).toHaveBeenCalled()
@@ -80,22 +102,29 @@ describe('AccountStore - Account Subscription', () => {
   })
 
   describe('handleSpotAccountUpdate() - outboundAccountPosition', () => {
-    it('should update spot account balances when outboundAccountPosition received', async () => {
+    it('should update spotDisplay balances when outboundAccountPosition received', async () => {
       // Arrange
       const unsubscribeFn = vi.fn()
       mockSubscribeAccount.mockReturnValue(unsubscribeFn)
-      const store = useAccountStore()
-
-      // Set initial spot account
-      const initialAccount = {
+      mockGetSpotAccount.mockResolvedValue({
         balances: [
           { asset: 'BTC', free: '1.0', locked: '0.0' },
           { asset: 'ETH', free: '10.0', locked: '0.0' },
         ],
         updateTime: 1234567890,
-      }
-      mockGetSpotAccount.mockResolvedValue(initialAccount)
-      await store.fetchSpotAccount()
+        canTrade: true,
+        canWithdraw: true,
+        canDeposit: true,
+        permissions: ['SPOT'],
+      })
+      mockGetFuturesAccount.mockResolvedValue({
+        assets: [],
+        positions: [],
+        updateTime: 1234567890,
+      })
+      const store = useAccountStore()
+      await store.initialize()
+      await nextTick()
 
       // Reset mock to track subscription
       mockSubscribeAccount.mockClear()
@@ -109,23 +138,20 @@ describe('AccountStore - Account Subscription', () => {
         B: [{ a: 'BTC', f: '1.5', l: '0.0' }],
       }
 
-      // Act - call initialize to set up subscription
-      store.initialize()
-      nextTick()
-
       // Get the callback passed to subscribeAccount('SPOT', ...)
-      const subscribeCall = mockSubscribeAccount.mock.calls.find(
-        call => call[0] === 'SPOT'
-      )
-      expect(subscribeCall).toBeDefined()
+      const allCalls = mockSubscribeAccount.mock.calls as unknown[][]
+      const spotCalls = allCalls.filter(call => call[0] === 'SPOT')
+      expect(spotCalls.length).toBeGreaterThanOrEqual(1)
 
-      const callback = subscribeCall![1] as (update: unknown) => void
+      const callback = spotCalls[0]![1] as (update: unknown) => void
       callback(updateEvent)
 
       await nextTick()
 
-      // Assert - spot account should be updated
-      const btcBalance = store.spotAccount?.balances?.find(b => b.asset === 'BTC')
+      // Assert - spotDisplay should be updated
+      const btcBalance = store.spotDisplay?.balances?.find(
+        (b: { asset: string }) => b.asset === 'BTC'
+      )
       expect(btcBalance?.free).toBe('1.5')
     })
   })
@@ -134,16 +160,22 @@ describe('AccountStore - Account Subscription', () => {
     it('should update specific asset balance when balanceUpdate received', async () => {
       // Arrange
       mockSubscribeAccount.mockReturnValue(vi.fn())
-      const store = useAccountStore()
-
-      const initialAccount = {
-        balances: [
-          { asset: 'BTC', free: '1.0', locked: '0.0' },
-        ],
+      mockGetSpotAccount.mockResolvedValue({
+        balances: [{ asset: 'BTC', free: '1.0', locked: '0.0' }],
         updateTime: 1234567890,
-      }
-      mockGetSpotAccount.mockResolvedValue(initialAccount)
-      await store.fetchSpotAccount()
+        canTrade: true,
+        canWithdraw: true,
+        canDeposit: true,
+        permissions: ['SPOT'],
+      })
+      mockGetFuturesAccount.mockResolvedValue({
+        assets: [],
+        positions: [],
+        updateTime: 1234567890,
+      })
+      const store = useAccountStore()
+      await store.initialize()
+      await nextTick()
 
       // Prepare balanceUpdate event - BTC increased by 0.5
       const updateEvent = {
@@ -154,20 +186,20 @@ describe('AccountStore - Account Subscription', () => {
         T: 1234567899,
       }
 
-      // Act
-      store.initialize()
-      nextTick()
+      // Get the callback
+      const allCalls = mockSubscribeAccount.mock.calls as unknown[][]
+      const spotCalls = allCalls.filter(call => call[0] === 'SPOT')
+      expect(spotCalls.length).toBeGreaterThanOrEqual(1)
 
-      const subscribeCall = mockSubscribeAccount.mock.calls.find(
-        call => call[0] === 'SPOT'
-      )
-      const callback = subscribeCall![1] as (update: unknown) => void
+      const callback = spotCalls[0]![1] as (update: unknown) => void
       callback(updateEvent)
 
       await nextTick()
 
       // Assert - BTC balance should be increased by delta
-      const btcBalance = store.spotAccount?.balances?.find(b => b.asset === 'BTC')
+      const btcBalance = store.spotDisplay?.balances?.find(
+        (b: { asset: string }) => b.asset === 'BTC'
+      )
       expect(btcBalance?.free).toBe('1.5')
     })
   })
@@ -176,17 +208,23 @@ describe('AccountStore - Account Subscription', () => {
     it('should log order execution updates without modifying balance directly', async () => {
       // Arrange
       mockSubscribeAccount.mockReturnValue(vi.fn())
-      const store = useAccountStore()
-      const consoleSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
-
-      const initialAccount = {
-        balances: [
-          { asset: 'BTC', free: '1.0', locked: '0.0' },
-        ],
+      mockGetSpotAccount.mockResolvedValue({
+        balances: [{ asset: 'BTC', free: '1.0', locked: '0.0' }],
         updateTime: 1234567890,
-      }
-      mockGetSpotAccount.mockResolvedValue(initialAccount)
-      await store.fetchSpotAccount()
+        canTrade: true,
+        canWithdraw: true,
+        canDeposit: true,
+        permissions: ['SPOT'],
+      })
+      mockGetFuturesAccount.mockResolvedValue({
+        assets: [],
+        positions: [],
+        updateTime: 1234567890,
+      })
+      const store = useAccountStore()
+      await store.initialize()
+      await nextTick()
+      const consoleSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
 
       // Prepare executionReport event
       const updateEvent = {
@@ -200,14 +238,12 @@ describe('AccountStore - Account Subscription', () => {
         q: '0.1',
       }
 
-      // Act
-      store.initialize()
-      nextTick()
+      // Get the callback
+      const allCalls = mockSubscribeAccount.mock.calls as unknown[][]
+      const spotCalls = allCalls.filter(call => call[0] === 'SPOT')
+      expect(spotCalls.length).toBeGreaterThanOrEqual(1)
 
-      const subscribeCall = mockSubscribeAccount.mock.calls.find(
-        call => call[0] === 'SPOT'
-      )
-      const callback = subscribeCall![1] as (update: unknown) => void
+      const callback = spotCalls[0]![1] as (update: unknown) => void
       callback(updateEvent)
 
       await nextTick()
@@ -219,40 +255,31 @@ describe('AccountStore - Account Subscription', () => {
     })
   })
 
-  describe('handleFuturesAccountUpdate()', () => {
-    it('should NOT subscribe to FUTURES account updates', () => {
-      // Arrange
-      mockSubscribeAccount.mockReturnValue(vi.fn())
-      const store = useAccountStore()
-
-      // Act
-      store.initialize()
-      nextTick()
-
-      // Assert - futures should NOT be subscribed
-      expect(mockSubscribeAccount).not.toHaveBeenCalledWith(
-        'FUTURES',
-        expect.any(Function)
-      )
-    })
-  })
-
   describe('reset()', () => {
     it('should cleanup subscriptions when reset is called', async () => {
       // Arrange
       const unsubscribeFn = vi.fn()
       mockSubscribeAccount.mockReturnValue(unsubscribeFn)
+      mockGetSpotAccount.mockResolvedValue({
+        balances: [],
+        updateTime: 1234567890,
+      })
+      mockGetFuturesAccount.mockResolvedValue({
+        assets: [],
+        positions: [],
+        updateTime: 1234567890,
+      })
       const store = useAccountStore()
 
       // Act
-      store.initialize()
-      nextTick()
+      await store.initialize()
+      await nextTick()
       store.reset()
 
       // Assert
       expect(unsubscribeFn).toHaveBeenCalled()
-      expect(store.spotAccount).toBeNull()
-      expect(store.futuresAccount).toBeNull()
+      expect(store.spotDisplay).toBeNull()
+      expect(store.futuresDisplay).toBeNull()
     })
   })
 
@@ -260,8 +287,15 @@ describe('AccountStore - Account Subscription', () => {
     it('should fetch both spot and futures accounts', async () => {
       // Arrange
       const store = useAccountStore()
-      mockGetSpotAccount.mockResolvedValue({ balances: [] })
-      mockGetFuturesAccount.mockResolvedValue({ assets: [], positions: [] })
+      mockGetSpotAccount.mockResolvedValue({
+        balances: [],
+        updateTime: 1234567890,
+      })
+      mockGetFuturesAccount.mockResolvedValue({
+        assets: [],
+        positions: [],
+        updateTime: 1234567890,
+      })
 
       // Act
       await store.refreshAccounts()

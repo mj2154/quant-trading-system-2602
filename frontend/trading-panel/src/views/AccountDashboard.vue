@@ -103,9 +103,8 @@ async function handleRefresh() {
 }
 
 // 组件挂载时初始化
-onMounted(() => {
-  store.initialize()
-  store.refreshAccounts()
+onMounted(async () => {
+  await store.initialize()
 })
 
 // keep-alive 激活时（从缓存恢复）

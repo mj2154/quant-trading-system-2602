@@ -219,8 +219,8 @@ API 服务内部使用 **snake_case** 命名规范，与 Python 惯例一致：
 |-----------|--------|---------|---------|--------|
 | `BINANCE:BTCUSDT@KLINE_60` | BINANCE | BTCUSDT | K线 | 60分钟 |
 | `BINANCE:BTCUSDT@QUOTES` | BINANCE | BTCUSDT | 报价 | - |
-| `BINANCE:FUTURES@ACCOUNT` | BINANCE | FUTURES | 账户 | - |
-| `BINANCE:SPOT@ACCOUNT` | BINANCE | SPOT | 账户 | - |
+| `BINANCE:FUTURES@USERDATA` | BINANCE | FUTURES | 用户数据 | - |
+| `BINANCE:SPOT@USERDATA` | BINANCE | SPOT | 用户数据 | - |
 
 ### v2.0 订阅键格式规范
 
@@ -234,15 +234,15 @@ API 服务内部使用 **snake_case** 命名规范，与 Python 惯例一致：
   - `KLINE` - K线数据
   - `QUOTES` - 报价数据
   - `TRADE` - 成交数据
-  - `ACCOUNT` - 账户数据
+  - `USERDATA` - 用户数据
   - `SIGNAL` - 信号数据
 - `RESOLUTION`: 分辨率（仅K线需要）
   - `1`, `3`, `5`, `15`, `30`, `60`, `120`, `240`, `360`, `480`, `720`
   - `D`, `1D`, `W`, `1W`, `M`, `1M`
 
-**账户订阅键示例**:
-- `BINANCE:SPOT@ACCOUNT` - 现货账户
-- `BINANCE:FUTURES@ACCOUNT` - USDT本位合约账户
+**用户数据订阅键示例**:
+- `BINANCE:SPOT@USERDATA` - 现货账户
+- `BINANCE:FUTURES@USERDATA` - USDT本位合约账户
 
 ### 交易对搜索响应示例
 
@@ -383,6 +383,27 @@ WebSocket 协议本身提供了 ping/pong 机制，浏览器会自动处理：
 4. **智能订阅管理** - 自动计算、去重和优化订阅状态
 5. **实时数据推送** - 支持 K线、报价、成交、信号、账户增量推送
 6. **多交易所支持** - 通过统一消息格式支持不同交易所
+
+---
+
+## User Data Stream Events Classification
+
+用户数据流事件根据订阅键前缀分为以下两类：
+
+### 现货用户数据流 (`BINANCE:SPOT@USERDATA`)
+
+| 事件类型 | WS 事件名 | 说明 |
+|---------|---------|------|
+| `SpotAccountUpdate` | `ACCOUNT_UPDATE` | 账户余额/持仓变更 |
+| `SpotBalanceUpdateEvent` | `BALANCE_UPDATE` | 余额变动事件 |
+| `SpotExecutionReportEvent` | `EXECUTION_REPORT` | 订单执行报告 |
+
+### 期货用户数据流 (`BINANCE:FUTURES@USERDATA`)
+
+| 事件类型 | WS 事件名 | 说明 |
+|---------|---------|------|
+| `FuturesAccountUpdate` | `ACCOUNT_UPDATE` | 账户余额/持仓变更 |
+| `FuturesOrderTradeUpdate` | `ORDER_TRADE_UPDATE` | 订单/成交更新 |
 
 ---
 

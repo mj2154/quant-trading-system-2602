@@ -293,14 +293,13 @@ sequenceDiagram
 - 状态准确：交易对状态变化会准确反映
 - 事务保证：整个替换过程具有原子性
 
-## 10. 账户订阅数据流
+## 10. 用户数据订阅数据流
 
 ### 10.1 设计原则
 
-账户订阅采用"GET 完整 + 订阅增量"的策略：
+用户数据订阅采用"GET 完整 + 订阅增量"的策略：
 - **完整数据**：通过 REST API 获取，存储到 `account_info` 表
 - **增量更新**：通过 WebSocket 用户数据流推送，直接覆盖写入 `realtime_data` 表
-- **定期快照**：每隔 N 分钟调用 REST API 获取完整快照，覆盖写入 `realtime_data` 表（兜底）
 
 ### 10.2 数据存储位置
 
@@ -358,12 +357,6 @@ sequenceDiagram
         GW-->>FrontEnd: 推送增量数据
     end
 
-    Note over Frontend, DB: 定期快照 (兜底)
-
-    loop 每隔 N 分钟
-        BN->>BinanceWS: 定期完整快照
-        BN->>DB: UPDATE realtime_data SET data = 完整快照数据
-    end
 ```
 
 ### 10.5 增量数据说明
@@ -676,4 +669,4 @@ async def _handle_get_quotes(self, payload: TaskPayload):
 ---
 
 **版本**：v3.3
-**更新**：2026-02-27 - 添加账户订阅数据流设计
+**更新**：2026-02-27 - 添加用户数据订阅数据流设计

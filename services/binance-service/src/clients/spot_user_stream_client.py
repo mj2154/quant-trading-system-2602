@@ -330,8 +330,8 @@ class SpotUserStreamClient:
                     if self._websocket:
                         try:
                             await self._websocket.close()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[{self.CLIENT_ID}] 关闭 WebSocket 出错（忽略）: {e}")
                     self._websocket = None
 
                     # 创建新连接
@@ -375,8 +375,8 @@ class SpotUserStreamClient:
         if self._websocket:
             try:
                 await self._websocket.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[{self.CLIENT_ID}] 关闭 WebSocket 出错（忽略）: {e}")
             self._websocket = None
 
         self._connected = False
