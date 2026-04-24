@@ -1182,6 +1182,207 @@ class MACDResonanceShortStrategyV1(BaseStrategy):
         )
 
 
+class MACDResonanceShortStrategyV2(BaseStrategy):
+    """基于双MACD共振的做空策略V2，在V1基础上增加多头状态提前出场条件。
+
+    策略原理：
+        本策略通过双MACD指标的死叉信号，捕捉下跌趋势中的做空机会。
+        在V1基础上添加了EMA均线系统过滤条件和多头状态提前出场机制。
+
+    主要逻辑：
+        1. 使用两组不同参数的MACD指标（MACD1和MACD2）：
+           - MACD1采用较大周期参数（默认12/26/9）
+           - MACD2采用较小周期参数（默认4/16/9）
+        2. 入场条件（做空）：
+           - 两个MACD同时出现死叉（快线下穿慢线）
+           - 过滤条件：如果ema96低于ema192，且ema48也低于ema192的前提下，
+             入场信号K没有出现下穿ema48或96或192的情况就不入场
+        3. 出场条件：
+           - MACD2出现金叉（快线上穿慢线）
+           - 多头状态下提前出场：EMA96>EMA192 且 价格上穿EMA48 且 前一信号为失败的下穿
+
+    参数说明：
+        macd1_fastperiod: MACD1快线周期（默认12）
+        macd1_slowperiod: MACD1慢线周期（默认26）
+        macd1_signalperiod: MACD1信号线周期（默认9）
+        macd2_fastperiod: MACD2快线周期（默认4）
+        macd2_slowperiod: MACD2慢线周期（默认16）
+        macd2_signalperiod: MACD2信号线周期（默认9）
+        need_param_product: 是否生成参数组合网格（默认False）
+    """
+
+    type: str = "MACDResonanceShortStrategyV2"
+    name: str = "MACD做空策略V2"
+    description: str = "基于双MACD共振的做空策略V2，在V1基础上增加多头状态提前出场条件"
+
+    def __init__(self):
+        super().__init__()
+        self.macd_ind = MACDIndicator()
+        self.ema_ind = EMAIndicator()
+
+    def generate_signals(
+        self,
+        ohlcv: pd.DataFrame,
+        macd1_fastperiod: int | np.ndarray = 12,
+        macd1_slowperiod: int | np.ndarray = 26,
+        macd1_signalperiod: int | np.ndarray = 9,
+        macd2_fastperiod: int | np.ndarray = 4,
+        macd2_slowperiod: int | np.ndarray = 16,
+        macd2_signalperiod: int | np.ndarray = 9,
+        need_param_product: bool = False,
+    ) -> StrategySignals:
+        # 参数标准化与维度展开
+        params = {
+            "macd1_fastperiod": np.atleast_1d(macd1_fastperiod),
+            "macd1_slowperiod": np.atleast_1d(macd1_slowperiod),
+            "macd1_signalperiod": np.atleast_1d(macd1_signalperiod),
+            "macd2_fastperiod": np.atleast_1d(macd2_fastperiod),
+            "macd2_slowperiod": np.atleast_1d(macd2_slowperiod),
+            "macd2_signalperiod": np.atleast_1d(macd2_signalperiod),
+        }
+
+        param_list = [
+            list(params["macd1_fastperiod"]),
+            list(params["macd1_slowperiod"]),
+            list(params["macd1_signalperiod"]),
+            list(params["macd2_fastperiod"]),
+            list(params["macd2_slowperiod"]),
+            list(params["macd2_signalperiod"]),
+        ]
+
+        # 生成参数网格
+        if need_param_product:
+            param_product_list = create_param_product(param_list=param_list)
+            param_count = len(param_product_list[0]) if param_product_list[0] else 0
+        else:
+            # 检查所有参数数组的长度是否一致
+            param_lengths = [len(arr) for arr in param_list]
+            if len(set(param_lengths)) > 1:
+                raise ValueError(
+                    f"当param_product=False时，所有参数数组的长度必须一致，当前长度为: {dict(zip(params.keys(), param_lengths))}"
+                )
+
+            # 如果所有参数数组长度一致，则直接使用
+            param_product_list = param_list
+            param_count = len(param_product_list[0]) if param_product_list[0] else 0
+
+        # 预初始化信号矩阵
+        close = ohlcv["close"]
+        index = ohlcv.index
+        signal_shape = (len(index), param_count)
+        entries = np.zeros(signal_shape, dtype=np.int8)  # 做空入场信号
+        exits = np.zeros(signal_shape, dtype=np.int8)  # 做空出场信号
+
+        # 计算EMA用于过滤条件
+        ema48 = self.ema_ind.calculate_indicators(close, 48)["ema"]
+        ema96 = self.ema_ind.calculate_indicators(close, 96)["ema"]
+        ema192 = self.ema_ind.calculate_indicators(close, 192)["ema"]
+
+        # 计算价格下穿EMA的信号
+        price_cross_below_ema48 = (close < ema48) & (close.shift(1) >= ema48.shift(1))
+        price_cross_below_ema96 = (close < ema96) & (close.shift(1) >= ema96.shift(1))
+        price_cross_below_ema192 = (close < ema192) & (
+            close.shift(1) >= ema192.shift(1)
+        )
+
+        # 计算价格上穿EMA的信号
+        price_cross_above_ema48 = (close > ema48) & (close.shift(1) <= ema48.shift(1))
+
+        # 下穿失败信号：当前上穿ema48，但前一个信号是下穿ema48
+        filled = price_cross_below_ema48.shift(1)
+        failed_cross_below_ema48 = price_cross_above_ema48 & filled
+
+        # 多头状态：EMA96高于EMA192
+        多头状态 = ema96 > ema192
+
+        # 空头状态：EMA96低于EMA192，且EMA48也低于EMA192
+        特定空头状态 = (ema96 < ema192) & (ema48 < ema192)
+
+        # 批量计算信号
+        for i in range(param_count):
+            # 从param_product_list中提取参数
+            m1_fast = param_product_list[0][i]
+            m1_slow = param_product_list[1][i]
+            m1_signal = param_product_list[2][i]
+            m2_fast = param_product_list[3][i]
+            m2_slow = param_product_list[4][i]
+            m2_signal = param_product_list[5][i]
+
+            # 检查参数是否合规：快线周期必须小于慢线周期
+            if m1_fast > m1_slow or m2_fast > m2_slow:
+                # 对于不合规的参数组合，直接跳过计算，保持entries和exits为全False
+                continue
+
+            # 计算MACD1指标
+            macd1_result = self.macd_ind.calculate_indicators(
+                close=close,
+                fastperiod=m1_fast,
+                slowperiod=m1_slow,
+                signalperiod=m1_signal,
+            )
+
+            # 计算MACD2指标
+            macd2_result = self.macd_ind.calculate_indicators(
+                close=close,
+                fastperiod=m2_fast,
+                slowperiod=m2_slow,
+                signalperiod=m2_signal,
+            )
+
+            # 提取MACD数据
+            macd1_line = macd1_result["macd"]
+            macd1_signal_line = macd1_result["macd_signal"]
+            macd2_line = macd2_result["macd"]
+            macd2_signal_line = macd2_result["macd_signal"]
+
+            # 生成做空入场信号：当两个MACD的快线都下穿慢线时（死叉）
+            macd1_bearish_cross = (macd1_line < macd1_signal_line) & (
+                macd1_line.shift(1) >= macd1_signal_line.shift(1)
+            )
+            macd2_bearish_cross = (macd2_line < macd2_signal_line) & (
+                macd2_line.shift(1) >= macd2_signal_line.shift(1)
+            )
+            entries[:, i] = (macd1_bearish_cross & macd2_bearish_cross).astype(np.int8)
+
+            # 检查入场K线是否下穿EMA均线
+            entry_signals = entries[:, i].astype(bool)
+            cross_below_any_ema = (
+                price_cross_below_ema48
+                | price_cross_below_ema96
+                | price_cross_below_ema192
+            )
+
+            # 在特定空头状态下，如果入场信号K没有出现下穿EMA的情况，则过滤掉该信号
+            filter_condition = 特定空头状态 & ~cross_below_any_ema
+            entries[:, i] = (entry_signals & ~filter_condition).astype(np.int8)
+
+            # 生成做空出场信号：当MACD2出现金叉时
+            macd2_bullish_cross = (macd2_line > macd2_signal_line) & (
+                macd2_line.shift(1) <= macd2_signal_line.shift(1)
+            )
+            # V2新增：多头状态下的提前出场条件
+            extra_exit_condition = (
+                多头状态
+                & (close > ema48)
+                & (failed_cross_below_ema48.shift(1))
+            )
+
+            # 出场信号 = 原MACD2金叉 OR 额外条件
+            exits[:, i] = (macd2_bullish_cross | extra_exit_condition).astype(np.int8)
+
+        # 创建多重索引列名
+        # 重新构造参数组合的元组列表
+        param_tuples = list(zip(*param_product_list))
+        param_names = list(params.keys())
+        columns = pd.MultiIndex.from_tuples(param_tuples, names=param_names)
+
+        # 构建最终数据结构
+        return StrategySignals(
+            entries=pd.DataFrame(entries, index=index, columns=columns),
+            exits=pd.DataFrame(exits, index=index, columns=columns),
+        )
+
+
 # ===========================================
 # 策略注册
 # ===========================================
@@ -1200,3 +1401,6 @@ StrategyRegistry.register(MACDResonanceShortStrategy)
 
 # 注册MACD做空策略V1
 StrategyRegistry.register(MACDResonanceShortStrategyV1)
+
+# 注册MACD做空策略V2
+StrategyRegistry.register(MACDResonanceShortStrategyV2)

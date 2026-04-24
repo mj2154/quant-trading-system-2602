@@ -59,10 +59,19 @@ function formatStringRate(value: string | undefined): string {
   return (num * 100).toFixed(4) + '%'
 }
 
-// 格式化时间
+// 格式化时间 (Asia/Shanghai 时区)
 function formatTime(timestamp: number | undefined): string {
   if (!timestamp) return '-'
-  return new Date(timestamp).toLocaleString()
+  return new Date(timestamp).toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
 }
 
 // 计算收益率
@@ -143,18 +152,18 @@ const riskLevel = computed(() => {
 const futuresPositionColumns: any[] = [
   { title: '交易对', key: 'symbol', width: 110, fixed: 'left' },
   { title: '方向', key: 'side', width: 75, render: (row: any) => h(NTag, { type: row.side === 'long' ? 'success' : row.side === 'short' ? 'error' : 'info', size: 'small' }, { default: () => row.side.toUpperCase() }) },
-  { title: '数量', key: 'amount', width: 95, render: (row: any) => formatNumber(row.amount, 4) },
+  { title: '数量', key: 'positionAmt', width: 95, render: (row: any) => formatNumber(row.positionAmt, 4) },
   { title: '开仓价', key: 'entryPrice', width: 95, render: (row: any) => row.entryPrice === '-' ? h('span', { class: 'text-muted' }, '-') : formatNumber(row.entryPrice) },
   { title: '标记价', key: 'markPrice', width: 95, render: (row: any) => row.markPrice === '-' ? h('span', { class: 'text-muted' }, '-') : formatNumber(row.markPrice) },
   { title: '强平价', key: 'liquidationPrice', width: 95, render: (row: any) => row.liquidationPrice === '-' ? h('span', { class: 'text-muted' }, '-') : h('span', { class: parseFloat(row.liquidationPrice || '0') ? '' : 'text-muted' }, formatNumber(row.liquidationPrice)) },
   { title: '杠杆', key: 'leverage', width: 65, render: (row: any) => row.leverage ? h(NTag, { type: parseInt(row.leverage) > 50 ? 'error' : parseInt(row.leverage) > 20 ? 'warning' : 'info', size: 'small' }, { default: () => row.leverage + 'x' }) : '-' },
-  { title: '模式', key: 'isolated', width: 70, render: (row: any) => row.isIsolated ? h(NTag, { type: 'warning', size: 'small' }, { default: () => '逐仓' }) : h(NTag, { type: 'info', size: 'small' }, { default: () => '全仓' }) },
+  { title: '模式', key: 'isolatedMargin', width: 70, render: (row: any) => parseFloat(row.isolatedMargin) > 0 ? h(NTag, { type: 'warning', size: 'small' }, { default: () => '逐仓' }) : h(NTag, { type: 'info', size: 'small' }, { default: () => '全仓' }) },
   { title: '名义价值', key: 'notional', width: 110, render: (row: any) => formatLargeNumber(row.notional) },
-  { title: '保证金', key: 'margin', width: 95, render: (row: any) => formatNumber(row.margin) },
-  { title: '未实现盈亏', key: 'unrealizedPnl', width: 110, render: (row: any) => h('span', { class: getPnlClass(row.unrealizedPnl) }, (parseFloat(row.unrealizedPnl) > 0 ? '+' : '') + formatNumber(row.unrealizedPnl)) },
+  { title: '保证金', key: 'isolatedMargin', width: 95, render: (row: any) => formatNumber(row.isolatedMargin) },
+  { title: '未实现盈亏', key: 'unrealizedProfit', width: 110, render: (row: any) => h('span', { class: getPnlClass(row.unrealizedProfit) }, (parseFloat(row.unrealizedProfit) > 0 ? '+' : '') + formatNumber(row.unrealizedProfit)) },
   { title: '收益率', key: 'roe', width: 85, render: (row: any) => {
-    const roe = calculateROE(row.unrealizedPnl, row.margin)
-    return h('span', { class: getPnlClass(row.unrealizedPnl) }, roe)
+    const roe = calculateROE(row.unrealizedProfit, row.initialMargin)
+    return h('span', { class: getPnlClass(row.unrealizedProfit) }, roe)
   }},
 ]
 
@@ -383,7 +392,7 @@ const totalEquity = computed(() => {
             <div class="info-grid">
               <div class="info-item">
                 <span class="info-label">更新于</span>
-                <span class="info-value">{{ formatTime(store.futuresAssets?.[0]?.updateTime) }}</span>
+                <span class="info-value">{{ formatTime(store.futuresDisplay?.updateTime) }}</span>
               </div>
             </div>
           </NCard>

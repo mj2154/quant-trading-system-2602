@@ -484,16 +484,8 @@ export class DataService {
   private restoreSubscriptions(): void {
     for (const [key, info] of this.subscriptionInfos) {
       if (info.options.reconnect !== false && info.status === 'active') {
-        // 重新发送订阅消息
+        // 只重发订阅命令，handlers 由业务层在 onConnect 回调中显式订阅
         this.sendSubscription('SUBSCRIBE', [key])
-
-        // 确保 handler 已注册
-        let handlers = this.messageHandlers.get(key)
-        if (!handlers) {
-          handlers = new Set()
-          this.messageHandlers.set(key, handlers)
-        }
-        handlers.add(info.callback)
       }
     }
   }

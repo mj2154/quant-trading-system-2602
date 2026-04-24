@@ -78,6 +78,26 @@ class RealtimeDataRepository:
         )
         return [RealtimeDataRecord(**row) for row in rows]
 
+    async def get_subscriptions_by_subscriber(self, subscriber: str) -> list[RealtimeDataRecord]:
+        """Get all subscriptions for a specific subscriber.
+
+        Args:
+            subscriber: The subscriber ID to filter by.
+
+        Returns:
+            List of subscription records where the subscriber is in the subscribers array.
+        """
+        rows = await self._db.fetch(
+            """
+            SELECT id, subscription_key, data_type, data, event_time, created_at, updated_at, subscribers
+            FROM realtime_data
+            WHERE $1 = ANY(subscribers)
+            ORDER BY subscription_key
+            """,
+            subscriber,
+        )
+        return [RealtimeDataRecord(**row) for row in rows]
+
     async def insert_subscription(
         self, subscription_key: str, data_type: str, data: dict[str, Any] | None = None
     ) -> int:

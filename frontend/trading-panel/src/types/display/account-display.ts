@@ -126,7 +126,11 @@ export interface FuturesPositionDisplay {
   /** 未实现盈亏 */
   unrealizedProfit: string
 
-  // 以下字段WS不推送，保留原值
+  // 字段数据来源说明:
+  // - entryPrice: WS推送 (ACCOUNT_UPDATE事件P字段的ep)
+  // - markPrice: WS推送 (MARGIN_CALL事件p字段的mp)
+  // - liquidationPrice: 无WS来源，需通过/fapi/v3/positionRisk获取（暂不支持）
+  // - maintMargin: WS推送 (MARGIN_CALL事件p字段的mm)
   /** 开仓价格 */
   entryPrice: string
   /** 标记价格 */

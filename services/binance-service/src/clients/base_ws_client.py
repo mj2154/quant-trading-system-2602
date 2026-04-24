@@ -196,12 +196,8 @@ class BaseWSClient:
 
         try:
             async for message in self._websocket:
-                logger.debug(f"[{self.CLIENT_ID}] 收到原始消息")
                 try:
                     data = json.loads(message)
-                    logger.debug(
-                        f"[{self.CLIENT_ID}] 收到数据: {data.get('e', 'unknown')}"
-                    )
                     await self._handle_message(data)
                 except json.JSONDecodeError:
                     logger.warning(f"[{self.CLIENT_ID}] 无效的JSON消息")
@@ -318,9 +314,6 @@ class BaseWSClient:
             )
             return
 
-        logger.debug(f"[{self.CLIENT_ID}] 处理消息: {message.get('e', 'unknown')}")
-        logger.debug(f"[{self.CLIENT_ID}] 完整消息: {message}")
-
         # 打包数据
         package = WSDataPackage(
             client_id=self.CLIENT_ID,
@@ -330,7 +323,6 @@ class BaseWSClient:
 
         # 发送给币安服务
         if self._data_callback:
-            logger.debug(f"[{self.CLIENT_ID}] 调用 _data_callback")
             await self._data_callback(package)
 
     async def _close_websocket(self, websocket: Optional[ClientConnection]) -> None:

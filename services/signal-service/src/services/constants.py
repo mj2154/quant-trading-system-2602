@@ -3,6 +3,9 @@
 # Required number of klines for MACD calculation
 REQUIRED_KLINES = 280
 
+# Retry delay in seconds for kline fill loop
+RETRY_DELAY_SECONDS = 2
+
 # TV resolution to Binance interval format mapping
 TV_TO_BINANCE_INTERVAL = {
     "1": "1m",

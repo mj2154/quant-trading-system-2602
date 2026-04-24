@@ -1031,6 +1031,9 @@ class BinanceService:
         用于 get_klines 任务，历史数据写入历史表。
         使用 BinanceSpotKlineGetModel 或 BinanceFuturesKlineGetModel 验证原始数据。
 
+        注意：只写入已收盘的K线，跳过未收盘的K线。
+        这是因为REST API会返回最后一根未收盘的K线，但历史表只存储已收盘的K线。
+
         Args:
             symbol: 交易对符号（带 BINANCE: 前缀）
             interval: K线间隔
@@ -1042,6 +1045,21 @@ class BinanceService:
         """
         if not raw_klines:
             return 0
+
+        # 检查最后一根K线是否已收盘
+        # 币安REST API会返回最后一根未收盘的K线，需要过滤掉
+        last_kline = raw_klines[-1]
+        # raw_klines 格式：[open_time, open, high, low, close, volume, close_time, ...]
+        last_close_time = int(last_kline[6])  # close_time 字段
+        current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        if last_close_time > current_time_ms:
+            logger.info(
+                f"跳过未收盘的最后一根K线: {symbol} {interval} close_time={last_close_time} current_time={current_time_ms}"
+            )
+            # 只写入除最后一根之外的所有K线
+            raw_klines = raw_klines[:-1]
+            if not raw_klines:
+                return 0
 
         # 根据类型选择模型
         kline_model_class = (

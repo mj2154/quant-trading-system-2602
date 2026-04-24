@@ -225,21 +225,25 @@ function convertFuturesAsset(
 /**
  * 期货持仓API数据 -> 期货持仓显示项
  *
- * 注意: /fapi/v3/account 返回的持仓数据不包含entryPrice, markPrice, liquidationPrice
- * 这些字段需要通过/fapi/v3/positionRisk单独获取
+ * 数据来源说明:
+ * - /fapi/v3/account 不返回 entryPrice, markPrice, liquidationPrice
+ * - entryPrice: WS推送的ACCOUNT_UPDATE事件P字段包含(ep)
+ * - markPrice: WS推送的MARGIN_CALL事件p字段包含(mp)
+ * - liquidationPrice: 无WS来源，需通过/fapi/v3/positionRisk获取（暂不支持）
  */
 function convertFuturesPosition(
   position: FuturesAccountDetail['positions'][number]
 ): FuturesPositionDisplay {
+  console.log('[AccountConverter] position leverage:', position.leverage, 'isolatedMargin:', position.isolatedMargin)
   return {
     symbol: position.symbol || '',
     side: (position.positionSide as 'LONG' | 'SHORT' | 'BOTH') || 'BOTH',
     positionAmt: position.positionAmt || '0',
     unrealizedProfit: position.unrealizedProfit || '0',
-    // V3 API不返回以下字段
+    // entryPrice/markPrice/liquidationPrice: GET API不返回，通过WS推送更新
     entryPrice: '-',
     markPrice: '-',
-    liquidationPrice: '-',
+    liquidationPrice: '-', // 无WS来源，需通过/fapi/v3/positionRisk获取
     leverage: position.leverage ?? 0,
     isolatedMargin: position.isolatedMargin || '0',
     initialMargin: position.initialMargin || '0',
@@ -258,6 +262,9 @@ function convertFuturesPosition(
 export function convertFuturesAccountToDisplay(
   apiData: FuturesAccountDetail
 ): FuturesAccountDisplay {
+  // 期货API的updateTime在assets数组里，取USDT资产的时间（或其他有效资产）
+  const updateTime = apiData.updateTime ?? apiData.assets?.find(a => a.updateTime && a.updateTime > 0)?.updateTime ?? 0
+
   return {
     totalWalletBalance: apiData.totalWalletBalance || '0',
     totalUnrealizedProfit: apiData.totalUnrealizedProfit || '0',
@@ -273,7 +280,7 @@ export function convertFuturesAccountToDisplay(
     positionMode: 'oneWay', // API不返回此字段，需要通过ACCOUNT_CONFIG_UPDATE获取
     assets: (apiData.assets || []).map(convertFuturesAsset),
     positions: (apiData.positions || []).map(convertFuturesPosition),
-    updateTime: apiData.updateTime || 0,
+    updateTime,
   }
 }
 
@@ -284,12 +291,26 @@ export function convertFuturesAccountToDisplay(
  * - a.B: 余额更新列表
  * - a.P: 持仓更新列表
  *
- * 注意：ACCOUNT_UPDATE不包含顶层聚合字段（totalWalletBalance等），
- * 需要根据B[]和P[]计算得出。
+ * ACCOUNT_UPDATE P字段完整映射:
+ * - s: symbol 交易对
+ * - pa: positionAmt 持仓数量
+ * - ep: entryPrice 开仓价 ✅
+ * - bep: breakEvenPrice 盈亏平衡价
+ * - cr: cumRealizedPnl 累计实现盈亏
+ * - up: unrealizedProfit 未实现盈亏 ✅
+ * - mt: marginType 保证金类型(isolated/crossed) ✅
+ * - iw: isolatedWallet 逐仓钱包余额 ✅
+ * - ps: positionSide 持仓方向 ✅
+ *
+ * 注意：
+ * - ACCOUNT_UPDATE不包含顶层聚合字段（totalWalletBalance等），需要根据B[]和P[]计算得出
+ * - markPrice: 不在ACCOUNT_UPDATE中，由MARGIN_CALL事件推送
+ * - liquidationPrice: 无WS来源，需通过/fapi/v3/positionRisk获取（暂不支持）
+ * - leverage: 不在ACCOUNT_UPDATE中，由ACCOUNT_CONFIG_UPDATE事件推送
  *
  * @param display - 当前显示模型
  * @param update - WS推送的ACCOUNT_UPDATE事件
- * @param leverageMap - 杠杆率映射表 (symbol -> leverage)
+ * @param leverageMap - 杠杆率映射表 (symbol -> leverage)，由ACCOUNT_CONFIG_UPDATE维护
  * @returns 更新后的显示模型(新对象)
  */
 export function applyFuturesAccountUpdate(
@@ -303,7 +324,7 @@ export function applyFuturesAccountUpdate(
   }
 
   // 创建资产列表副本
-  const newAssets = display.assets.map(a => ({ ...a }))
+  const newAssets = display.assets.map(asset => ({ ...asset }))
 
   // 处理余额更新 (B)
   if (a.B && a.B.length > 0) {
@@ -342,39 +363,59 @@ export function applyFuturesAccountUpdate(
   if (a.P && a.P.length > 0) {
     for (const positionUpdate of a.P) {
       const index = newPositions.findIndex(p => p.symbol === positionUpdate.s)
+      const positionAmt = parseFloat(positionUpdate.pa || '0')
+      const entryPrice = parseFloat(positionUpdate.ep || '0')
+      const unrealizedProfit = parseFloat(positionUpdate.up || '0')
+      const isolatedWallet = positionUpdate.iw || '0'
+      const leverage = leverageMap[positionUpdate.s]
+
       if (index >= 0) {
         // 更新现有持仓
-        // 注意: WS只推送pa(持仓数量)和up(未实现盈亏)
-        // entryPrice/markPrice/liquidationPrice保留原值
+        // P字段包含: pa, ep, bep, cr, up, mt, iw, ps
         newPositions[index] = {
           ...newPositions[index],
+          // 基本信息
           positionAmt: positionUpdate.pa,
           unrealizedProfit: positionUpdate.up || '0',
+          // 开仓价: 从WS获取(ep)
+          entryPrice: positionUpdate.ep || newPositions[index].entryPrice,
+          // 保证金类型: mt (isolated/crossed)
+          // 逐仓: isolatedMargin = iw, 全仓: isolatedMargin = '0'
+          isolatedMargin: positionUpdate.mt === 'isolated' ? isolatedWallet : '0',
+          // 持仓方向
+          side: (positionUpdate.ps as 'LONG' | 'SHORT' | 'BOTH') || newPositions[index].side,
+          // 杠杆: 如果leverageMap中有值则更新
+          leverage: leverage ?? newPositions[index].leverage,
+          // 逐仓钱包(仅逐仓有值)
           updateTime: update.T,
         }
       } else {
         // 新增持仓
         // WS推送新增持仓时，说明用户刚开仓，需要创建完整记录
         // leverage从leverageMap获取，如果没有则默认为1
-        const positionAmt = parseFloat(positionUpdate.pa || '0')
-        const entryPrice = parseFloat(positionUpdate.ep || '0')
-        const leverage = leverageMap[positionUpdate.s] ?? 1
+        const notional = Math.abs(positionAmt * entryPrice) > 0
+          ? (positionAmt * entryPrice).toFixed(8)
+          : '0'
 
         newPositions.push({
           symbol: positionUpdate.s,
           side: (positionUpdate.ps as 'LONG' | 'SHORT' | 'BOTH') || 'BOTH',
           positionAmt: positionUpdate.pa,
           unrealizedProfit: positionUpdate.up || '0',
+          // 开仓价: 从WS获取(ep)
           entryPrice: positionUpdate.ep || '-',
+          // 标记价: 不在ACCOUNT_UPDATE中，暂用'-'
           markPrice: '-',
+          // 强平价: 无WS来源，需通过positionRisk获取（暂不支持）
           liquidationPrice: '-',
-          leverage,
-          isolatedMargin: positionUpdate.iw || '0',
+          // 杠杆: 从leverageMap获取
+          leverage: leverage ?? 1,
+          // 保证金: mt=isolated时用iw，否则为0
+          isolatedMargin: positionUpdate.mt === 'isolated' ? isolatedWallet : '0',
+          // 初始/维持保证金: ACCOUNT_UPDATE不推送，暂用0
           initialMargin: '0',
           maintMargin: '0',
-          notional: positionAmt * entryPrice > 0
-            ? (positionAmt * entryPrice).toFixed(8)
-            : '0',
+          notional,
           updateTime: update.T,
         })
       }
@@ -383,7 +424,7 @@ export function applyFuturesAccountUpdate(
 
   // 重新计算聚合字段
   // totalWalletBalance: 从assets中获取USDT的钱包余额
-  const usdtAsset = newAssets.find(a => a.asset === 'USDT')
+  const usdtAsset = newAssets.find(asset => asset.asset === 'USDT')
   const totalWalletBalance = usdtAsset?.walletBalance || '0'
 
   // totalUnrealizedProfit: 累加所有持仓的未实现盈亏

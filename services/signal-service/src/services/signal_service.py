@@ -1,13 +1,4 @@
-"""Core signal service logic.
-
-This module contains the main signal service that:
-1. Loads alert configurations from alert_signals table
-2. Listens for realtime_update notifications
-3. Uses trigger engine to determine when to execute strategies
-4. Fetches historical klines for indicator calculation
-5. Calculates strategy signals
-6. Writes signals to the database
-"""
+"""Core signal service logic."""
 
 import asyncio
 import json
@@ -27,7 +18,7 @@ from ..listener.alert_signal_listener import AlertSignalListener
 from ..listener.realtime_update_listener import RealtimeUpdateListener
 from ..strategies.base import Strategy
 from .alert_signal import LoadedAlertConfig
-from .constants import REQUIRED_KLINES, TV_INTERVAL_TO_MS
+from .constants import REQUIRED_KLINES, TV_INTERVAL_TO_MS, RETRY_DELAY_SECONDS
 from .kline_cache import _init_kline_cache, _update_kline_cache
 from .kline_utils import (
     _build_ohlcv_for_trigger_type,
@@ -101,6 +92,9 @@ class SignalService:
         """Start the signal service."""
         logger.info("Starting signal service")
         self._running = True
+
+        # 清理旧的订阅记录，确保与告警配置状态一致
+        await self._cleanup_stale_subscriptions()
 
         # Load alert configurations from alert_signals table
         await self._load_alerts_from_db()
@@ -195,66 +189,46 @@ class SignalService:
     async def _handle_alert_delete_async(self, data: dict[str, Any]) -> None:
         """Async cleanup logic for deleted alert."""
         alert_id = data.get("id")
+        if not alert_id:
+            return
 
-        # Remove the alert from memory and cleanup indexes
         try:
-            # Use string as key (consistent with _load_alerts_from_db)
             alert_id_str = str(alert_id)
-            if alert_id_str in self._alerts:
-                # Get old subscription_key before deletion
-                old_alert = self._alerts[alert_id_str]
-                old_subscription_key = _build_subscription_key(
-                    old_alert.symbol,
-                    old_alert.interval
-                )
-
-                # Remove from _alerts
-                del self._alerts[alert_id_str]
-                logger.info("[ALERT_DELETE] Alert removed from _alerts: id=%s", alert_id)
-
-                # Cleanup _alerts_by_key index
-                if old_subscription_key in self._alerts_by_key:
-                    self._alerts_by_key[old_subscription_key].discard(alert_id_str)
-                    if not self._alerts_by_key[old_subscription_key]:
-                        del self._alerts_by_key[old_subscription_key]
-                    logger.info(
-                        "[ALERT_DELETE] Removed from _alerts_by_key: subscription_key=%s "
-                        "(remaining keys: %s)",
-                        old_subscription_key,
-                        list(self._alerts_by_key.keys()),
-                    )
-
-                # Cleanup subscription in database (if no other enabled alerts using this key)
-                other_enabled_alerts_using_key = False
-                for key, alert_ids in self._alerts_by_key.items():
-                    if key == old_subscription_key:
-                        for other_id in alert_ids:
-                            if str(other_id) in self._alerts:
-                                other_alert = self._alerts[str(other_id)]
-                                if other_alert.is_enabled:
-                                    other_enabled_alerts_using_key = True
-                                    break
-                        break
-
-                if not other_enabled_alerts_using_key:
-                    await self._realtime_repo.remove_subscription(old_subscription_key)
-                    logger.info("[ALERT_DELETE] Subscription removed: %s", old_subscription_key)
-                else:
-                    logger.info(
-                        "[ALERT_DELETE] Other enabled alerts using subscription_key=%s, keeping subscription",
-                        old_subscription_key,
-                    )
-
-                # Cleanup _kline_cache (optional, as it may be used by other alerts)
-                # Note: Don't delete _kline_cache here as it may be shared
         except ValueError:
             logger.warning("Invalid alert ID format: %s", alert_id)
+            return
+
+        # Remove from memory if exists
+        if alert_id_str not in self._alerts:
+            return
+
+        old_alert = self._alerts[alert_id_str]
+        old_subscription_key = _build_subscription_key(
+            old_alert.symbol,
+            old_alert.interval
+        )
+
+        # Remove from _alerts
+        del self._alerts[alert_id_str]
+
+        # Remove from _alerts_by_key
+        if old_subscription_key in self._alerts_by_key:
+            self._alerts_by_key[old_subscription_key].discard(alert_id_str)
+            if not self._alerts_by_key[old_subscription_key]:
+                del self._alerts_by_key[old_subscription_key]
+
+        # Cleanup subscription if no other enabled alerts use it
+        await self._cleanup_subscription_if_unused(old_subscription_key)
+
+        logger.info("[ALERT_DELETE] Alert deleted: id=%s subscription_key=%s", alert_id, old_subscription_key)
 
     async def _reload_single_alert(self, data: dict[str, Any]) -> None:
         """Reload a single alert from database notification.
 
-        Handles both new alerts and updates to existing alerts.
-        When interval or symbol changes, cleans up old subscription_key indexes.
+        Simplified logic: Database is single source of truth.
+        - Update memory state from DB
+        - If enabled: ensure subscription exists
+        - If disabled: ensure subscription removed
         """
         alert_id_str = data.get("id")
         if not alert_id_str:
@@ -262,111 +236,35 @@ class SignalService:
 
         # Validate UUID format
         try:
-            alert_uuid = UUID(alert_id_str)
+            UUID(alert_id_str)
         except ValueError:
             logger.warning("Invalid alert ID format: %s", alert_id_str)
             return
 
-        # ========== Step 1: Get old config (for cleanup) ==========
-        # Use string as key to match storage format
-        alert_id_key = str(alert_uuid)
-
-        old_alert = self._alerts.get(alert_id_key)
-
-        old_subscription_key = None
-        if old_alert:
-            old_subscription_key = _build_subscription_key(
-                old_alert.symbol,
-                old_alert.interval
-            )
-
-        # ========== Step 2: Fetch new config from database ==========
+        # Fetch latest state from database
         alert = await self._alert_repo.find_by_id(alert_id_str)
         if not alert:
-            logger.warning("Alert not found in database: %s", alert_id_str)
+            # Alert was deleted - remove from memory and cleanup
+            logger.info("[ALERT_UPDATE] Alert deleted from DB: %s, cleaning up", alert_id_str)
+            if alert_id_str in self._alerts:
+                old_alert = self._alerts[alert_id_str]
+                old_sub_key = _build_subscription_key(old_alert.symbol, old_alert.interval)
+
+                # Remove from memory indexes
+                del self._alerts[alert_id_str]
+                if old_sub_key in self._alerts_by_key:
+                    self._alerts_by_key[old_sub_key].discard(alert_id_str)
+                    if not self._alerts_by_key[old_sub_key]:
+                        del self._alerts_by_key[old_sub_key]
+
+                # Remove subscription if no other enabled alerts use it
+                await self._cleanup_subscription_if_unused(old_sub_key)
             return
 
-        # Use string as key for consistency
         alert_id = str(alert.id)
+        subscription_key = _build_subscription_key(alert.symbol, alert.interval)
 
-        # ========== Step 2.5: Check if is_enabled changed ==========
-        # Handle subscription based on is_enabled state change
-        # New subscription_key is used for both old and new checks
-        new_subscription_key = _build_subscription_key(alert.symbol, alert.interval)
-
-        old_is_enabled = old_alert.is_enabled if old_alert else None
-        new_is_enabled = alert.is_enabled
-
-        # If is_enabled changed from true to false, remove subscription
-        if old_is_enabled is True and new_is_enabled is False:
-            logger.info(
-                "[ALERT_UPDATE] is_enabled changed: true -> false, removing subscription: "
-                "alert_id=%s subscription_key=%s",
-                alert_id,
-                new_subscription_key,
-            )
-            # Check if other alerts are using this subscription_key
-            other_alerts_using_key = False
-            for key, alert_ids in self._alerts_by_key.items():
-                if key == new_subscription_key and len(alert_ids) > 0:
-                    # Check if there are other ENABLED alerts
-                    for other_id in alert_ids:
-                        if other_id != alert_id and str(other_id) in self._alerts:
-                            other_alert = self._alerts[str(other_id)]
-                            if other_alert.is_enabled:
-                                other_alerts_using_key = True
-                                break
-                    break
-
-            if not other_alerts_using_key:
-                await self._realtime_repo.remove_subscription(new_subscription_key)
-                logger.info("[ALERT_UPDATE] Subscription removed: %s", new_subscription_key)
-            else:
-                logger.info(
-                    "[ALERT_UPDATE] Other enabled alerts using subscription_key=%s, keeping subscription",
-                    new_subscription_key,
-                )
-
-        # ========== Step 3: Check if subscription_key changed ==========
-
-        # If subscription_key changed, cleanup old indexes
-        if old_subscription_key and old_subscription_key != new_subscription_key:
-            logger.info(
-                "[ALERT_UPDATE] subscription_key changed: %s -> %s (alert_id=%s)",
-                old_subscription_key,
-                new_subscription_key,
-                alert_id_key,
-            )
-
-            # Remove from old _alerts_by_key index
-            if old_subscription_key in self._alerts_by_key:
-                self._alerts_by_key[old_subscription_key].discard(alert_id_key)
-                if not self._alerts_by_key[old_subscription_key]:
-                    del self._alerts_by_key[old_subscription_key]
-                logger.info("[ALERT_UPDATE] Removed old subscription_key index: %s", old_subscription_key)
-            else:
-                logger.warning("[ALERT_UPDATE] Old subscription_key not in _alerts_by_key: %s", old_subscription_key)
-
-            # Cleanup old K-line cache (optional, as it may be shared)
-            if old_subscription_key in self._kline_cache:
-                del self._kline_cache[old_subscription_key]
-                logger.info("[ALERT_UPDATE] Removed old K-line cache: %s", old_subscription_key)
-            else:
-                logger.info("[ALERT_UPDATE] Old subscription_key not in _kline_cache: %s", old_subscription_key)
-
-            # Cleanup old subscription in database (remove signal-service from subscribers)
-            # Note: Only remove if no other alerts are using this subscription_key
-            other_alerts_using_old_key = False
-            for key, alert_ids in self._alerts_by_key.items():
-                if key == old_subscription_key and len(alert_ids) > 0:
-                    other_alerts_using_old_key = True
-                    break
-
-            if not other_alerts_using_old_key:
-                await self._realtime_repo.remove_subscription(old_subscription_key)
-
-        # ========== Step 4: Create new LoadedAlertConfig ==========
-        # Create trigger state for the alert
+        # Create strategy (may raise if strategy_type invalid)
         try:
             trigger_type_enum = TriggerType(alert.trigger_type)
             get_trigger_engine(trigger_type_enum)
@@ -378,13 +276,13 @@ class SignalService:
             )
             get_trigger_engine(TriggerType.EACH_KLINE_CLOSE)
 
-        # Create strategy instance
         strategy = await self._create_strategy(alert)
 
-        # Store alert signal (LoadedAlertConfig contains both config and strategy)
-        # If old_alert exists, preserve created_at; otherwise use now
+        # Preserve created_at if updating existing alert
+        old_alert = self._alerts.get(alert_id)
         created_at = old_alert.created_at if old_alert else datetime.utcnow()
 
+        # Update memory state
         self._alerts[alert_id] = LoadedAlertConfig(
             alert_id=alert_id,
             name=alert.name,
@@ -401,29 +299,37 @@ class SignalService:
             updated_at=datetime.utcnow(),
         )
 
-        # ========== Step 5: Update indexes ==========
-        # Update alerts index by subscription_key
-        if new_subscription_key not in self._alerts_by_key:
-            self._alerts_by_key[new_subscription_key] = set()
-        self._alerts_by_key[new_subscription_key].add(alert_id)
+        # Update _alerts_by_key based on current enabled status
+        if alert.is_enabled:
+            if subscription_key not in self._alerts_by_key:
+                self._alerts_by_key[subscription_key] = set()
+            self._alerts_by_key[subscription_key].add(alert_id)
+        else:
+            if subscription_key in self._alerts_by_key:
+                self._alerts_by_key[subscription_key].discard(alert_id)
+                if not self._alerts_by_key[subscription_key]:
+                    del self._alerts_by_key[subscription_key]
 
-        # Ensure subscription exists in database (only if is_enabled)
-        if new_is_enabled:
-            existing = await self._realtime_repo.get_by_subscription_key(new_subscription_key)
+        # Manage subscription based on enabled status
+        if alert.is_enabled:
+            # Ensure subscription exists in DB
+            existing = await self._realtime_repo.get_by_subscription_key(subscription_key)
             if existing is None:
                 await self._realtime_repo.insert_subscription(
-                    subscription_key=new_subscription_key,
+                    subscription_key=subscription_key,
                     data_type="KLINE",
                 )
-                logger.info("[ALERT_UPDATE] Created subscription in DB: %s", new_subscription_key)
+                logger.info("[ALERT_UPDATE] Created subscription: %s", subscription_key)
+        else:
+            # Ensure subscription removed from DB (if no other enabled alerts use it)
+            await self._cleanup_subscription_if_unused(subscription_key)
 
         logger.info(
-            "[ALERT_UPDATE] Alert reloaded successfully: id=%s name=%s subscription_key=%s "
-            "(current _alerts_by_key: %s)",
+            "[ALERT_UPDATE] alert_id=%s name=%s enabled=%s subscription_key=%s",
             alert_id,
             alert.name,
-            new_subscription_key,
-            list(self._alerts_by_key.keys()),
+            alert.is_enabled,
+            subscription_key,
         )
 
     async def reload_configs(self) -> None:
@@ -443,13 +349,58 @@ class SignalService:
         if removed:
             logger.info("Removed %d alerts", len(removed))
 
+    async def _cleanup_stale_subscriptions(self) -> None:
+        """Clean up stale subscriptions on startup.
+
+        Removes all signal-service subscriptions from realtime_data table,
+        ensuring subscriptions are always consistent with enabled alert configs.
+        This handles cases where alerts were disabled/deleted but subscriptions
+        weren't properly cleaned up.
+        """
+        logger.info("Cleaning up stale subscriptions")
+        rows = await self._realtime_repo.get_subscriptions_by_subscriber(
+            self._realtime_repo.SUBSCRIBER_ID
+        )
+        if not rows:
+            logger.info("No stale subscriptions to clean up")
+            return
+
+        cleaned_keys = []
+        for row in rows:
+            subscription_key = row.subscription_key
+            success = await self._realtime_repo.remove_subscription(subscription_key)
+            if success:
+                cleaned_keys.append(subscription_key)
+                logger.info(
+                    "Cleaned up stale subscription: %s",
+                    subscription_key,
+                )
+            else:
+                logger.warning(
+                    "Failed to clean up subscription: %s",
+                    subscription_key,
+                )
+
+        logger.info(
+            "[CLEANUP] Cleaned up %d stale subscriptions: %s",
+            len(cleaned_keys),
+            cleaned_keys,
+        )
+
     async def _load_alerts_from_db(self) -> None:
-        """Load alert configurations from alert_signals table."""
-        # Get enabled alerts from database
-        db_alerts = await self._alert_repo.find_enabled()
+        """Load all alert configurations from database.
+
+        All alerts are loaded into _alerts (regardless of is_enabled).
+        Only enabled alerts are added to _alerts_by_key for subscriptions.
+        """
+        # Load ALL alerts from database
+        db_alerts = await self._alert_repo.find_all()
+
+        # Clear existing state
+        self._alerts.clear()
+        self._alerts_by_key.clear()
 
         for alert in db_alerts:
-            # Use string as key for consistency
             alert_id = str(alert.id)
 
             # Create trigger state for each alert
@@ -464,10 +415,10 @@ class SignalService:
                 )
                 get_trigger_engine(TriggerType.EACH_KLINE_CLOSE)
 
-            # Create strategy instance based on alert's strategy_type
+            # Create strategy instance
             strategy = await self._create_strategy(alert)
 
-            # Store alert signal (LoadedAlertConfig contains both config and strategy)
+            # Store alert (all alerts, regardless of enabled status)
             self._alerts[alert_id] = LoadedAlertConfig(
                 alert_id=alert_id,
                 name=alert.name,
@@ -484,20 +435,24 @@ class SignalService:
                 updated_at=datetime.utcnow(),
             )
 
-            # Build subscription key and index by subscription_key
-            subscription_key = _build_subscription_key(alert.symbol, alert.interval)
-            if subscription_key not in self._alerts_by_key:
-                self._alerts_by_key[subscription_key] = set()
-            self._alerts_by_key[subscription_key].add(alert_id)
+            # Only add ENABLED alerts to _alerts_by_key (subscriptions)
+            if alert.is_enabled:
+                subscription_key = _build_subscription_key(alert.symbol, alert.interval)
+                if subscription_key not in self._alerts_by_key:
+                    self._alerts_by_key[subscription_key] = set()
+                self._alerts_by_key[subscription_key].add(alert_id)
 
         logger.info(
-            "[STARTUP] Loaded %d alert configurations, subscription_keys: %s",
+            "[STARTUP] Loaded %d alerts (%d enabled), subscription_keys: %s",
             len(db_alerts),
+            len([a for a in db_alerts if a.is_enabled]),
             list(self._alerts_by_key.keys()),
         )
 
     async def _create_strategy(self, alert: AlertConfigRecord) -> Strategy:
         """Create strategy instance based on alert configuration.
+
+        Uses StrategyRegistry for automatic strategy discovery and instantiation.
 
         Args:
             alert: Alert configuration record from alert_signals table.
@@ -508,66 +463,39 @@ class SignalService:
         Raises:
             ValueError: If strategy type is unknown.
         """
+        from ..strategies.registry import StrategyRegistry
+
         strategy_type = alert.strategy_type
 
         if not strategy_type:
             raise ValueError(f"Alert {alert.name} has no strategy_type configured")
 
-        # Direct import mapping - no fallbacks
-        # Each strategy type must be explicitly mapped to avoid confusion
-        strategy_map = {
-            # MACD 做多策略
-            "MACDResonanceStrategyV5": (
-                "src.strategies.macd_resonance_strategy",
-                "MACDResonanceStrategyV5",
-            ),
-            "MACDResonanceStrategyV6": (
-                "src.strategies.macd_resonance_strategy",
-                "MACDResonanceStrategyV6",
-            ),
-            "MACDResonanceStrategyV601": (
-                "src.strategies.macd_resonance_strategy",
-                "MACDResonanceStrategyV601",
-            ),
-            # MACD 做空策略
-            "MACDResonanceShortStrategy": (
-                "src.strategies.macd_resonance_strategy",
-                "MACDResonanceShortStrategy",
-            ),
-            "MACDResonanceShortStrategyV1": (
-                "src.strategies.macd_resonance_strategy",
-                "MACDResonanceShortStrategyV1",
-            ),
-            # Alpha 策略
-            "Alpha01Strategy": (
-                "src.strategies.alpha_01_strategy",
-                "Alpha01Strategy",
-            ),
-            # 随机策略
-            "RandomStrategy": (
-                "src.strategies.random_strategy",
-                "RandomStrategy",
-            ),
-        }
+        return StrategyRegistry.create_instance(strategy_type)
 
-        if strategy_type not in strategy_map:
-            raise ValueError(
-                f"Unknown strategy type '{strategy_type}' for alert '{alert.name}'. "
-                f"Available strategies: {list(strategy_map.keys())}"
+    async def _cleanup_subscription_if_unused(self, subscription_key: str) -> None:
+        """Remove subscription from DB if no enabled alerts use it.
+
+        Args:
+            subscription_key: The subscription key to check and potentially remove.
+        """
+        # Check if any enabled alert uses this subscription_key
+        alert_ids = self._alerts_by_key.get(subscription_key, set())
+        has_enabled_alert = any(
+            self._alerts[aid].is_enabled
+            for aid in alert_ids
+            if aid in self._alerts
+        )
+
+        if not has_enabled_alert:
+            await self._realtime_repo.remove_subscription(subscription_key)
+            logger.info(
+                "[CLEANUP] Removed unused subscription: %s (no enabled alerts)",
+                subscription_key,
             )
-
-        module_path, class_name = strategy_map[strategy_type]
-
-        # Use importlib for reliable dynamic import
-        import importlib
-
-        try:
-            module = importlib.import_module(module_path)
-            strategy_class = getattr(module, class_name)
-            return strategy_class()
-        except (ImportError, AttributeError) as e:
-            raise ValueError(
-                f"Failed to load strategy '{strategy_type}' from module '{module_path}': {e}"
+        else:
+            logger.info(
+                "[CLEANUP] Keeping subscription: %s (used by other enabled alerts)",
+                subscription_key,
             )
 
     async def _ensure_subscriptions(self) -> None:
@@ -736,7 +664,7 @@ class SignalService:
                     retry_count,
                 )
 
-                await asyncio.sleep(2)
+                await asyncio.sleep(RETRY_DELAY_SECONDS)
 
             # Note: This should never be reached as the loop is infinite per design
             logger.error(

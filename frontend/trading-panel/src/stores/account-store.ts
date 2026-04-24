@@ -202,14 +202,8 @@ export const useAccountStore = defineStore('account', () => {
       futuresDisplay.value = convertFuturesAccountToDisplay(apiData)
       wsConnected.value = true
 
-      // 从持仓数据初始化杠杆率映射表
-      const newLeverageMap: Record<string, number> = {}
-      for (const position of apiData.positions || []) {
-        if (position.symbol && position.leverage !== undefined) {
-          newLeverageMap[position.symbol] = position.leverage
-        }
-      }
-      leverageMap.value = newLeverageMap
+      // 注意: GET API 不返回 leverage 字段，leverageMap 只能通过 WS ACCOUNT_CONFIG_UPDATE 事件维护
+      // 不再从 GET API 初始化 leverageMap，避免覆盖 WS 已推送的值
 
       return futuresDisplay.value
     } catch (error) {
@@ -473,13 +467,41 @@ export const useAccountStore = defineStore('account', () => {
    * 处理期货保证金追缴事件 (MARGIN_CALL事件)
    *
    * 高优先级：涉及强平风险，需要告警通知
+   *
+   * MARGIN_CALL事件推送的字段:
+   * - mp: 标记价格 (markPrice)
+   * - mm: 维持保证金要求 (maintMargin)
+   *
+   * 注意: MARGIN_CALL只在仓位风险时才推送，因此更新时直接覆盖
    */
   function handleFuturesMarginCall(update: FuturesMarginCall): void {
-    // 构建告警信息
+    if (!futuresDisplay.value) {
+      console.warn('[AccountStore] 期货账户未初始化，跳过保证金追缴更新')
+      return
+    }
+
     const positions = update.p || []
-    const warningMsg = `[AccountStore] ⚠️ 保证金追缴警告！跨账户钱包余额: ${update.cw}`
+    const warningMsg = `[AccountStore] 保证金追缴警告！跨账户钱包余额: ${update.cw}`
 
     console.warn(warningMsg, '追缴持仓:', positions)
+
+    // 更新匹配持仓的标记价格和维持保证金
+    const newPositions = futuresDisplay.value.positions.map(position => {
+      const marginPosition = positions.find(p => p.s === position.symbol)
+      if (marginPosition) {
+        return {
+          ...position,
+          markPrice: marginPosition.mp,
+          maintMargin: marginPosition.mm,
+        }
+      }
+      return position
+    })
+
+    futuresDisplay.value = {
+      ...futuresDisplay.value,
+      positions: newPositions,
+    }
 
     // TODO: 触发浏览器通知或UI告警
     // 建议：使用 Notification API 或调用告警组件

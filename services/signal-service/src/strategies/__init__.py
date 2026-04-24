@@ -4,6 +4,7 @@ from .base import Strategy, StrategyInput, StrategyOutput
 from .macd_resonance_strategy import (
     MACDResonanceShortStrategy,
     MACDResonanceShortStrategyV1,
+    MACDResonanceShortStrategyV2,
     MACDResonanceStrategyV5,
     MACDResonanceStrategyV6,
     MACDResonanceStrategyV601,
@@ -21,6 +22,7 @@ __all__ = [
     "MACDResonanceStrategyV601",
     "MACDResonanceShortStrategy",
     "MACDResonanceShortStrategyV1",
+    "MACDResonanceShortStrategyV2",
     "BaseStrategy",
     "StrategySignals",
     "StrategyRegistry",

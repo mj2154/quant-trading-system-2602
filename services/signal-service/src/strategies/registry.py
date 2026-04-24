@@ -2,6 +2,7 @@
 import inspect
 import json
 import logging
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, get_origin, get_args
 
@@ -31,6 +32,8 @@ class StrategyMetadata:
     name: str  # Display name
     description: str  # Strategy description
     params: list[StrategyParam] = field(default_factory=list)  # Parameter list
+    module_path: str = ""  # Full module path for dynamic import (e.g., "src.strategies.macd_resonance_strategy")
+    class_name: str = ""  # Class name for dynamic import (e.g., "MACDResonanceStrategyV5")
 
     def to_dict(self) -> dict:
         """Convert to dictionary for database storage."""
@@ -214,6 +217,8 @@ class StrategyRegistry:
             name=strategy_class.name,
             description=getattr(strategy_class, 'description', ''),
             params=params,
+            module_path=sys.modules[strategy_class.__module__].__name__ if strategy_class.__module__ in sys.modules else strategy_class.__module__,
+            class_name=strategy_class.__name__,
         )
 
         cls._registry[strategy_class.type] = metadata
@@ -332,3 +337,40 @@ class StrategyRegistry:
         """
         cls.discover_strategies()
         return cls._registry.get(strategy_type)
+
+    @classmethod
+    def create_instance(cls, strategy_type: str) -> "BaseStrategy":
+        """Create a strategy instance by type identifier.
+
+        Args:
+            strategy_type: Strategy type identifier (e.g., "MACDResonanceStrategyV5").
+
+        Returns:
+            Strategy instance.
+
+        Raises:
+            ValueError: If strategy type is unknown or cannot be loaded.
+        """
+        cls.discover_strategies()
+
+        metadata = cls._registry.get(strategy_type)
+        if not metadata:
+            available = list(cls._registry.keys())
+            raise ValueError(
+                f"Unknown strategy type '{strategy_type}'. Available strategies: {available}"
+            )
+
+        if not metadata.module_path or not metadata.class_name:
+            raise ValueError(
+                f"Strategy '{strategy_type}' is missing module_path or class_name in metadata"
+            )
+
+        import importlib
+        try:
+            module = importlib.import_module(metadata.module_path)
+            strategy_class = getattr(module, metadata.class_name)
+            return strategy_class()
+        except (ImportError, AttributeError) as e:
+            raise ValueError(
+                f"Failed to load strategy '{strategy_type}' from module '{metadata.module_path}': {e}"
+            )
