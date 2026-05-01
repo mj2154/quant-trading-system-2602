@@ -84,7 +84,7 @@ async def ws_market(
 
             # 解析消息
             try:
-                logger.info(f"Received WebSocket message: {raw_data[:200]}...")
+                logger.debug(f"Received WebSocket message: {raw_data[:200]}...")
                 message = json.loads(raw_data)
                 request = parse_message(message)
             except (json.JSONDecodeError, ValueError) as e:
@@ -101,7 +101,7 @@ async def ws_market(
             msg_type = message.get("type", "UNKNOWN")
 
             # 记录接收到的请求（用于调试消息路由问题）
-            logger.info(
+            logger.debug(
                 f"← [WS] client_id={client_id}, requestId={request_id}, type={msg_type}"
             )
 

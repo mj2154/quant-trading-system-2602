@@ -6,9 +6,12 @@
 
 
 import asyncpg
+import logging
 
 from ..models.protocol.ws_payload import SymbolSearchItem
 from ..models.trading.symbol_models import SymbolInfo
+
+logger = logging.getLogger(__name__)
 
 
 class ExchangeInfoRepository:
@@ -100,15 +103,51 @@ class ExchangeInfoRepository:
                 if row is None:
                     return None
 
+                # 测试品种使用特殊值，方便前端比对字段用途
+                if symbol.upper() in ("TEST", "TESTNAME"):
+                    return SymbolInfo(
+                        name="testName",
+                        ticker="testTicker",
+                        description="testDescription",
+                        exchange=exchange,
+                        listed_exchange=exchange,
+                        type="crypto",
+                        session="24x7",
+                        timezone="Etc/UTC",
+                        minmov=1,
+                        pricescale=100,
+                        supported_resolutions=["1", "5", "15", "60", "240", "1D", "1W", "1M"],
+                        intraday_multipliers=["1", "5", "15", "60"],
+                        daily_multipliers=["1"],
+                        weekly_multipliers=["1"],
+                        monthly_multipliers=["1"],
+                        has_intraday=True,
+                        has_daily=True,
+                        has_weekly_and_monthly=True,
+                        visible_plots_set="ohlcv",
+                        data_status="streaming",
+                        volume_precision=2,
+                        currency_code=row["quote_asset"],
+                        base_name=[f"{row['base_asset']}/{row['quote_asset']}"],
+                        long_description=f"Test symbol: {row['base_asset']}/{row['quote_asset']}",
+                        session_display="24x7",
+                        has_seconds=True,
+                        has_ticks=True,
+                        minmove2=0,
+                    )
+
                 # 返回 SymbolInfo 模型
                 # 注意：ticker 必须是 EXCHANGE:SYMBOL 格式，符合 TradingView 要求
                 # description 需要区分期货和现货：期货添加 .PERP 后缀
                 symbol = row["symbol"]
+                # 为期货添加 .PERP 后缀到 name 和 ticker，以区分期现货
+                # 根据 TradingView 文档：name 和 ticker 不同会触发双重解析，确保正确区分
+                symbol_suffix = ".PERP" if market_type == "FUTURES" else ""
                 description = f"{symbol}.PERP" if market_type == "FUTURES" else symbol
 
                 return SymbolInfo(
-                    name=symbol,
-                    ticker=f"{exchange}:{symbol}",  # 修复：添加交易所前缀
+                    name=f"{exchange}:{symbol}{symbol_suffix}",  # 期货: "BINANCE:BTCUSDT.PERP"
+                    ticker=f"{exchange}:{symbol}{symbol_suffix}",  # 期货: "BINANCE:BTCUSDT.PERP"
                     description=description,
                     exchange=exchange,
                     listed_exchange=exchange,
@@ -129,6 +168,8 @@ class ExchangeInfoRepository:
                     data_status="streaming",
                     volume_precision=2,
                     currency_code=row["quote_asset"],
+                    base_name=[f"{row['base_asset']}/{row['quote_asset']}"],
+                    long_description=f"{row['base_asset']}/{row['quote_asset']}",
                 )
         except Exception:
             return None
@@ -175,6 +216,7 @@ class ExchangeInfoRepository:
         """
 
         search_pattern = f"%{query}%" if query else "%"
+        logger.info(f"[ExchangeInfoRepo] search_symbols: query='{query}', exchange='{exchange}', market_type='{market_type}', pattern='{search_pattern}'")
 
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
@@ -187,6 +229,20 @@ class ExchangeInfoRepository:
 
             results = []
             for row in rows:
+                # 测试品种使用特殊值，方便前端比对字段用途
+                if row["symbol"].upper() in ("TEST", "TESTNAME"):
+                    results.append(
+                        SymbolSearchItem(
+                            symbol="testSymbol",
+                            full_name="testFullName",
+                            description="testDescription",
+                            exchange="testExchange",
+                            ticker="testTicker",
+                            type="crypto",
+                        )
+                    )
+                    continue
+
                 # 永续期货添加 .PERP 后缀
                 symbol_suffix = ".PERP" if row["market_type"] == "FUTURES" else ""
                 ticker = f"{row['symbol']}{symbol_suffix}"
@@ -203,6 +259,7 @@ class ExchangeInfoRepository:
                     )
                 )
 
+            logger.info(f"[ExchangeInfoRepo] search_symbols: found {len(results)} results")
             return results
 
     async def get_total_count(

@@ -55,26 +55,7 @@ function saveToStorage(key, data) {
  * 符合 IExternalSaveLoadAdapter 接口规范
  */
 
-// 存储当前图表的实际 symbol（包含 .PERP 等后缀）
-let currentChartSymbol = 'BTCUSDT';
-
 export const chartStorageAdapter = {
-    /**
-     * 设置当前图表的实际 symbol（包含 .PERP 后缀）
-     * @param {string} symbol - 当前图表的完整 symbol
-     */
-    setCurrentSymbol(symbol) {
-        currentChartSymbol = symbol;
-    },
-
-    /**
-     * 获取当前图表的实际 symbol
-     * @returns {string} 当前图表的完整 symbol
-     */
-    getCurrentSymbol() {
-        return currentChartSymbol;
-    },
-
     /**
      * 保存图表
      * @param {Object} chartData - 图表数据（符合 ChartData 接口）
@@ -87,7 +68,7 @@ export const chartStorageAdapter = {
                 return null;
             }
 
-            console.log('💾 saveChart 接收到的 chartData:', chartData);
+            console.log('[ChartStorage] 💾 saveChart:', chartData);
 
             // 如果没有提供名称，生成默认名称
             if (!chartData.name || typeof chartData.name !== 'string' || chartData.name.trim() === '') {
@@ -102,28 +83,20 @@ export const chartStorageAdapter = {
                 return null;
             }
 
-            // 关键修复：优先使用当前图表的实际 symbol，而不是 TradingView 传入的 symbol
-            // TradingView 有时会传入不含 .PERP 后缀的基础 symbol
-            const symbolToSave = currentChartSymbol || chartData.symbol || 'BTCUSDT';
-            console.log('💾 saveChart symbol (修复后):', symbolToSave, '原始:', chartData.symbol);
-
             const charts = getFromStorage(STORAGE_KEYS.CHARTS, []);
-            const chartId = chartData.id || generateChartId();
 
-            const chartInfo = {
-                id: chartId,
-                name: chartData.name,
-                symbol: symbolToSave,  // 使用修复后的完整 symbol
-                resolution: chartData.resolution,
-                timestamp: Date.now(),
-                data: chartData
-            };
+            // 直接保存 TradingView 传入的原始数据
+            const chartInfo = chartData;
 
-            // 检查是否已存在同名图表
-            const existingIndex = charts.findIndex(c => c.name === chartInfo.name);
+            // 检查是否已存在同名图表（使用 id 判断）
+            const existingIndex = charts.findIndex(c => c.id === chartInfo.id);
             if (existingIndex !== -1) {
                 charts[existingIndex] = chartInfo;
             } else {
+                // ✅ 修复：如果 id 为空，自动生成一个新 id（初次保存时）
+                if (!chartInfo.id) {
+                    chartInfo.id = generateChartId();
+                }
                 charts.push(chartInfo);
             }
 
@@ -138,8 +111,8 @@ export const chartStorageAdapter = {
             const success = saveToStorage(STORAGE_KEYS.CHARTS, charts);
 
             if (success) {
-                saveToStorage(STORAGE_KEYS.LAST_CHART_ID, chartId);
-                return chartId;
+                saveToStorage(STORAGE_KEYS.LAST_CHART_ID, chartData.id);
+                return chartData.id;
             }
             return null;
         } catch (error) {
@@ -157,8 +130,8 @@ export const chartStorageAdapter = {
             const charts = getFromStorage(STORAGE_KEYS.CHARTS, []);
             const chart = charts.find(c => c.id === chartId);
 
-            if (chart && chart.data && chart.data.content) {
-                return chart.data.content;
+            if (chart && chart.content) {
+                return chart.content;
             }
             return null;
         } catch (error) {
@@ -190,35 +163,7 @@ export const chartStorageAdapter = {
      */
     async getAllCharts() {
         try {
-            const charts = getFromStorage(STORAGE_KEYS.CHARTS, []);
-
-            console.log('[ChartStorage] getAllCharts - 原始数据:', JSON.parse(JSON.stringify(charts)));
-
-            // 返回完整的图表元信息（符合 ChartMetaInfo 接口）
-            const chartList = charts.map(chart => {
-                // 调试：显示每个图表的完整结构
-                console.log('[ChartStorage] 图表结构:', {
-                    id: chart.id,
-                    name: chart.name,
-                    topLevelSymbol: chart.symbol,
-                    dataSymbol: chart.data?.symbol,
-                    topLevelResolution: chart.resolution,
-                    dataResolution: chart.data?.resolution
-                });
-
-                return {
-                    id: chart.id,
-                    name: chart.name,
-                    // 优先使用 chart.symbol（直接存储的），其次使用 chart.data.symbol
-                    // 如果都没有，使用默认的 BTCUSDT 现货
-                    symbol: chart.symbol || chart.data?.symbol || 'BINANCE:BTCUSDT',
-                    resolution: chart.resolution || chart.data?.resolution || '60',
-                    timestamp: chart.timestamp
-                };
-            });
-
-            console.log('[ChartStorage] getAllCharts - 返回的 chartList:', chartList);
-            return chartList;
+            return getFromStorage(STORAGE_KEYS.CHARTS, []);
         } catch (error) {
             console.error('[ChartStorage] getAllCharts 错误:', error);
             return [];

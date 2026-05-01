@@ -22,6 +22,8 @@ import json
 import logging
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 from ..db.alert_signal_repository import AlertConfigRepository
 from ..db.exchange_info_repository import ExchangeInfoRepository
 from ..db.order_tasks_repository import OrderTasksRepository
@@ -245,8 +247,8 @@ class TaskRouter:
         data = request.data
         request_id = request.request_id
 
-        logger.info(
-            f"handle: msg_type={msg_type}, request_id={request_id}, request={request}"
+        logger.debug(
+            f"handle: msg_type={msg_type}, request_id={request_id}"
         )
 
         # ========== 需要三阶段模式的请求类型 ==========
@@ -600,6 +602,16 @@ class TaskRouter:
             interval = validated.interval
             from_time = validated.from_time
             to_time = validated.to_time
+
+            # 记录获取历史K线请求的详细信息（INFO级别，方便排查问题）
+            from datetime import datetime, timezone, timedelta
+            tz_cn = timezone(timedelta(hours=8))
+            from_ts = datetime.fromtimestamp(from_time / 1000, tz=tz_cn).strftime("%Y-%m-%d %H:%M:%S") if from_time else "None"
+            to_ts = datetime.fromtimestamp(to_time / 1000, tz=tz_cn).strftime("%Y-%m-%d %H:%M:%S") if to_time else "None"
+            logger.info(
+                f"[GET_KLINES] 收到获取K线请求: symbol={symbol}, interval={interval}, "
+                f"from_time={from_time} ({from_ts}), to_time={to_time} ({to_ts})"
+            )
         except Exception as e:
             # 参数错误，也需要先发送 ACK 再发送错误
             await self._client_manager.send(client_id, self._create_ack(request_id))
@@ -638,7 +650,7 @@ class TaskRouter:
             )
 
             if endpoints["from_exists"] and endpoints["to_exists"]:
-                logger.info(
+                logger.debug(
                     f"缓存命中（端点完整）: {symbol} {interval} "
                     f"({from_time_aligned} - {to_time_aligned})"
                 )
@@ -671,17 +683,26 @@ class TaskRouter:
                     request_id=request_id,
                     data=kline_data,
                 )
+                # 记录缓存命中时返回K线数据
+                logger.info(
+                    f"[GET_KLINES] 缓存命中返回K线: symbol={symbol}, interval={interval}, "
+                    f"count={len(bars_list)}, from={from_time_aligned}, to={to_time_aligned}"
+                )
             else:
                 missing = []
                 if not endpoints["from_exists"]:
                     missing.append("from_time")
                 if not endpoints["to_exists"]:
                     missing.append("to_time")
-                logger.info(
+                logger.debug(
                     f"缓存缺失（端点不完整）: {symbol} {interval} "
                     f"缺少: {', '.join(missing)}，创建异步任务"
                 )
                 # 缓存缺失时，创建异步任务获取数据
+                logger.info(
+                    f"[GET_KLINES] 缓存缺失，创建异步任务: symbol={symbol}, "
+                    f"interval={interval}, from={from_time_aligned}, to={to_time_aligned}"
+                )
                 result = await self._create_async_task(
                     client_id=client_id,
                     task_type="get_klines",
@@ -742,6 +763,8 @@ class TaskRouter:
         limit = data.get("limit", 50)
         market_type = data.get("market_type", "ALL")  # 支持 ALL/SPOT/FUTURES
 
+        logger.info(f"[TaskRouter] GET_SEARCH_SYMBOLS: query='{query}', exchange='{exchange}', market_type='{market_type}', limit={limit}")
+
         try:
             # 如果 market_type 为 ALL，同时搜索 SPOT 和 FUTURES
             if market_type == "ALL":
@@ -760,6 +783,7 @@ class TaskRouter:
                 # 合并结果，现货优先，限制总数不超过 limit
                 symbols = (spot_symbols + futures_symbols)[:limit]
                 total = len(symbols)
+                logger.info(f"[TaskRouter] GET_SEARCH_SYMBOLS: spot={len(spot_symbols)}, futures={len(futures_symbols)}, combined={total}")
             else:
                 symbols = await self._exchange_repo.search_symbols(
                     query=query,
@@ -772,6 +796,7 @@ class TaskRouter:
                     exchange=exchange,
                     market_type=market_type,
                 )
+                logger.info(f"[TaskRouter] GET_SEARCH_SYMBOLS: {market_type} results={len(symbols)}, total={total}")
 
             # 使用 SearchSymbolsData 模型构建响应
             search_data = SearchSymbolsData(
@@ -779,6 +804,11 @@ class TaskRouter:
                 total=total,
                 count=len(symbols),
             )
+            if symbols:
+                symbol_list = [s.ticker for s in symbols[:5]]
+                logger.info(f"[TaskRouter] GET_SEARCH_SYMBOLS: returning {len(symbols)} symbols, first 5: {symbol_list}")
+            else:
+                logger.info(f"[TaskRouter] GET_SEARCH_SYMBOLS: no symbols found for query='{query}'")
             return self._response(
                 msg_type="SEARCH_SYMBOLS_DATA",
                 request_id=request_id,
@@ -816,11 +846,19 @@ class TaskRouter:
                 error_message="Missing symbol parameter",
             )
 
+        # 记录解析品种请求的详细信息（DEBUG级别）
+        logger.info(f"[RESOLVE_SYMBOL] 收到解析品种请求: symbol={symbol}")
+
         try:
             # 使用 SemanticSymbol 解析 symbol，自动判断市场类型
             parsed = parse_semantic_symbol(symbol)
             # 根据是否有合约类型判断市场类型
             market_type = "FUTURES" if parsed.is_futures else "SPOT"
+
+            logger.debug(
+                f"[RESOLVE_SYMBOL] 解析后: exchange={parsed.exchange}, "
+                f"is_futures={parsed.is_futures}, market_type={market_type}"
+            )
 
             symbol_info = await self._exchange_repo.resolve_symbol(
                 symbol=symbol,
@@ -845,6 +883,11 @@ class TaskRouter:
 
             # 直接返回 SymbolInfo 模型，无需包装
             # SymbolInfo 继承自 CamelCaseModel，序列化时自动转换为 camelCase
+            logger.info(
+                f"[RESOLVE_SYMBOL] 解析成功: symbol={symbol} -> "
+                f"name={symbol_info.name}, ticker={symbol_info.ticker}, "
+                f"pricescale={symbol_info.pricescale}"
+            )
             return self._response(
                 msg_type="SYMBOL_DATA",
                 request_id=request_id,
@@ -927,7 +970,7 @@ class TaskRouter:
             client_id, subscriptions
         )
 
-        logger.info(
+        logger.debug(
             f"客户端 {client_id} 订阅 {len(subscriptions)} 个键，"
             f"新增数据库记录 {inserted_count} 个"
         )
@@ -966,7 +1009,7 @@ class TaskRouter:
         if all_subs:
             # 取消所有订阅
             deleted_keys = await self._subscription_manager.unsubscribe_all(client_id)
-            logger.info(f"客户端 {client_id} 取消全部 {len(deleted_keys)} 个订阅")
+            logger.debug(f"客户端 {client_id} 取消全部 {len(deleted_keys)} 个订阅")
 
             # 专门监控账户信息取消订阅
             account_unsubs = [k for k in deleted_keys if "@USERDATA" in k]
@@ -994,7 +1037,7 @@ class TaskRouter:
             client_id, subscriptions
         )
 
-        logger.info(
+        logger.debug(
             f"客户端 {client_id} 取消 {len(subscriptions)} 个订阅，"
             f"删除数据库记录 {deleted_count} 个"
         )
@@ -1595,7 +1638,7 @@ class TaskRouter:
             # 注册任务与客户端的映射（用于推送结果）
             self._client_manager.register_task(task_id, client_id)
 
-            logger.info(
+            logger.debug(
                 f"创建异步任务: client_id={client_id}, "
                 f"task_type={task_type}, task_id={task_id}, request_id={request_id}, store_result={store_result}"
             )

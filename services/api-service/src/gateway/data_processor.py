@@ -510,7 +510,7 @@ class DataProcessor:
             # 直接传递 MessageSuccess 模型，保持类型安全
             success = await self._client_manager.send(client_id, response)
             if success:
-                logger.info(
+                logger.debug(
                     f"已推送 klines 数据给客户端 {client_id}: "
                     f"{symbol} {interval} 共 {len(bars_list)} 条"
                 )
@@ -749,7 +749,7 @@ class DataProcessor:
             # 直接传递 MessageSuccess 模型，保持类型安全
             success = await self._client_manager.send(client_id, response)
             if success:
-                logger.info(
+                logger.debug(
                     f"已推送任务结果给客户端 {client_id}: "
                     f"task_type={task_type}, task_id={task_id}"
                 )
