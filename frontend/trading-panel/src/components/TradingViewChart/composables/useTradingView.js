@@ -107,8 +107,49 @@ export function useTradingView(containerId = 'tv_chart_container') {
                     chart.resetData();
                 });
 
-                // ✅ 移除：不再自动恢复图表 symbol
-                // TradingView 的 load_last_chart 会自动处理
+                // ✅ 加载图表后检查并恢复正确的 symbol
+                try {
+                    const charts = await chartStorageAdapter.getAllCharts();
+                    let lastChartId = chartStorageAdapter.getLastChartId();
+
+                    // 清理可能多余的引号（JSON 序列化问题）
+                    if (lastChartId) {
+                        if (typeof lastChartId === 'string') {
+                            lastChartId = lastChartId.replace(/^"|"$/g, '');
+                        }
+                    }
+
+                    console.log('[TradingView] 图表恢复检查:', {
+                        chartsCount: charts.length,
+                        charts: charts.map(c => ({ id: c.id, symbol: c.symbol, name: c.name })),
+                        lastChartId
+                    });
+
+                    if (lastChartId && charts.length > 0) {
+                        const lastChart = charts.find(c => c.id === lastChartId);
+
+                        if (lastChart && lastChart.symbol) {
+                            const currentSymbol = chart.symbol();
+                            const savedSymbol = lastChart.symbol;
+
+                            console.log('[TradingView] symbol 对比:', {
+                                current: currentSymbol,
+                                saved: savedSymbol
+                            });
+
+                            // 如果保存的是期货 symbol 但当前显示的不是，则强制恢复
+                            const isFuturesChart = savedSymbol.endsWith('.PERP');
+                            const isCurrentFutures = currentSymbol.endsWith('.PERP');
+
+                            if (isFuturesChart && !isCurrentFutures && savedSymbol !== currentSymbol) {
+                                console.log('[TradingView] 强制恢复期货 symbol:', savedSymbol);
+                                chart.setSymbol(savedSymbol);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error('[TradingView] symbol 恢复失败:', err);
+                }
             });
 
         } catch (err) {

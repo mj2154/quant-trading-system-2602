@@ -51,7 +51,6 @@ function parseSubscriptionKey(subscriptionKey) {
     const match = subscriptionKey.match(/^([^:]+):([^@]+)@([A-Z]+)(?:_(.+))?$/);
 
     if (!match) {
-        console.warn(`无法解析订阅键格式: ${subscriptionKey}`);
         return null;
     }
 
@@ -304,7 +303,7 @@ export default {
     resolveSymbol: (symbolName, onSymbolResolvedCallback, onResolveErrorCallback) => {
         // 使用公共格式化函数
         const formattedSymbol = formatSymbol(symbolName);
-        console.log('[DataFeed] resolveSymbol:', { symbolName, formattedSymbol });
+        console.log('[DataFeed] resolveSymbol:', formattedSymbol);
 
         // 使用WebSocket GET请求获取交易对详情
         sendWSRequest({
@@ -314,7 +313,6 @@ export default {
             // v2.0 协议: 使用 type === 'SYMBOL_DATA'
             if (response.type === 'SYMBOL_DATA') {
                 const data = response.data;
-                console.log('[DataFeed] resolveSymbol response.data:', data);
 
                 // 根据设计文档，name 应该是交易代码（不带交易所前缀），如 BTCUSDT
                 // ticker 应该是标的全名（带交易所前缀），如 BINANCE:BTCUSDT

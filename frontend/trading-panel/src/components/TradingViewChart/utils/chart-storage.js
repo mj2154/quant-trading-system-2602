@@ -131,6 +131,17 @@ export const chartStorageAdapter = {
             const chart = charts.find(c => c.id === chartId);
 
             if (chart && chart.content) {
+                // 解析 chart content 中的 symbol 信息
+                try {
+                    const content = JSON.parse(chart.content);
+                    console.log('[ChartStorage] getChartContent:', {
+                        chartId,
+                        symbol: content?.symbol || content?.s?.symbol || content?.symbolInfo?.ticker,
+                        contentKeys: Object.keys(content),
+                    });
+                } catch {
+                    console.log('[ChartStorage] getChartContent:', { chartId, hasContent: true });
+                }
                 return chart.content;
             }
             return null;
