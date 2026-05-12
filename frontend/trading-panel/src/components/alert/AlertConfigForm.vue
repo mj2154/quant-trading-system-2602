@@ -234,17 +234,6 @@ const emit = defineEmits<{
 const store = useAlertStore()
 const strategyStore = useStrategyStore()
 
-// 组件挂载时获取策略列表
-onMounted(async () => {
-  // 确保 DataService 已连接后再获取策略
-  await store.initialize()
-  await strategyStore.fetchStrategies()
-  // 策略加载完成后，确保 formData.strategyType 有有效值
-  if (!formData.strategyType && strategyStore.strategies.length > 0) {
-    formData.strategyType = strategyStore.strategies[0].type
-  }
-})
-
 // 监听策略列表加载完成，自动初始化当前策略的参数
 watch(
   () => strategyStore.strategies,
@@ -269,9 +258,29 @@ watch(
         paramsData.value = {}
       }
     }
-  },
-  { immediate: true }
+  }
 )
+
+// 组件挂载时初始化数据
+onMounted(async () => {
+  // 确保 DataService 已连接后再获取策略
+  await store.initialize()
+  await strategyStore.fetchStrategies()
+  // 策略加载完成后，手动触发一次 watch 的回调来初始化 formData
+  if (strategyStore.strategies.length > 0) {
+    if (!formData.strategyType) {
+      formData.strategyType = strategyStore.strategies[0].type
+    }
+    const strategy = strategyStore.getStrategyByType(formData.strategyType)
+    if (strategy && strategy.params.length > 0) {
+      const defaultParams: Record<string, number | boolean> = {}
+      strategy.params.forEach(param => {
+        defaultParams[param.name] = param.default
+      })
+      paramsData.value = defaultParams
+    }
+  }
+})
 
 // 表单引用
 const formRef = ref<FormInst | null>(null)
@@ -282,7 +291,7 @@ const submitting = ref(false)
 // 判断是否为编辑模式
 const isEdit = computed(() => !!props.alert)
 
-// 表单数据
+// 表单数据 - 必须在 watch 之后声明，因为 watch 的 immediate 回调已执行完毕
 const formData = reactive({
   name: '',
   description: '',
