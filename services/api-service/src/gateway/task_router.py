@@ -763,6 +763,12 @@ class TaskRouter:
         limit = data.get("limit", 50)
         market_type = data.get("market_type", "ALL")  # 支持 ALL/SPOT/FUTURES
 
+        # 如果查询包含 . 后缀，强制使用 FUTURES 市场类型
+        # 因为数据库中期货符号不带 . 后缀，需要单独搜索期货
+        if '.' in query:
+            market_type = "FUTURES"
+            logger.debug(f"[TaskRouter] GET_SEARCH_SYMBOLS: query contains dot suffix, forcing market_type=FUTURES")
+
         logger.info(f"[TaskRouter] GET_SEARCH_SYMBOLS: query='{query}', exchange='{exchange}', market_type='{market_type}', limit={limit}")
 
         try:

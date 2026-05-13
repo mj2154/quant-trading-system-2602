@@ -7,6 +7,7 @@
 
 import asyncpg
 import logging
+import re
 
 from ..models.protocol.ws_payload import SymbolSearchItem
 from ..models.trading.symbol_models import SymbolInfo
@@ -215,8 +216,8 @@ class ExchangeInfoRepository:
             LIMIT $4
         """
 
-        search_pattern = f"%{query}%" if query else "%"
-        logger.info(f"[ExchangeInfoRepo] search_symbols: query='{query}', exchange='{exchange}', market_type='{market_type}', pattern='{search_pattern}'")
+        search_pattern = f"%{re.sub(r'\..*$', '', query)}%" if query else "%"
+        logger.debug(f"[ExchangeInfoRepo] search_symbols: query='{query}', exchange='{exchange}', market_type='{market_type}', pattern='{search_pattern}'")
 
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
