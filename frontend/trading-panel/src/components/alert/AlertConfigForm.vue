@@ -247,15 +247,19 @@ watch(
       // 根据当前策略类型初始化参数
       const strategy = strategyStore.getStrategyByType(formData.strategyType)
       if (strategy && strategy.params.length > 0) {
-        // 使用策略的默认参数
-        const defaultParams: Record<string, number | boolean> = {}
-        strategy.params.forEach(param => {
-          defaultParams[param.name] = param.default
-        })
-        paramsData.value = defaultParams
+        // 仅在 paramsData 为空时设置默认值（避免覆盖编辑模式的已有值）
+        if (!paramsData.value || Object.keys(paramsData.value).length === 0) {
+          const defaultParams: Record<string, number | boolean> = {}
+          strategy.params.forEach(param => {
+            defaultParams[param.name] = param.default
+          })
+          paramsData.value = defaultParams
+        }
       } else {
         // 无参数策略（如随机策略），清空参数
-        paramsData.value = {}
+        if (!paramsData.value || Object.keys(paramsData.value).length === 0) {
+          paramsData.value = {}
+        }
       }
     }
   }
@@ -267,7 +271,9 @@ onMounted(async () => {
   await store.initialize()
   await strategyStore.fetchStrategies()
   // 策略加载完成后，手动触发一次 watch 的回调来初始化 formData
-  if (strategyStore.strategies.length > 0) {
+  // 但只在创建模式（没有 props.alert）时才初始化默认参数
+  // 编辑模式时 watch 已经设置了正确的值，不需要覆盖
+  if (strategyStore.strategies.length > 0 && !props.alert) {
     if (!formData.strategyType) {
       formData.strategyType = strategyStore.strategies[0].type
     }
@@ -304,10 +310,8 @@ const formData = reactive({
 })
 
 // 使用 ref 来存储参数，确保响应性
-// 初始值使用 strategyStore.getDefaultParams 获取，会根据 strategyType 返回正确的默认值
-const paramsData = ref<Record<string, number | boolean>>(
-  strategyStore.getDefaultParams(formData.strategyType)
-)
+// 初始值为空对象，等待 watch 回调根据是编辑还是创建模式来设置正确的值
+const paramsData = ref<Record<string, number | boolean>>({})
 
 // 计算属性访问 params
 const formDataWithParams = computed(() => ({
@@ -448,11 +452,11 @@ watch(
       formData.interval = newAlert.interval
       formData.isEnabled = newAlert.isEnabled
       formData.strategyType = newAlert.strategyType
-      // 加载 params（如果存在）
+      // 加载 params（如果存在则使用实际值，否则使用策略的默认参数）
       if (newAlert.params && Object.keys(newAlert.params).length > 0) {
         paramsData.value = { ...newAlert.params } as Record<string, number | boolean>
       } else {
-        paramsData.value = { ...DEFAULT_PARAMS }
+        paramsData.value = { ...strategyStore.getDefaultParams(newAlert.strategyType) }
       }
     } else {
       // 创建模式：重置表单

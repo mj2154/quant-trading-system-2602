@@ -118,6 +118,10 @@ export class DataService {
   private onConnectCallback: (() => void) | null = null
   private onDisconnectCallback: (() => void) | null = null
 
+  // getQuotes 请求缓存 (用于去重)
+  private quotesRequestCache = new Map<string, { promise: Promise<QuotesList>, timestamp: number }>()
+  private static QUOTES_CACHE_TTL = 500 // 500ms 去重窗口
+
   // 私有构造函数确保单例
   private constructor() {}
 
@@ -531,11 +535,31 @@ export class DataService {
   async getQuotes(symbols: string[]): Promise<QuotesList> {
     await this.ensureConnected()
 
-    const response = await this.request<GetQuotesResponse>('GET_QUOTES', { symbols })
+    // 生成缓存 key（排序后的 symbols 字符串，去重）
+    const cacheKey = [...new Set(symbols)].slice().sort().join(',')
+    const now = Date.now()
 
-    return {
-      quotes: (response.quotes || []) as QuotesList['quotes'],
+    // 检查缓存是否有效
+    const cached = this.quotesRequestCache.get(cacheKey)
+    if (cached && (now - cached.timestamp) < DataService.QUOTES_CACHE_TTL) {
+      console.log('[DataService] getQuotes 命中缓存:', cacheKey)
+      return cached.promise
     }
+
+    console.debug('[DataService] getQuotes request:', symbols)
+
+    const responsePromise = this.request<GetQuotesResponse>('GET_QUOTES', { symbols })
+    const resultPromise = responsePromise.then((r) => ({
+      quotes: (r.quotes || []) as QuotesList['quotes'],
+    }))
+
+    // 存储到缓存
+    this.quotesRequestCache.set(cacheKey, {
+      promise: resultPromise,
+      timestamp: now,
+    })
+
+    return resultPromise
   }
 
   /**
@@ -599,14 +623,7 @@ export class DataService {
         symbol: (rawItem.symbol as string) || '',
         interval: (rawItem.interval as string) || '60',
         triggerType: (rawItem.triggerType as string) || (rawItem.trigger_type as string) || 'each_kline_close',
-        params: this.convertParamsFromBackend(item.params) || {
-          macd1_fastperiod: 12,
-          macd1_slowperiod: 26,
-          macd1_signalperiod: 9,
-          macd2_fastperiod: 5,
-          macd2_slowperiod: 10,
-          macd2_signalperiod: 4,
-        },
+        params: this.convertParamsFromBackend(item.params),
         isEnabled: (rawItem.isEnabled as boolean) ?? (rawItem.is_enabled as boolean) ?? true,
         createdAt: (rawItem.createdAt as string) || (rawItem.created_at as string) || '',
         updatedAt: (rawItem.updatedAt as string) || (rawItem.updated_at as string) || '',
@@ -638,14 +655,7 @@ export class DataService {
       symbol: (rawItem.symbol as string) || '',
       interval: (rawItem.interval as string) || '60',
       triggerType: (rawItem.triggerType as string) || (rawItem.trigger_type as string) || 'each_kline_close',
-      params: this.convertParamsFromBackend(alert.params) || {
-        macd1_fastperiod: 12,
-        macd1_slowperiod: 26,
-        macd1_signalperiod: 9,
-        macd2_fastperiod: 5,
-        macd2_slowperiod: 10,
-        macd2_signalperiod: 4,
-      },
+      params: this.convertParamsFromBackend(alert.params),
       isEnabled: (rawItem.isEnabled as boolean) ?? (rawItem.is_enabled as boolean) ?? true,
       createdAt: (rawItem.createdAt as string) || (rawItem.created_at as string) || '',
       updatedAt: (rawItem.updatedAt as string) || (rawItem.updated_at as string) || '',

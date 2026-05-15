@@ -328,7 +328,7 @@ export const useAlertStore = defineStore('alert', () => {
       // 检查数据库中的实际状态
       const alert = alerts.value.find(a => a.id === id)
       if (alert?.isEnabled === false) {
-        console.log('Alert disabled in database, marking as success')
+        console.debug('Alert disabled in database, marking as success')
         return true
       }
       alertsError.value = error instanceof Error ? error.message : '禁用告警失败'
@@ -438,7 +438,7 @@ export const useAlertStore = defineStore('alert', () => {
 
     // 使用 DataService 批量订阅信号
     signalUnsubscribe = dataService.subscribeAllSignals(alertIds, (signal) => {
-      console.log('[AlertStore] 收到实时信号:', JSON.stringify(signal, null, 2))
+      console.debug('[AlertStore] 收到实时信号:', JSON.stringify(signal, null, 2))
       addRealtimeAlertSignal(signal)
     })
   }
