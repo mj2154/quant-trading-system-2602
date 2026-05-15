@@ -303,7 +303,7 @@ export default {
     resolveSymbol: (symbolName, onSymbolResolvedCallback, onResolveErrorCallback) => {
         // 使用公共格式化函数
         const formattedSymbol = formatSymbol(symbolName);
-        console.log('[DataFeed] resolveSymbol:', formattedSymbol);
+        console.debug('[DataFeed] resolveSymbol:', formattedSymbol);
 
         // 使用WebSocket GET请求获取交易对详情
         sendWSRequest({
@@ -447,18 +447,18 @@ export default {
     },
 
     unsubscribeBars: (subscriberUID) => {
-        console.log('unsubscribeBars 被调用:', {
+        console.debug('unsubscribeBars 被调用:', {
             subscriberUID,
             timestamp: new Date().toISOString(),
         });
 
         const subscriptionInfo = subscriptions.get(subscriberUID);
         if (!subscriptionInfo) {
-            console.log('unsubscribeBars: 未找到 subscriberUID 对应的订阅信息');
+            console.debug('unsubscribeBars: 未找到 subscriberUID 对应的订阅信息');
             return;
         }
 
-        console.log('📊 unsubscribeBars 订阅信息:', {
+        console.debug('📊 unsubscribeBars 订阅信息:', {
             subscriptionKey: subscriptionInfo.subscriptionKey,
             resolution: subscriptionInfo.resolution,
             activeBarsSubscriptions: Array.from(subscriptions.keys())
@@ -466,7 +466,7 @@ export default {
 
         // 使用存储的 v2.0 订阅键
         const klineSubscription = subscriptionInfo.subscriptionKey;
-        console.log('准备取消 K 线订阅:', klineSubscription);
+        console.debug('准备取消 K 线订阅:', klineSubscription);
 
         // 使用 DataService.unsubscribe 替换原生 WebSocket 取消订阅
         if (subscriptionInfo.unsubscribe) {
@@ -478,7 +478,7 @@ export default {
         }
 
         subscriptions.delete(subscriberUID);
-        console.log('清理本地 K 线订阅记录完成，剩余订阅:', Array.from(subscriptions.keys()));
+        console.debug('清理本地 K 线订阅记录完成，剩余订阅:', Array.from(subscriptions.keys()));
     },
 
     /**
@@ -490,22 +490,26 @@ export default {
     getQuotes: (symbols, onDataCallback, onErrorCallback) => {
         // 处理空symbols数组 - 直接返回空数组
         if (!symbols || symbols.length === 0) {
+            console.debug('[datafeed] getQuotes called with empty symbols');
             onDataCallback([]);
             return;
         }
 
         // 确保所有symbols都使用EXCHANGE:SYMBOL格式
         const formattedSymbols = symbols.map(symbol => formatSymbol(symbol));
+        console.debug('[datafeed] getQuotes request:', formattedSymbols);
 
         // 使用 DataService.getQuotes 替换原生 WebSocket 请求
         dataService.getQuotes(formattedSymbols)
             .then((response) => {
                 // DataService 返回格式: { quotes: [] }
                 const quotes = response.quotes || [];
+                console.debug('[datafeed] getQuotes response:', quotes);
                 onDataCallback(quotes);
             })
             .catch((error) => {
                 const errorMsg = error?.message || 'Failed to get quotes';
+                console.error('[datafeed] getQuotes error:', errorMsg, formattedSymbols);
                 onErrorCallback(errorMsg);
             });
     },
@@ -593,7 +597,7 @@ export default {
             quotesSubscriptions: Array.from(quotesSubscriptions.keys()),
             dataServiceConnected: dataService.isConnected,
         };
-        console.log('📋 订阅状态:', status);
+        console.debug('📋 订阅状态:', status);
         return status;
     },
 
@@ -606,7 +610,7 @@ export default {
         const status = {
             isConnected: dataService.isConnected,
         };
-        console.log('🔌 连接状态:', status);
+        console.debug('🔌 连接状态:', status);
         return status;
     }
 

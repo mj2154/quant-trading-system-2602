@@ -48,7 +48,7 @@ const emit = defineEmits<{
 }>()
 
 function showMessage(msg: string, type: 'success' | 'error' = 'success') {
-  console.log(`[SpotOrderForm] ${type}: ${msg}`)
+  console.debug(`[SpotOrderForm] ${type}: ${msg}`)
   if (type === 'success') {
     emit('order-success', msg)
   } else {

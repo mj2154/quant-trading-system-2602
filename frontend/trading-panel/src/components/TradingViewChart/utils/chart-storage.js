@@ -68,7 +68,7 @@ export const chartStorageAdapter = {
                 return null;
             }
 
-            console.log('[ChartStorage] 💾 saveChart:', chartData);
+            console.debug('[ChartStorage] 💾 saveChart:', chartData);
 
             // 如果没有提供名称，生成默认名称
             if (!chartData.name || typeof chartData.name !== 'string' || chartData.name.trim() === '') {
@@ -134,13 +134,13 @@ export const chartStorageAdapter = {
                 // 解析 chart content 中的 symbol 信息
                 try {
                     const content = JSON.parse(chart.content);
-                    console.log('[ChartStorage] getChartContent:', {
+                    console.debug('[ChartStorage] getChartContent:', {
                         chartId,
                         symbol: content?.symbol || content?.s?.symbol || content?.symbolInfo?.ticker,
                         contentKeys: Object.keys(content),
                     });
                 } catch {
-                    console.log('[ChartStorage] getChartContent:', { chartId, hasContent: true });
+                    console.debug('[ChartStorage] getChartContent:', { chartId, hasContent: true });
                 }
                 return chart.content;
             }

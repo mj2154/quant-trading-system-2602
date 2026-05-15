@@ -56,7 +56,7 @@ export const useStrategyStore = defineStore('strategy', () => {
       console.log('[StrategyStore] Fetching strategies...')
       // 通过 DataService 获取策略元数据
       const rawStrategies = await dataService.getStrategyMetadata()
-      console.log('[StrategyStore] Raw strategies received:', rawStrategies.length)
+      console.debug('[StrategyStore] Raw strategies received:', rawStrategies.length)
 
       // 转换后端返回的数据为前端格式
       strategies.value = rawStrategies.map((s: StrategyMetadataResponse) => ({
@@ -72,7 +72,7 @@ export const useStrategyStore = defineStore('strategy', () => {
           description: p.description,
         })),
       }))
-      console.log('[StrategyStore] Strategies loaded:', strategies.value.length)
+      console.debug('[StrategyStore] Strategies loaded:', strategies.value.length)
     } catch (e) {
       console.error('[StrategyStore] Error fetching strategies:', e)
       error.value = e instanceof Error ? e.message : 'Unknown error'
