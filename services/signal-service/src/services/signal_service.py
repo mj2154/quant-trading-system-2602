@@ -356,6 +356,11 @@ class SignalService:
         old_alert = self._alerts.get(alert_id)
         created_at = old_alert.created_at if old_alert else datetime.utcnow()
 
+        # Calculate old subscription key BEFORE updating memory state
+        old_subscription_key = None
+        if old_alert and old_alert.is_enabled:
+            old_subscription_key = _build_subscription_key(old_alert.symbol, old_alert.interval)
+
         # Update memory state
         self._alerts[alert_id] = LoadedAlertConfig(
             alert_id=alert_id,
@@ -375,6 +380,18 @@ class SignalService:
 
         # Update _alerts_by_key based on current enabled status
         if alert.is_enabled:
+            # Remove from old subscription key if interval changed
+            if old_subscription_key and old_subscription_key != subscription_key:
+                if old_subscription_key in self._alerts_by_key:
+                    self._alerts_by_key[old_subscription_key].discard(alert_id)
+                    if not self._alerts_by_key[old_subscription_key]:
+                        del self._alerts_by_key[old_subscription_key]
+                    logger.info(
+                        "[ALERT_UPDATE] Removed alert from old subscription: alert_id=%s old_key=%s",
+                        alert_id,
+                        old_subscription_key,
+                    )
+            # Add to new subscription key
             if subscription_key not in self._alerts_by_key:
                 self._alerts_by_key[subscription_key] = set()
             self._alerts_by_key[subscription_key].add(alert_id)
@@ -386,6 +403,9 @@ class SignalService:
 
         # Manage subscription based on enabled status
         if alert.is_enabled:
+            # Cleanup old subscription if interval changed
+            if old_subscription_key and old_subscription_key != subscription_key:
+                await self._cleanup_subscription_if_unused(old_subscription_key)
             # Ensure subscription exists in DB
             existing = await self._realtime_repo.get_by_subscription_key(subscription_key)
             if existing is None:
