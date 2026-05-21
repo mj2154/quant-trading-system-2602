@@ -1,7 +1,7 @@
 """Constants used by signal service."""
 
 # Required number of klines for MACD calculation
-REQUIRED_KLINES = 280
+REQUIRED_KLINES = 350
 
 # Retry delay in seconds for kline fill loop
 RETRY_DELAY_SECONDS = 2

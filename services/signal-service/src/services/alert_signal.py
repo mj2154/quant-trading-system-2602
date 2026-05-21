@@ -18,9 +18,6 @@ import pandas as pd
 from ..strategies.base import Strategy, StrategyOutput
 from .trigger_engine import TriggerState
 
-# 策略计算所需的最少K线数量
-REQUIRED_KLINES = 280
-
 
 @dataclass
 class LoadedAlertConfig:

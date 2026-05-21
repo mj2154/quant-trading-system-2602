@@ -23,6 +23,7 @@ from .kline_cache import _init_kline_cache, _update_kline_cache
 from .kline_utils import (
     _build_ohlcv_for_trigger_type,
     _format_kline_time,
+    _get_interval_ms,
 )
 from .kline_validator import _check_kline_data_validity
 from .subscription_utils import _build_subscription_key
@@ -33,6 +34,79 @@ from .trigger_engine import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _convert_time_to_ms(time_value: Any) -> int | None:
+    """Convert time value to milliseconds integer for comparison."""
+    if time_value is None:
+        return None
+    if hasattr(time_value, 'timestamp'):
+        return int(time_value.timestamp() * 1000)
+    return int(time_value)
+
+
+def _validate_cache_for_kline_close(
+    cached_klines: pd.DataFrame,
+    kline_data: dict[str, Any],
+) -> tuple[bool, str]:
+    """验证缓存是否包含正确的完结K线.
+
+    Args:
+        cached_klines: 缓存的K线DataFrame
+        kline_data: 收到的实时K线数据
+
+    Returns:
+        (is_valid, reason) - reason 包含详细差异信息
+    """
+    if cached_klines.empty:
+        return False, "cache_empty"
+
+    cached_last_time = cached_klines.iloc[-1]["time"]
+    received_time = kline_data.get("k", {}).get("t")
+
+    if received_time is None:
+        return False, "received_time_missing"
+
+    cached_ms = _convert_time_to_ms(cached_last_time)
+    received_ms = int(received_time)
+
+    if cached_ms != received_ms:
+        return False, f"time_mismatch:cached={cached_ms},received={received_ms},diff={abs(cached_ms - received_ms)}ms"
+
+    return True, "ok"
+
+
+def _check_kline_continuity_in_dataframe(
+    df: pd.DataFrame,
+    interval_ms: int,
+) -> tuple[bool, str]:
+    """检查DataFrame中的K线时间连续性.
+
+    Args:
+        df: K线DataFrame
+        interval_ms: 间隔毫秒数
+
+    Returns:
+        (is_valid, reason)
+    """
+    if len(df) < 2:
+        return True, "ok"
+
+    for i in range(1, len(df)):
+        prev_time = df.iloc[i-1]["time"]
+        curr_time = df.iloc[i]["time"]
+
+        prev_ms = _convert_time_to_ms(prev_time)
+        curr_ms = _convert_time_to_ms(curr_time)
+
+        if prev_ms is None or curr_ms is None:
+            continue
+
+        diff = curr_ms - prev_ms
+        if abs(diff - interval_ms) > 1000:  # 1秒容差
+            return False, f"gap_at_index={i},prev={prev_ms},curr={curr_ms},expected_diff={interval_ms}ms"
+
+    return True, "ok"
 
 
 class SignalService:
@@ -1222,6 +1296,111 @@ class SignalService:
             logger.warning("Invalid trigger type: %s", e)
             return
 
+        # ========================================
+        # 【新增】对于 each_kline_close，验证缓存正确性
+        # ========================================
+        if trigger_type == "each_kline_close":
+            cache_valid, cache_reason = _validate_cache_for_kline_close(cached_klines, kline_data)
+
+            if not cache_valid:
+                cached_last_time = cached_klines.iloc[-1]["time"] if not cached_klines.empty else "N/A"
+                cached_last_close = cached_klines.iloc[-1]["close"] if not cached_klines.empty else "N/A"
+                received_time = kline_data.get("k", {}).get("t")
+                logger.warning(
+                    "[CACHE_VALIDATION_FAILED] alert=%s reason=%s "
+                    "cached_last_time=%s cached_last_close=%s received_time=%s, attempting cache repair",
+                    loaded_alert.name,
+                    cache_reason,
+                    cached_last_time,
+                    cached_last_close,
+                    received_time,
+                )
+
+                # 尝试重新初始化缓存
+                await self._init_kline_cache_for_key(subscription_key)
+                repaired_cached_klines = self._kline_cache.get(subscription_key, pd.DataFrame())
+
+                # 再次验证
+                cache_valid, cache_reason = _validate_cache_for_kline_close(repaired_cached_klines, kline_data)
+
+                if not cache_valid:
+                    cached_last_time = repaired_cached_klines.iloc[-1]["time"] if not repaired_cached_klines.empty else "N/A"
+                    cached_last_close = repaired_cached_klines.iloc[-1]["close"] if not repaired_cached_klines.empty else "N/A"
+                    received_time = kline_data.get("k", {}).get("t")
+                    logger.error(
+                        "[CACHE_VALIDATION_FATAL] alert=%s cache_repair_failed reason=%s "
+                        "cached_last_time=%s cached_last_close=%s received_time=%s",
+                        loaded_alert.name,
+                        cache_reason,
+                        cached_last_time,
+                        cached_last_close,
+                        received_time,
+                    )
+                    return  # 跳过本次计算
+
+                # 修复成功，使用修复后的缓存
+                cached_klines = repaired_cached_klines
+                logger.info(
+                    "[CACHE_REPAIRED] alert=%s subscription_key=%s",
+                    loaded_alert.name,
+                    subscription_key,
+                )
+
+        # ========================================
+        # 【新增】验证数量和连续性
+        # ========================================
+        interval_ms = _get_interval_ms(loaded_alert.interval)
+
+        # 数量检查
+        if len(cached_klines) < REQUIRED_KLINES:
+            last_time = cached_klines.iloc[-1]["time"] if not cached_klines.empty else "N/A"
+            last_close = cached_klines.iloc[-1]["close"] if not cached_klines.empty else "N/A"
+            logger.error(
+                "[INSUFFICIENT_KLINES] alert=%s got=%d need=%d "
+                "cached_last_time=%s cached_last_close=%s",
+                loaded_alert.name,
+                len(cached_klines),
+                REQUIRED_KLINES,
+                last_time,
+                last_close,
+            )
+            return
+
+        # 连续性检查
+        continuity_valid, continuity_reason = _check_kline_continuity_in_dataframe(cached_klines, interval_ms)
+        if not continuity_valid:
+            logger.warning(
+                "[KLINE_CONTINUITY_FAILED] alert=%s reason=%s, attempting repair",
+                loaded_alert.name,
+                continuity_reason,
+            )
+            # 同样尝试重新初始化缓存
+            await self._init_kline_cache_for_key(subscription_key)
+            repaired_cached_klines = self._kline_cache.get(subscription_key, pd.DataFrame())
+
+            continuity_valid, continuity_reason = _check_kline_continuity_in_dataframe(repaired_cached_klines, interval_ms)
+            if not continuity_valid:
+                last_time = repaired_cached_klines.iloc[-1]["time"] if not repaired_cached_klines.empty else "N/A"
+                last_close = repaired_cached_klines.iloc[-1]["close"] if not repaired_cached_klines.empty else "N/A"
+                received_time = kline_data.get("k", {}).get("t")
+                logger.error(
+                    "[KLINE_CONTINUITY_FATAL] alert=%s reason=%s "
+                    "cached_last_time=%s cached_last_close=%s received_time=%s",
+                    loaded_alert.name,
+                    continuity_reason,
+                    last_time,
+                    last_close,
+                    received_time,
+                )
+                return
+
+            cached_klines = repaired_cached_klines
+            logger.info(
+                "[CACHE_REPAIRED] alert=%s subscription_key=%s (continuity repair)",
+                loaded_alert.name,
+                subscription_key,
+            )
+
         # Build ohlcv DataFrame based on trigger type
         ohlcv = _build_ohlcv_for_trigger_type(
             history=cached_klines,
@@ -1251,55 +1430,31 @@ class SignalService:
             )
             return
 
-        # Get strategy from LoadedAlertConfig
-        strategy = loaded_alert.strategy
 
-        # Create LoadedAlertConfig instance to use calculate method
-        alert_signal = LoadedAlertConfig(
-            alert_id=str(alert_id),
-            name=loaded_alert.name,
-            strategy_type=loaded_alert.strategy_type,
-            symbol=loaded_alert.symbol,
-            interval=loaded_alert.interval,
-            trigger_type=loaded_alert.trigger_type,
-            params=loaded_alert.params,
-            is_enabled=loaded_alert.is_enabled,
-            created_by=loaded_alert.created_by,
-            strategy=strategy,
-            trigger_state=loaded_alert.trigger_state,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+        # ========================================
+        # 【新增】打印计算前的详细信息日志
+        # ========================================
+        last_kline = ohlcv.iloc[-1]
+        last_open_time_raw = last_kline["time"]
+        last_open_time = _format_kline_time(last_open_time_raw)
+        last_close_price = last_kline["close"]
+
+        logger.info(
+            "[CALC_START] alert=%s strategy=%s trigger_type=%s "
+            "last_kline_open_time=%s last_kline_close_price=%s "
+            "ohlcv_count=%d symbol=%s interval=%s",
+            loaded_alert.name,
+            loaded_alert.strategy_type,
+            trigger_type,
+            last_open_time,
+            last_close_price,
+            len(ohlcv),
+            loaded_alert.symbol,
+            loaded_alert.interval,
         )
 
-        # DEBUG: Log the kline data input to strategy
-        # Extract time range from the actual kline data passed to strategy
-        if len(cached_klines) > 0:
-            # First kline time
-            first_k_time_raw = cached_klines.iloc[0]["time"]
-            first_k_time = _format_kline_time(first_k_time_raw)
-
-            # Last kline time (could be from kline_data if not closed)
-            if kline_data and not is_closed:
-                # Use kline_data as the last one
-                current_k_time_raw = kline_data.get("k", {}).get("t")
-                last_k_time = _format_kline_time(current_k_time_raw)
-                input_time_range = f"[{first_k_time} -> {last_k_time}] (with current)"
-            else:
-                last_k_time_raw = cached_klines.iloc[-1]["time"]
-                last_k_time = _format_kline_time(last_k_time_raw)
-                input_time_range = f"[{first_k_time} -> {last_k_time}]"
-
-            logger.debug(
-                "[INPUT_KLINE] alert=%s klines=%d trigger_type=%s is_closed=%s time_range=%s",
-                loaded_alert.name,
-                len(cached_klines),
-                trigger_type,
-                is_closed,
-                input_time_range,
-            )
-
         # Calculate signal with ohlcv DataFrame
-        output = alert_signal.calculate(ohlcv)
+        output = loaded_alert.calculate(ohlcv)
 
         # Skip writing if signal_value is None (no signal)
         if output.signal_value is None:
