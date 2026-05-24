@@ -32,6 +32,8 @@ DROP TABLE IF EXISTS alert_configs CASCADE;
 DROP TABLE IF EXISTS subscription_keys CASCADE;
 DROP TABLE IF EXISTS task_results CASCADE;
 DROP TABLE IF EXISTS trading_orders CASCADE;
+DROP TABLE IF EXISTS subscription_tasks CASCADE;
+DROP TABLE IF EXISTS service_heartbeats CASCADE;
 
 -- =============================================================================
 -- 第三部分: 创建表
@@ -75,7 +77,54 @@ CREATE INDEX IF NOT EXISTS idx_realtime_data_subscribers ON realtime_data USING 
 CREATE INDEX IF NOT EXISTS idx_realtime_data_updated ON realtime_data (updated_at DESC);
 
 -- -----------------------------------------------------------------------------
--- 3.2 tasks 任务表
+-- 3.2 service_heartbeats 服务心跳表
+-- 设计: 各应用服务自己定期 UPSERT 心跳，消费者自行通过 last_heartbeat 与 NOW() 比较判断存活
+-- 每个服务只负责自己的心跳行，不做跨服务删除
+-- -----------------------------------------------------------------------------
+CREATE TABLE service_heartbeats (
+    subscriber_id VARCHAR(100) PRIMARY KEY,         -- 服务标识: api-service, signal-service, binance-service, subscription-manager
+    last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -----------------------------------------------------------------------------
+-- 3.3 subscription_tasks 订阅任务表
+-- 设计: 订阅任务队列，INSERT触发subscription_task_new通知，subscription-manager消费
+-- 与 tasks 表模式一致：写入→触发→通知→订阅
+-- -----------------------------------------------------------------------------
+CREATE TABLE subscription_tasks (
+    id BIGSERIAL PRIMARY KEY,
+
+    -- 任务类型: subscribe, unsubscribe, heartbeat
+    type VARCHAR(50) NOT NULL,
+
+    -- 订阅键
+    subscription_key VARCHAR(255),
+
+    -- 数据类型: KLINE, QUOTES, TRADE, USERDATA
+    data_type VARCHAR(50),
+
+    -- 发起订阅者: api-service, signal-service
+    subscriber VARCHAR(100) NOT NULL,
+
+    -- 任务状态: pending, completed, failed
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+
+    -- 额外数据
+    payload JSONB DEFAULT '{}',
+
+    -- 时间戳
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_subscription_tasks_status ON subscription_tasks (status);
+CREATE INDEX IF NOT EXISTS idx_subscription_tasks_type ON subscription_tasks (type);
+CREATE INDEX IF NOT EXISTS idx_subscription_tasks_subscriber ON subscription_tasks (subscriber);
+CREATE INDEX IF NOT EXISTS idx_subscription_tasks_created ON subscription_tasks (created_at DESC);
+
+-- -----------------------------------------------------------------------------
+-- 3.4 tasks 任务表
 -- 设计: 一次性请求任务，INSERT触发task_new，UPDATE status=completed触发task_completed
 -- -----------------------------------------------------------------------------
 CREATE TABLE tasks (
@@ -420,6 +469,26 @@ CREATE INDEX IF NOT EXISTS idx_strategy_signals_computed
 -- =============================================================================
 -- 第四部分: 触发器函数
 -- =============================================================================
+
+-- 订阅任务新建通知: INSERT subscription_tasks 时触发，通知 subscription-manager
+CREATE OR REPLACE FUNCTION notify_subscription_task_new()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_notify('subscription_task_new', jsonb_build_object(
+        'event_id', uuidv7()::TEXT,
+        'event_type', 'subscription_task_new',
+        'timestamp', NOW()::TEXT,
+        'data', jsonb_build_object(
+            'id', NEW.id,
+            'type', NEW.type,
+            'subscription_key', NEW.subscription_key,
+            'data_type', NEW.data_type,
+            'subscriber', NEW.subscriber
+        )
+    )::TEXT);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 -- 任务创建通知：INSERT tasks时触发，通知币安服务有新任务（统一包装格式）
 CREATE OR REPLACE FUNCTION notify_task_new()
@@ -784,6 +853,13 @@ $$ LANGUAGE plpgsql;
 -- 第五部分: 创建触发器
 -- =============================================================================
 
+-- subscription_tasks 触发器
+DROP TRIGGER IF EXISTS trigger_subscription_task_new ON subscription_tasks;
+CREATE TRIGGER trigger_subscription_task_new
+    AFTER INSERT ON subscription_tasks
+    FOR EACH ROW
+    EXECUTE FUNCTION notify_subscription_task_new();
+
 -- tasks 触发器
 DROP TRIGGER IF EXISTS trigger_task_new ON tasks;
 CREATE TRIGGER trigger_task_new
@@ -1004,6 +1080,7 @@ $$ LANGUAGE plpgsql;
 --
 -- | 频道                   | 触发条件                    | 发送者  | 接收者         | 说明                    |
 -- |-----------------------|----------------------------|---------|----------------|-------------------------|
+-- | subscription_task_new  | INSERT subscription_tasks   | 数据库  | subscription-manager | 新订阅任务通知   |
 -- | task_new              | INSERT tasks               | 数据库  | 币安服务       | 新任务通知              |
 -- | task_completed        | UPDATE status=completed    | 数据库  | API网关        | 任务完成通知            |
 -- | subscription_add      | INSERT realtime_data        | 数据库  | 币安服务       | 新增订阅通知            |
@@ -1040,10 +1117,10 @@ BEGIN
     RAISE NOTICE '========================================';
     RAISE NOTICE '数据库初始化完成！';
     RAISE NOTICE '========================================';
-    RAISE NOTICE '表: realtime_data, tasks, klines_history, exchange_info, alert_configs, strategy_signals, order_tasks';
+    RAISE NOTICE '表: realtime_data, service_heartbeats, subscription_tasks, tasks, klines_history, exchange_info, alert_configs, strategy_signals, order_tasks';
     RAISE NOTICE 'Hypertable: 5个表已转换为TimescaleDB Hypertable';
-    RAISE NOTICE '触发器: 12个触发器已创建';
+    RAISE NOTICE '触发器: 13个触发器已创建';
     RAISE NOTICE '保留策略: tasks(7天), realtime_data(1天), strategy_signals(30天), order_tasks(永久)';
-    RAISE NOTICE '通知频道: task_new, task_completed, subscription_add, subscription_remove, subscription_clean, realtime_update, signal_new, alert_config.new, alert_config.update, alert_config.delete';
+    RAISE NOTICE '通知频道: subscription_task_new, task_new, task_completed, subscription_add, subscription_remove, subscription_clean, realtime_update, signal_new, alert_config.new, alert_config.update, alert_config.delete';
     RAISE NOTICE '========================================';
 END $$;

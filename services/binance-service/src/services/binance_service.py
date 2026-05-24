@@ -116,6 +116,7 @@ class BinanceService:
         self._proxy_ws = proxy_ws
 
         self._pool: Optional[asyncpg.Pool] = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
         self._spot_http: Optional[BinanceSpotHTTPClient] = None
         self._futures_http: Optional[BinanceFuturesHTTPClient] = None
         self._spot_private_http: Optional[BinanceSpotPrivateHTTPClient] = None
@@ -155,6 +156,9 @@ class BinanceService:
             min_size=2,
             max_size=10,
         )
+
+        # 启动心跳
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
         # 初始化HTTP客户端
         self._spot_http = BinanceSpotHTTPClient(proxy_url=self._proxy_http)
@@ -409,6 +413,23 @@ class BinanceService:
         if self._futures_private_http:
             await self._futures_private_http.close()
 
+        # 停止心跳并清除心跳记录
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            self._heartbeat_task = None
+            try:
+                async with self._pool.acquire() as conn:
+                    await conn.execute(
+                        "DELETE FROM service_heartbeats WHERE subscriber_id = 'binance-service'"
+                    )
+            except Exception:
+                logger.exception("Failed to delete heartbeat")
+            logger.info("Heartbeat stopped")
+
         # 关闭连接池
         if self._pool:
             await self._pool.close()
@@ -483,6 +504,26 @@ class BinanceService:
                     error_msg = f"ValidationError ({error_count} errors): {error_msg[:500]}..."
                 # result 字段限制在 2000 字符以内
                 await self._tasks_repo.fail(task_id, error_msg[:2000])
+
+    async def _heartbeat_loop(self, interval: int = 10) -> None:
+        """Periodically update binance-service heartbeat in service_heartbeats."""
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                if self._pool:
+                    async with self._pool.acquire() as conn:
+                        await conn.execute(
+                            """
+                            INSERT INTO service_heartbeats (subscriber_id, last_heartbeat)
+                            VALUES ('binance-service', NOW())
+                            ON CONFLICT (subscriber_id)
+                            DO UPDATE SET last_heartbeat = NOW()
+                            """
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Heartbeat update failed")
 
     async def run(self) -> None:
         """运行服务（阻塞）"""

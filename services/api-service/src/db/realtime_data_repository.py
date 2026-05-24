@@ -33,123 +33,73 @@ class RealtimeDataRepository:
         data_type: str,
         subscriber: str = "api-service",
     ) -> bool:
-        """添加订阅键
+        """Publish a subscribe task to subscription_tasks.
 
-        Args:
-            subscription_key: 订阅键
-            data_type: 数据类型 (KLINE, QUOTES, TRADE)
-            subscriber: 订阅源标识
+        The subscription-manager service picks up the task and manages
+        the realtime_data table as the sole write authority.
 
         Returns:
-            是否添加成功（新增 subscriber 返回 True，已存在返回 False）
+            True if task was created successfully.
         """
-        # 使用 ON CONFLICT (subscription_key) 实现 UPSERT
-        # 使用 ARRAY_REMOVE + ARRAY_PREPEND 确保不重复添加 subscriber
         query = """
-            INSERT INTO realtime_data (subscription_key, data_type, data, subscribers)
-            VALUES ($1, $2, '{}'::jsonb, ARRAY[$3])
-            ON CONFLICT (subscription_key)
-            DO UPDATE SET
-                subscribers = ARRAY_PREPEND($3, ARRAY_REMOVE(realtime_data.subscribers, $3))
-            RETURNING (xmax = 0) as is_insert;
+            INSERT INTO subscription_tasks (type, subscription_key, data_type, subscriber)
+            VALUES ('subscribe', $1, $2, $3)
+            RETURNING id
         """
-        try:
-            async with self._pool.acquire() as conn:
-                result = await conn.fetchval(
-                    query, subscription_key, data_type, subscriber
-                )
-            return bool(result)  # True = INSERT (新行), False = UPDATE (已存在)
-        except asyncpg.UniqueViolationError:
-            return False  # 已存在
+        async with self._pool.acquire() as conn:
+            task_id = await conn.fetchval(query, subscription_key, data_type, subscriber)
+        return task_id is not None
 
     async def remove_subscription(
         self,
         subscription_key: str,
         subscriber: str = "api-service",
     ) -> bool:
-        """移除订阅键
+        """Publish an unsubscribe task to subscription_tasks.
 
-        Args:
-            subscription_key: 订阅键
-            subscriber: 订阅源标识
-
-        Returns:
-            是否删除成功
-        """
-        # 先从数组中移除订阅者
-        query = """
-            UPDATE realtime_data
-            SET subscribers = ARRAY_REMOVE(subscribers, $2)
-            WHERE subscription_key = $1
-        """
-        async with self._pool.acquire() as conn:
-            await conn.execute(query, subscription_key, subscriber)
-
-        # 如果订阅者列表为空，则删除该行
-        if not await self.has_subscribers(subscription_key):
-            return await self._delete_by_key(subscription_key)
-        return True
-
-    async def _delete_by_key(self, subscription_key: str) -> bool:
-        """根据订阅键删除数据
-
-        Args:
-            subscription_key: 订阅键
+        The subscription-manager service picks up the task and manages
+        the realtime_data table as the sole write authority.
 
         Returns:
-            是否删除成功
-        """
-        query = "DELETE FROM realtime_data WHERE subscription_key = $1"
-        async with self._pool.acquire() as conn:
-            result: str = await conn.execute(query, subscription_key)
-        return result != "DELETE 0"
-
-    async def has_subscribers(self, subscription_key: str) -> bool:
-        """检查是否还有其他订阅源
-
-        Args:
-            subscription_key: 订阅键
-
-        Returns:
-            是否存在订阅者
+            True if task was created successfully.
         """
         query = """
-            SELECT EXISTS(
-                SELECT 1 FROM realtime_data
-                WHERE subscription_key = $1
-                  AND cardinality(subscribers) > 0
-            )
+            INSERT INTO subscription_tasks (type, subscription_key, subscriber)
+            VALUES ('unsubscribe', $1, $2)
+            RETURNING id
         """
         async with self._pool.acquire() as conn:
-            result = await conn.fetchval(query, subscription_key)
-            return bool(result) if result is not None else False
+            task_id = await conn.fetchval(query, subscription_key, subscriber)
+        return task_id is not None
 
     async def remove_api_service_subscriptions(self) -> int:
-        """清理 api-service 创建的所有订阅（保留其他订阅源的数据）
+        """Publish unsubscribe tasks for all api-service subscriptions.
 
-        对于只有 api-service 的记录，执行 DELETE
-        对于有多个订阅者的记录，从数组中移除 api-service
+        Queries realtime_data for rows where api-service is a subscriber,
+        then creates unsubscribe tasks for each. The subscription-manager
+        will process these and clean up the realtime_data table.
 
         Returns:
-            清理的记录数
+            Number of unsubscribe tasks created.
         """
         async with self._pool.acquire() as conn:
-            # 先从数组中移除 api-service
-            await conn.execute("""
-                UPDATE realtime_data
-                SET subscribers = ARRAY_REMOVE(subscribers, 'api-service')
+            rows = await conn.fetch(
+                """
+                SELECT subscription_key FROM realtime_data
                 WHERE 'api-service' = ANY(subscribers)
-            """)
-
-            # 删除 subscribers 为空或只有 api-service 的记录
-            rows = await conn.fetch("""
-                DELETE FROM realtime_data
-                WHERE subscribers IS NULL
-                   OR subscribers = '{}'
-                   OR subscribers = ARRAY['api-service']
-                RETURNING id
-            """)
-            return len(rows)
+                """
+            )
+            count = 0
+            for row in rows:
+                await conn.execute(
+                    """
+                    INSERT INTO subscription_tasks (type, subscription_key, subscriber)
+                    VALUES ('unsubscribe', $1, 'api-service')
+                    """,
+                    row["subscription_key"],
+                )
+                count += 1
+            return count
 
     async def get_all_subscriptions(self) -> list[dict[str, Any]]:
         """获取所有订阅

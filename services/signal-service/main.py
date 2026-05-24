@@ -57,6 +57,26 @@ def get_db_password() -> str:
     return os.environ.get("DATABASE_PASSWORD", "pass")
 
 
+async def _heartbeat_loop(db: Database, interval: int = 10) -> None:
+    """Periodically update signal-service heartbeat in service_heartbeats."""
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            async with db.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO service_heartbeats (subscriber_id, last_heartbeat)
+                    VALUES ('signal-service', NOW())
+                    ON CONFLICT (subscriber_id)
+                    DO UPDATE SET last_heartbeat = NOW()
+                    """
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Heartbeat update failed")
+
+
 async def main() -> None:
     """Main entry point for signal service."""
     logger.info("Starting Signal Service")
@@ -102,8 +122,27 @@ async def main() -> None:
     # Start the service
     await signal_service.start()
 
+    # Start heartbeat
+    heartbeat_task = asyncio.create_task(_heartbeat_loop(db))
+    logger.info("Heartbeat started")
+
     # Wait for shutdown
     await shutdown_event.wait()
+
+    # Stop heartbeat and delete heartbeat record
+    heartbeat_task.cancel()
+    try:
+        await heartbeat_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        async with db.pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM service_heartbeats WHERE subscriber_id = 'signal-service'"
+            )
+    except Exception:
+        logger.exception("Failed to delete heartbeat")
+    logger.info("Heartbeat stopped")
 
     # Stop the service
     await signal_service.stop()

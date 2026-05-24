@@ -847,11 +847,13 @@ class WSSubscriptionManager:
                 )
 
     async def _handle_clean_all(self) -> None:
-        """处理 clean_all 通知：触发WS客户端重连并恢复订阅"""
-        logger.info("收到 clean_all 通知，WS客户端将重连")
-        for client in self._ws_clients.values():
-            await client.disconnect()
-        # 重连后恢复所有订阅
+        """处理 clean_all 通知：执行全量同步恢复订阅。
+
+        clean_all 表示 realtime_data 表已被清空并重建（如 subscription-manager
+        重启时的状态核对）。直接调用 full_sync() 从数据库读取当前订阅并重新执行，
+        不调用 disconnect()，因为那会设置 _running=False 永久阻塞客户端恢复。
+        """
+        logger.info("收到 clean_all 通知，执行全量同步恢复订阅")
         await self.full_sync()
 
     async def full_sync(self) -> None:

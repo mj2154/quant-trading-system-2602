@@ -8,9 +8,11 @@ API 网关服务主入口
 - 任务管理: tasks表机制
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+import asyncpg
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -46,6 +48,7 @@ _order_tasks_repo: OrderTasksRepository | None = None
 _strategy_signals_repo: StrategySignalsRepository | None = None
 _strategy_metadata_repo: StrategyMetadataRepository | None = None
 _alert_repo: AlertConfigRepository | None = None
+_heartbeat_task: asyncio.Task[None] | None = None
 
 
 async def _create_initial_tasks(tasks_repo: TasksRepository) -> None:
@@ -78,6 +81,26 @@ async def _create_initial_tasks(tasks_repo: TasksRepository) -> None:
         logger.error(f"创建初始任务失败: {e}", exc_info=True)
 
 
+async def _heartbeat_loop(pool: asyncpg.Pool, interval: int = 10) -> None:
+    """Periodically update api-service heartbeat in service_heartbeats."""
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO service_heartbeats (subscriber_id, last_heartbeat)
+                    VALUES ('api-service', NOW())
+                    ON CONFLICT (subscriber_id)
+                    DO UPDATE SET last_heartbeat = NOW()
+                    """
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Heartbeat update failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理
@@ -89,6 +112,7 @@ async def lifespan(app: FastAPI):
     global _data_processor
     global _tasks_repo, _order_tasks_repo
     global _strategy_signals_repo, _alert_repo
+    global _heartbeat_task
 
     # 启动阶段
     logger.info("Starting API Gateway...")
@@ -168,6 +192,10 @@ async def lifespan(app: FastAPI):
     await _data_processor.start()
     logger.info("DataProcessor started (unified data processing center)")
 
+    # 7. 启动心跳，通知 subscription-manager api-service 存活
+    _heartbeat_task = asyncio.create_task(_heartbeat_loop(pool))
+    logger.info("Heartbeat started")
+
     # 9. 创建启动时初始任务
     await _create_initial_tasks(_tasks_repo)
     logger.info("Initial tasks created")
@@ -178,6 +206,23 @@ async def lifespan(app: FastAPI):
 
     # 关闭阶段
     logger.info("Shutting down API Gateway...")
+
+    # 0. 停止心跳并清除心跳记录
+    if _heartbeat_task:
+        _heartbeat_task.cancel()
+        try:
+            await _heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        _heartbeat_task = None
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM service_heartbeats WHERE subscriber_id = 'api-service'"
+                )
+        except Exception:
+            logger.exception("Failed to delete heartbeat")
+        logger.info("Heartbeat stopped")
 
     # 1. 停止订阅管理器
     if _subscription_manager:

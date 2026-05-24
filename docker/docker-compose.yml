@@ -79,6 +79,31 @@ services:
   #     timescale-db:
   #       condition: service_healthy
 
+  # 订阅管理服务
+  subscription-manager:
+    build:
+      context: ../services/subscription-manager
+      dockerfile: Dockerfile
+    image: subscription-manager:latest
+    container_name: subscription-manager
+    volumes:
+      - ../services/subscription-manager/src:/app/src
+      - ../services/subscription-manager/pyproject.toml:/app/pyproject.toml
+      - ../services/subscription-manager/main.py:/app/main.py
+
+    environment:
+      - DATABASE_HOST=timescale-db
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=trading_db
+      - DATABASE_USER=dbuser
+      - DATABASE_PASSWORD=pass
+      - TZ=Asia/Shanghai
+      - LOG_LEVEL=INFO
+    depends_on:
+      timescale-db:
+        condition: service_healthy
+    command: uv run python main.py
+
   # API服务（统一管理器）
   api-service:
     build:
