@@ -10,6 +10,8 @@
 |------|------|
 | [架构设计](design/ARCHITECTURE.md) | 前端技术栈、进程架构、核心组件结构 |
 | [交易功能设计](design/TRADING.md) | 交易功能设计、WebSocket通信、组件结构 |
+| [现货交易页面设计](design/SPOT_TRADING_PAGE_DESIGN.md) | 现货交易页面架构与功能设计 |
+| [币安期货UI分析](design/BINANCE_FUTURES_UI_ANALYSIS.md) | 币安期货界面参考分析 |
 
 ### 指南
 

@@ -162,11 +162,17 @@ class BaseWSClient:
     async def subscribe(self, request: WSSubscribeRequest) -> None:
         """订阅流
 
+        仅在已连接时发送订阅。不自动连接——重连由 _try_reconnect 统一管理，
+        避免 subscribe() 的自动连接与 _try_reconnect() 竞争修改 self._websocket。
+
         Args:
             request: 订阅请求模型
         """
         if not self._state.connected:
-            await self.connect()
+            logger.warning(
+                f"[{self.CLIENT_ID}] 未连接，无法订阅: {request.params}"
+            )
+            return
 
         await self._send(request.model_dump(by_alias=True))
 
@@ -336,8 +342,15 @@ class BaseWSClient:
 
     async def _send(self, message: dict) -> None:
         """发送消息"""
-        if self._websocket and self._state.connected:
-            try:
-                await self._websocket.send(json.dumps(message))
-            except Exception as e:
-                logger.error(f"[{self.CLIENT_ID}] 发送消息失败: {e}")
+        if not self._websocket or not self._state.connected:
+            logger.warning(
+                f"[{self.CLIENT_ID}] 无法发送消息: "
+                f"websocket={self._websocket is not None}, "
+                f"connected={self._state.connected}"
+            )
+            return
+
+        try:
+            await self._websocket.send(json.dumps(message))
+        except Exception as e:
+            logger.error(f"[{self.CLIENT_ID}] 发送消息失败: {e}")

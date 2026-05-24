@@ -35,6 +35,8 @@
 | `design/07b-websocket-errorcodes.md` | WebSocket 错误码定义 |
 | `design/07c-websocket-changelog.md` | WebSocket 协议变更日志 |
 | `design/08-api-models.md` | API 数据模型定义 |
+| `design/09-binance-models.md` | 币安数据模型映射 |
+| `design/REFORM_REQUIREMENT_WS_DATA_MODEL.md` | WebSocket数据模型改造需求 |
 
 ### 数据库设计
 
@@ -48,6 +50,7 @@
 |------|------|
 | `implementation/REPORT-api-service-models-refactor.md` | API服务模型重构报告 |
 | `implementation/REPORT-binance-service-models-refactor.md` | 币安服务模型重构报告 |
+| `design/VERIFICATION_REPORT_USER_STREAM.md` | 用户数据流验证报告 |
 
 ## 目录结构
 
@@ -69,6 +72,9 @@ docs/backend/
 │   ├── 07b-websocket-errorcodes.md # WebSocket错误码
 │   ├── 07c-websocket-changelog.md # WebSocket变更日志
 │   ├── 08-api-models.md           # API模型
+│   ├── 09-binance-models.md       # 币安数据模型
+│   ├── REFORM_REQUIREMENT_WS_DATA_MODEL.md  # WS数据模型改造
+│   ├── VERIFICATION_REPORT_USER_STREAM.md   # 用户数据流验证
 │   └── backup/                    # 历史版本备份
 ├── database/                       # 数据库设计
 │   └── Kline-Table-Event-Optimization.md

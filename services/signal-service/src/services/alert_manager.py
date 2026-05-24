@@ -167,12 +167,10 @@ class AlertLifecycleManager:
         if alert.is_enabled:
             if old_subscription_key and old_subscription_key != subscription_key:
                 await self.cleanup_subscription_if_unused(old_subscription_key)
-            existing = await self._realtime_repo.get_by_subscription_key(subscription_key)
-            if existing is None:
-                await self._realtime_repo.insert_subscription(
-                    subscription_key=subscription_key, data_type="KLINE",
-                )
-                logger.info("[ALERT_UPDATE] Created subscription: %s", subscription_key)
+            await self._realtime_repo.insert_subscription(
+                subscription_key=subscription_key, data_type="KLINE",
+            )
+            logger.info("[ALERT_UPDATE] Ensured subscription: %s", subscription_key)
         else:
             await self.cleanup_subscription_if_unused(subscription_key)
 
@@ -327,15 +325,13 @@ class AlertLifecycleManager:
                 loaded_alert.symbol, loaded_alert.interval,
             )
 
-            existing = await self._realtime_repo.get_by_subscription_key(subscription_key)
-            if existing is None:
-                await self._realtime_repo.insert_subscription(
-                    subscription_key=subscription_key, data_type="KLINE",
-                )
-                logger.info(
-                    "Created subscription: subscription_key=%s alert=%s",
-                    subscription_key, loaded_alert.name,
-                )
+            await self._realtime_repo.insert_subscription(
+                subscription_key=subscription_key, data_type="KLINE",
+            )
+            logger.info(
+                "Ensured subscription: subscription_key=%s alert=%s",
+                subscription_key, loaded_alert.name,
+            )
 
             if subscription_key not in processed_keys:
                 await kline_init_callback(subscription_key)

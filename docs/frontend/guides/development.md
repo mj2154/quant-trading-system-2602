@@ -24,6 +24,8 @@ cnpm add <package-name>
 | `npm run dev` | 启动开发服务器，支持热模块替换。运行在 http://127.0.0.1:5173 |
 | `npm run build` | 完整生产构建，运行 TypeScript 类型检查，构建 Vue/Vite 前端和 Electron 主进程 |
 | `npm run preview` | 在本地服务生产构建版本，用于分发前测试 |
+| `npm run test` | 运行 vitest 测试套件 |
+| `npm run test:watch` | 以 watch 模式运行 vitest |
 
 ### 构建流程
 
