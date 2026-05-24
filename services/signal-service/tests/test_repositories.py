@@ -1,9 +1,10 @@
 """Tests for repository modules."""
 
-import pytest
-from datetime import datetime, timezone
-from uuid import uuid4, UUID
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
 
 
 class TestRealtimeDataRepository:
@@ -187,7 +188,7 @@ class TestStrategyConfigRepository:
     async def test_find_by_id(self, repository, mock_db):
         """Test finding a configuration by ID."""
         config_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_db.fetchrow = AsyncMock(
             return_value={
                 "id": config_id,
@@ -225,7 +226,7 @@ class TestStrategyConfigRepository:
     async def test_find_all(self, repository, mock_db):
         """Test finding all configurations."""
         config_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_db.fetch = AsyncMock(
             return_value=[
                 {
@@ -263,7 +264,7 @@ class TestStrategyConfigRepository:
     async def test_find_by_symbol(self, repository, mock_db):
         """Test finding configurations by symbol."""
         config_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_db.fetch = AsyncMock(
             return_value=[
                 {
@@ -292,7 +293,7 @@ class TestStrategyConfigRepository:
     async def test_find_enabled(self, repository, mock_db):
         """Test finding enabled configurations."""
         config_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_db.fetch = AsyncMock(
             return_value=[
                 {
@@ -383,7 +384,7 @@ class TestStrategySignalsRepository:
     async def test_get_latest_by_symbol(self, repository, mock_db):
         """Test getting latest signals by symbol."""
         signal_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_db.fetch = AsyncMock(
             return_value=[
                 {
@@ -421,7 +422,7 @@ class TestStrategySignalsRepository:
     async def test_get_latest_by_strategy(self, repository, mock_db):
         """Test getting latest signals by strategy name."""
         signal_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_db.fetch = AsyncMock(
             return_value=[
                 {
@@ -451,7 +452,7 @@ class TestStrategySignalsRepository:
         """Test getting latest signals by config ID."""
         config_id = uuid4()
         signal_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_db.fetch = AsyncMock(
             return_value=[
                 {
@@ -480,7 +481,7 @@ class TestStrategySignalsRepository:
     async def test_get_latest_by_symbol_and_interval(self, repository, mock_db):
         """Test getting latest signals by symbol and interval."""
         signal_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_db.fetch = AsyncMock(
             return_value=[
                 {
@@ -509,7 +510,7 @@ class TestStrategySignalsRepository:
     async def test_get_by_time_range(self, repository, mock_db):
         """Test getting signals by time range."""
         signal_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start_time = now.replace(hour=0, minute=0, second=0)
         end_time = now.replace(hour=23, minute=59, second=59)
         mock_db.fetch = AsyncMock(
@@ -539,7 +540,7 @@ class TestStrategySignalsRepository:
     async def test_get_by_time_range_with_filters(self, repository, mock_db):
         """Test getting signals by time range with symbol and strategy filters."""
         signal_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start_time = now.replace(hour=0, minute=0, second=0)
         end_time = now.replace(hour=23, minute=59, second=59)
         mock_db.fetch = AsyncMock(return_value=[])

@@ -1,8 +1,14 @@
 """K-line validation utilities."""
 from typing import Any
 
+import pandas as pd
+
 from .constants import REQUIRED_KLINES
-from .kline_utils import _get_interval_ms, _get_previous_period_time
+from .kline_utils import (
+    _convert_time_to_ms,
+    _get_interval_ms,
+    _get_previous_period_time,
+)
 
 
 def _check_kline_continuity(history: list[dict[str, Any]], interval: str) -> bool:
@@ -109,5 +115,69 @@ def _check_kline_data_validity(
 
     # Note: Time correctness check removed - handled at runtime via realtime update
     # This prevents infinite retry loops when network is unavailable during startup
+
+    return True, "ok"
+
+
+def _validate_cache_for_kline_close(
+    cached_klines: pd.DataFrame,
+    kline_data: dict[str, Any],
+) -> tuple[bool, str]:
+    """验证缓存是否包含正确的完结K线.
+
+    Args:
+        cached_klines: 缓存的K线DataFrame
+        kline_data: 收到的实时K线数据
+
+    Returns:
+        (is_valid, reason) - reason 包含详细差异信息
+    """
+    if cached_klines.empty:
+        return False, "cache_empty"
+
+    cached_last_time = cached_klines.iloc[-1]["time"]
+    received_time = kline_data.get("k", {}).get("t")
+
+    if received_time is None:
+        return False, "received_time_missing"
+
+    cached_ms = _convert_time_to_ms(cached_last_time)
+    received_ms = int(received_time)
+
+    if cached_ms != received_ms:
+        return False, f"time_mismatch:cached={cached_ms},received={received_ms},diff={abs(cached_ms - received_ms)}ms"
+
+    return True, "ok"
+
+
+def _check_kline_continuity_in_dataframe(
+    df: pd.DataFrame,
+    interval_ms: int,
+) -> tuple[bool, str]:
+    """检查DataFrame中的K线时间连续性.
+
+    Args:
+        df: K线DataFrame
+        interval_ms: 间隔毫秒数
+
+    Returns:
+        (is_valid, reason)
+    """
+    if len(df) < 2:
+        return True, "ok"
+
+    for i in range(1, len(df)):
+        prev_time = df.iloc[i-1]["time"]
+        curr_time = df.iloc[i]["time"]
+
+        prev_ms = _convert_time_to_ms(prev_time)
+        curr_ms = _convert_time_to_ms(curr_time)
+
+        if prev_ms is None or curr_ms is None:
+            continue
+
+        diff = curr_ms - prev_ms
+        if abs(diff - interval_ms) > 1000:  # 1秒容差
+            return False, f"gap_at_index={i},prev={prev_ms},curr={curr_ms},expected_diff={interval_ms}ms"
 
     return True, "ok"

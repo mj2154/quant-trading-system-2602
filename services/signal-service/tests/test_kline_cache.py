@@ -7,16 +7,15 @@ Tests cover:
 4. Previous period time calculation
 """
 
-import pytest
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
-from src.services.signal_service import (
+from src.services.constants import REQUIRED_KLINES
+from src.services.kline_utils import _get_previous_period_time
+from src.services.kline_validator import (
     _check_kline_continuity,
-    _check_last_kline_time,
     _check_kline_data_validity,
-    _get_previous_period_time,
-    REQUIRED_KLINES,
+    _check_last_kline_time,
 )
 
 
@@ -177,7 +176,7 @@ class TestCheckKlineDataValidity:
         # Create datetime objects
         base_dt = datetime.fromtimestamp(
             (previous_period - (REQUIRED_KLINES - 1) * 60 * 60 * 1000) / 1000,
-            tz=timezone.utc
+            tz=UTC
         )
 
         history = [
@@ -195,5 +194,5 @@ class TestRequiredKlines:
     """Tests for REQUIRED_KLINES constant."""
 
     def test_required_klines_value(self):
-        """REQUIRED_KLINES should be 280."""
-        assert REQUIRED_KLINES == 280
+        """REQUIRED_KLINES should be 350."""
+        assert REQUIRED_KLINES == 350

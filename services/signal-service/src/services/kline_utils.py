@@ -48,90 +48,13 @@ def _format_kline_time(time_value: Any) -> str:
     return str(time_value)
 
 
-def _convert_klines_to_dataframe(
-    klines: list[dict[str, Any]],
-) -> pd.DataFrame:
-    """Convert klines list to DataFrame.
+def _build_ohlcv_for_trigger_type(history: pd.DataFrame) -> pd.DataFrame:
+    """Return cached history as-is for strategy calculation.
 
-    Args:
-        klines: List of kline dictionaries with 'o', 'h', 'l', 'c', 'v' keys.
-
-    Returns:
-        DataFrame with open, high, low, close, volume columns.
+    Cache is always updated before this function is called, so no additional
+    processing is needed.
     """
-    if not klines:
-        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
-
-    # Convert to DataFrame
-    df = pd.DataFrame(klines)
-
-    # Rename columns to standard format
-    column_mapping = {
-        "o": "open",
-        "h": "high",
-        "l": "low",
-        "c": "close",
-        "v": "volume",
-    }
-    df = df.rename(columns=column_mapping)
-
-    # Keep only required columns
-    required_cols = ["open", "high", "low", "close", "volume"]
-    df = df[[col for col in required_cols if col in df.columns]]
-
-    # Convert to numeric
-    for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    return df
-
-
-def _build_ohlcv_for_trigger_type(
-    history: pd.DataFrame,
-    current_kline: dict[str, Any] | None,
-    trigger_type: str,
-) -> pd.DataFrame:
-    """Build ohlcv DataFrame based on trigger type.
-
-    Note: Cache already contains the latest kline (updated in _update_kline_cache).
-    This function just returns the cache as-is.
-
-    Args:
-        history: Historical klines as DataFrame (already contains latest kline).
-        current_kline: Current realtime kline data (unused, cache has it).
-        trigger_type: Trigger type (each_kline_close, each_kline, each_minute).
-
-    Returns:
-        DataFrame ready for strategy calculation.
-    """
-    # Cache already contains the latest data, just return it
     return history.copy()
-
-
-def _convert_binance_kline_to_standard(kline_data: dict[str, Any]) -> dict[str, Any]:
-    """Convert Binance kline format to standard format.
-
-    Binance format: {"e": "kline", "k": {"o": "...", "h": "...", "l": "...", "c": "...", "v": "...", "t": ...}, "s": "BTCUSDT"}
-    Standard format: {"o": "...", "h": "...", "l": "...", "c": "...", "v": "...", "t": ...}
-
-    Args:
-        kline_data: Binance format kline data.
-
-    Returns:
-        Standard format kline data with time field preserved.
-    """
-    if "k" in kline_data:
-        k = kline_data["k"]
-        return {
-            "o": k.get("o"),
-            "h": k.get("h"),
-            "l": k.get("l"),
-            "c": k.get("c"),
-            "v": k.get("v"),
-            "t": k.get("t"),  # Preserve open time timestamp (milliseconds)
-            "ot": k.get("t"),  # Alias for open_time (for consistency with DB format)
-        }
-    return kline_data
 
 
 def _get_interval_ms(interval: str) -> int:
@@ -144,6 +67,15 @@ def _get_interval_ms(interval: str) -> int:
         Interval in milliseconds.
     """
     return TV_INTERVAL_TO_MS.get(interval, 60 * 60 * 1000)
+
+
+def _convert_time_to_ms(time_value: Any) -> int | None:
+    """Convert time value to milliseconds integer for comparison."""
+    if time_value is None:
+        return None
+    if hasattr(time_value, 'timestamp'):
+        return int(time_value.timestamp() * 1000)
+    return int(time_value)
 
 
 def _get_previous_period_time(interval: str) -> int:

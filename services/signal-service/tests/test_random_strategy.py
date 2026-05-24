@@ -1,8 +1,6 @@
 """Tests for RandomStrategy."""
 
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from datetime import UTC, datetime
 
 from src.strategies.base import StrategyInput, StrategyOutput
 from src.strategies.random_strategy import RandomStrategy
@@ -10,7 +8,7 @@ from src.strategies.random_strategy import RandomStrategy
 
 def _utcnow() -> datetime:
     """Get current UTC time in timezone-aware format."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def test_random_strategy_name() -> None:

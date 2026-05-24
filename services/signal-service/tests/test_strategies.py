@@ -1,8 +1,6 @@
 """Tests for strategy base module."""
 
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from datetime import UTC, datetime
 
 from src.strategies.base import Strategy, StrategyInput, StrategyOutput
 
@@ -28,7 +26,7 @@ def test_strategy_input_creation() -> None:
         interval="1",
         kline_data={"close": 50000.0},
         subscription_key="BINANCE:BTCUSDT@KLINE_1",
-        computed_at=datetime.now(timezone.utc),
+        computed_at=datetime.now(UTC),
     )
 
     assert input_data.symbol == "BINANCE:BTCUSDT"
@@ -68,7 +66,7 @@ def test_strategy_implementation() -> None:
         interval="1",
         kline_data={"close": 50000.0},
         subscription_key="BINANCE:BTCUSDT@KLINE_1",
-        computed_at=datetime.now(timezone.utc),
+        computed_at=datetime.now(UTC),
     )
 
     output = strategy.calculate(input_data)

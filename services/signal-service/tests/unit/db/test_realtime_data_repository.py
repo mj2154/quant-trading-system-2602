@@ -4,11 +4,12 @@
 验证 signal-service 的订阅操作正确维护 realtime_data 表。
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 
-from src.db.realtime_data_repository import RealtimeDataRepository, RealtimeDataRecord
+import pytest
+
+from src.db.realtime_data_repository import RealtimeDataRepository
 
 
 class TestRealtimeDataRepositoryInsertSubscription:

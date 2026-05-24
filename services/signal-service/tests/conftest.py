@@ -1,8 +1,10 @@
 """pytest configuration for signal service tests."""
 
-import pytest
 import sys
+from datetime import UTC
 from pathlib import Path
+
+import pytest
 
 # Add src directory to path
 src_path = Path(__file__).parent / "src"
@@ -13,7 +15,8 @@ if str(src_path) not in sys.path:
 @pytest.fixture
 def sample_strategy_input():
     """Sample strategy input for testing."""
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from src.strategies.base import StrategyInput
 
     return StrategyInput(
@@ -28,14 +31,15 @@ def sample_strategy_input():
             "volume": 125.4321,
         },
         subscription_key="BINANCE:BTCUSDT@KLINE_1",
-        computed_at=datetime.now(timezone.utc),
+        computed_at=datetime.now(UTC),
     )
 
 
 @pytest.fixture
 def mock_db():
     """Mock database for testing."""
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
+
     from src.db.database import Database
 
     db = MagicMock(spec=Database)

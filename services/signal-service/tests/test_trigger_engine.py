@@ -1,22 +1,20 @@
 """Tests for trigger engine."""
 
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime, timezone
-from unittest.mock import MagicMock
 
 from src.services.trigger_engine import (
+    TRIGGER_ENGINES,
+    EachKlineCloseTrigger,
+    EachKlineTrigger,
+    EachMinuteTrigger,
+    OnceOnlyTrigger,
     TriggerState,
     TriggerType,
-    TriggerEngine,
-    OnceOnlyTrigger,
-    EachKlineTrigger,
-    EachKlineCloseTrigger,
-    EachMinuteTrigger,
-    get_trigger_engine,
     create_trigger_state,
-    TRIGGER_ENGINES,
+    get_trigger_engine,
 )
-
 
 # ============================================================================
 # Helper Functions
@@ -44,7 +42,7 @@ def make_kline_data(
 
 def make_time(hour: int, minute: int = 0, second: int = 0) -> datetime:
     """Create a datetime for testing."""
-    return datetime(2024, 1, 15, hour, minute, second, tzinfo=timezone.utc)
+    return datetime(2024, 1, 15, hour, minute, second, tzinfo=UTC)
 
 
 # ============================================================================
@@ -329,7 +327,7 @@ class TestTriggerEngineRegistry:
 
     def test_create_trigger_state(self) -> None:
         """Test creating trigger state."""
-        state = create_trigger_state(TriggerType.ONCE_ONLY)
+        state = create_trigger_state()
         assert isinstance(state, TriggerState)
         assert state.executed is False
 

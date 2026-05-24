@@ -1,9 +1,7 @@
 """Tests for EMA and MACD indicators."""
 
-import pytest
 
 from src.indicators.ema import (
-    EmaResult,
     calculate_ema,
     calculate_ema_latest,
 )
@@ -11,10 +9,9 @@ from src.indicators.macd import (
     MacdResult,
     calculate_macd,
     get_macd_signal,
-    is_golden_cross,
     is_death_cross,
+    is_golden_cross,
 )
-
 
 # ============================================================================
 # EMA Tests

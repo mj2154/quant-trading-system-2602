@@ -6,25 +6,6 @@ REQUIRED_KLINES = 350
 # Retry delay in seconds for kline fill loop
 RETRY_DELAY_SECONDS = 2
 
-# TV resolution to Binance interval format mapping
-TV_TO_BINANCE_INTERVAL = {
-    "1": "1m",
-    "3": "3m",
-    "5": "5m",
-    "15": "15m",
-    "30": "30m",
-    "45": "45m",
-    "60": "1h",
-    "120": "2h",
-    "180": "3h",
-    "240": "4h",
-    "360": "6h",
-    "720": "12h",
-    "D": "1d",
-    "W": "1w",
-    "M": "1M",
-}
-
 # TV interval to milliseconds mapping
 TV_INTERVAL_TO_MS = {
     "1": 1 * 60 * 1000,

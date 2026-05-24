@@ -11,7 +11,7 @@ concurrent kline fill operations on the same subscription key.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

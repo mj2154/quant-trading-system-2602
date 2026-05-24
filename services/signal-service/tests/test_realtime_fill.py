@@ -7,11 +7,12 @@ Tests cover:
 4. Abnormal case (other gap values): trigger fill
 """
 
-import pytest
-import pandas as pd
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-from src.services.signal_service import SignalService, TV_INTERVAL_TO_MS
+import pandas as pd
+import pytest
+
+from src.services.signal_service import TV_INTERVAL_TO_MS, SignalService
 
 
 class TestRealtimeContinuityDetection:
@@ -255,7 +256,7 @@ class TestRealtimeFillIntegration:
         ])
 
         # Mock _fill_kline_data
-        service._fill_kline_data = AsyncMock()
+        service._kline_mgr.fill_kline_data = AsyncMock()
 
         # Simulate gap > 1.5 * interval_ms
         interval = "1"
@@ -280,7 +281,7 @@ class TestRealtimeFillIntegration:
         ])
 
         # Mock _fill_kline_data
-        service._fill_kline_data = AsyncMock()
+        service._kline_mgr.fill_kline_data = AsyncMock()
 
         # Simulate gap == 0 (update existing)
         new_time = base_time

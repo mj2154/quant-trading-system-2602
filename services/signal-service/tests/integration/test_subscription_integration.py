@@ -5,14 +5,13 @@
 需要在运行 Docker 数据库的环境中执行。
 """
 
-import pytest
 import asyncio
-import asyncpg
 import os
-from datetime import datetime
+
+import asyncpg
+import pytest
 
 from src.db.realtime_data_repository import RealtimeDataRepository
-
 
 # 数据库连接配置
 DB_CONFIG = {
@@ -154,7 +153,9 @@ class TestSignalServiceAndApiServiceCoexistence:
     @pytest.mark.asyncio
     async def test_both_services_can_subscribe(self, pool, repository, clean_db):
         """测试两个服务都可以订阅同一键"""
-        from src.db.realtime_data_repository import RealtimeDataRepository as ApiRealtimeDataRepository
+        from src.db.realtime_data_repository import (
+            RealtimeDataRepository as ApiRealtimeDataRepository,
+        )
 
         api_repository = ApiRealtimeDataRepository(pool)
 

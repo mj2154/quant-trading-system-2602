@@ -6,12 +6,13 @@ Tests the complete fill loop including:
 3. Success and failure scenarios
 """
 
-import pytest
-import asyncio
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone, timedelta
 
-from src.services.signal_service import SignalService, REQUIRED_KLINES
+import pytest
+
+from src.services.kline_manager import KlineCacheManager
+from src.services.signal_service import REQUIRED_KLINES, SignalService
 
 
 class TestKlineFillLoop:
@@ -49,7 +50,7 @@ class TestKlineFillLoop:
                 return []
             else:
                 # Subsequent calls: return valid data
-                previous_period = int(datetime.now(timezone.utc).timestamp() * 1000)
+                previous_period = int(datetime.now(UTC).timestamp() * 1000)
                 previous_period = (previous_period // (60 * 60 * 1000)) * (60 * 60 * 1000) - (60 * 60 * 1000)
                 base_time = previous_period - (REQUIRED_KLINES - 1) * 60 * 60 * 1000
                 return [
@@ -76,6 +77,9 @@ class TestKlineFillLoop:
         service._realtime_repo = mock_realtime_repo
         service._tasks_repo = mock_tasks_repo
         service._kline_cache = {}
+        service._kline_mgr = KlineCacheManager(
+            mock_db, mock_realtime_repo, mock_tasks_repo, service._kline_cache,
+        )
         return service
 
     @pytest.mark.asyncio
@@ -85,11 +89,11 @@ class TestKlineFillLoop:
         mock_db.create_dedicated_connection.reset_mock()
         mock_db.close_dedicated_connection.reset_mock()
 
-        async def mock_wait(conn, task_id, timeout):
+        async def mock_wait(db, tasks_repo, task_id, timeout, conn=None):
             return "completed"
 
-        with patch.object(signal_service, "_wait_for_task_completion_with_conn", mock_wait):
-            await signal_service._fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
+        with patch("src.services.kline_manager._wait_for_task_completion", mock_wait):
+            await signal_service._kline_mgr.fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
 
         # Should create connection once per fill loop call
         assert mock_db.create_dedicated_connection.call_count == 1
@@ -109,7 +113,7 @@ class TestKlineFillLoop:
 
         call_count = {"count": 0}
 
-        async def mock_wait(conn, task_id, timeout):
+        async def mock_wait(db, tasks_repo, task_id, timeout, conn=None):
             call_count["count"] += 1
             if call_count["count"] < 3:
                 # First two attempts fail
@@ -118,8 +122,8 @@ class TestKlineFillLoop:
                 # Third attempt succeeds
                 return "completed"
 
-        with patch.object(signal_service, "_wait_for_task_completion_with_conn", mock_wait):
-            await signal_service._fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
+        with patch("src.services.kline_manager._wait_for_task_completion", mock_wait):
+            await signal_service._kline_mgr.fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
 
         # Should have retried multiple times
         assert call_count["count"] >= 3
@@ -136,7 +140,7 @@ class TestKlineFillLoop:
 
         call_count = {"count": 0}
 
-        async def mock_wait(conn, task_id, timeout):
+        async def mock_wait(db, tasks_repo, task_id, timeout, conn=None):
             call_count["count"] += 1
             if call_count["count"] < 2:
                 # First attempt times out
@@ -145,8 +149,8 @@ class TestKlineFillLoop:
                 # Second attempt succeeds
                 return "completed"
 
-        with patch.object(signal_service, "_wait_for_task_completion_with_conn", mock_wait):
-            await signal_service._fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
+        with patch("src.services.kline_manager._wait_for_task_completion", mock_wait):
+            await signal_service._kline_mgr.fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
 
         # Should have retried
         assert call_count["count"] >= 2
@@ -158,11 +162,11 @@ class TestKlineFillLoop:
         mock_db.create_dedicated_connection.reset_mock()
         mock_db.close_dedicated_connection.reset_mock()
 
-        async def mock_wait(conn, task_id, timeout):
+        async def mock_wait(db, tasks_repo, task_id, timeout, conn=None):
             return "completed"
 
-        with patch.object(signal_service, "_wait_for_task_completion_with_conn", mock_wait):
-            await signal_service._fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
+        with patch("src.services.kline_manager._wait_for_task_completion", mock_wait):
+            await signal_service._kline_mgr.fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
 
         # Verify task was created with correct payload
         mock_tasks_repo.create_task.assert_called_once()
@@ -180,12 +184,12 @@ class TestKlineFillLoop:
         mock_db.create_dedicated_connection.reset_mock()
         mock_db.close_dedicated_connection.reset_mock()
 
-        async def mock_wait(conn, task_id, timeout):
+        async def mock_wait(db, tasks_repo, task_id, timeout, conn=None):
             raise Exception("Test error")
 
         with pytest.raises(Exception):
-            with patch.object(signal_service, "_wait_for_task_completion_with_conn", mock_wait):
-                await signal_service._fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
+            with patch("src.services.kline_manager._wait_for_task_completion", mock_wait):
+                await signal_service._kline_mgr.fill_kline_data("BINANCE:BTCUSDT@KLINE_60", "BTCUSDT", "60")
 
         # Connection should still be closed
         assert mock_db.close_dedicated_connection.call_count == 1

@@ -277,13 +277,5 @@ def get_trigger_engine(trigger_type: str | TriggerType) -> TriggerEngine:
     return engine
 
 
-def create_trigger_state(trigger_type: str | TriggerType) -> TriggerState:
-    """Create initial trigger state for a trigger type.
-
-    Args:
-        trigger_type: Trigger type.
-
-    Returns:
-        Initial TriggerState.
-    """
+def create_trigger_state() -> TriggerState:
     return TriggerState()
