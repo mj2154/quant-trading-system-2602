@@ -42,7 +42,7 @@ class BinanceHTTPClient:
         """异步上下文管理器入口"""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, _exc_type, _exc_val, _exc_tb) -> None:
         """异步上下文管理器退出"""
         await self.close()
 

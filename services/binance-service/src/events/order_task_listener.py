@@ -128,7 +128,7 @@ class OrderTaskListener:
 
     def _notify_handler(
         self,
-        connection: asyncpg.Connection,
+        _connection: asyncpg.Connection,
         pid: int,
         channel: str,
         payload: str,

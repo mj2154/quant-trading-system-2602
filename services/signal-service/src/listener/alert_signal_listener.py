@@ -117,19 +117,19 @@ class AlertSignalListener:
             self._tasks = [t for t in self._tasks if not t.done()]
 
     async def _handle_new(
-        self, connection: Any, pid: int, channel: str, payload: str
+        self, connection: Any, _pid: int, channel: str, payload: str
     ) -> None:
         """Handle new alert config notification."""
         self._handle_notification(channel, payload)
 
     async def _handle_update(
-        self, connection: Any, pid: int, channel: str, payload: str
+        self, connection: Any, _pid: int, channel: str, payload: str
     ) -> None:
         """Handle updated alert config notification."""
         self._handle_notification(channel, payload)
 
     async def _handle_delete(
-        self, connection: Any, pid: int, channel: str, payload: str
+        self, connection: Any, _pid: int, channel: str, payload: str
     ) -> None:
         """Handle deleted alert config notification."""
         self._handle_notification(channel, payload)

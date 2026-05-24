@@ -514,7 +514,7 @@ class SignalService:
         """
         # Cache validation for each_kline_close trigger
         if trigger_type == "each_kline_close":
-            cache_valid, cache_reason = _validate_cache_for_kline_close(
+            cache_valid, _ = _validate_cache_for_kline_close(
                 cached_klines, kline_data,
             )
             if not cache_valid:
@@ -541,13 +541,13 @@ class SignalService:
             )
             return None
 
-        continuity_valid, continuity_reason = _check_kline_continuity_in_dataframe(
+        continuity_valid, _ = _check_kline_continuity_in_dataframe(
             cached_klines, interval_ms,
         )
         if not continuity_valid:
             repaired = await self._repair_and_revalidate(
                 loaded_alert, subscription_key, cached_klines, kline_data,
-                validator=lambda df, kd: _check_kline_continuity_in_dataframe(df, interval_ms),
+                validator=lambda df, _kd: _check_kline_continuity_in_dataframe(df, interval_ms),
                 check_name="KLINE_CONTINUITY",
             )
             if repaired is None:

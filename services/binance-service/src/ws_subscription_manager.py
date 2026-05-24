@@ -572,8 +572,8 @@ class WSSubscriptionManager:
 
     def _notify_handler(
         self,
-        connection: asyncpg.Connection,
-        pid: int,
+        _connection: asyncpg.Connection,
+        _pid: int,
         channel: str,
         payload: str,
     ) -> None:

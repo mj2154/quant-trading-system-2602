@@ -16,6 +16,7 @@ dependencies = [
     # Data validation
     "pydantic",
     "pydantic-settings",
+    "vulture>=2.16",
 ]
 
 [project.optional-dependencies]

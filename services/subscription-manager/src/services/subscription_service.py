@@ -126,7 +126,7 @@ class SubscriptionService:
             self._conn = None
         logger.info("SubscriptionService stopped")
 
-    async def _on_task(self, conn: asyncpg.Connection, pid: int, channel: str, payload: str) -> None:
+    async def _on_task(self, conn: asyncpg.Connection, _pid: int, _channel: str, payload: str) -> None:
         """Handle incoming subscription_task_new notification."""
         if not self._running:
             return

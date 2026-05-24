@@ -1,6 +1,5 @@
 """Repository for subscription_tasks table - marking tasks as completed/failed."""
 
-import json
 import logging
 
 import asyncpg
@@ -25,7 +24,6 @@ class SubscriptionTasksRepository:
 
     async def mark_failed(self, task_id: int, error: str = "") -> None:
         """Mark a task as failed."""
-        error_json = json.dumps(error)
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE subscription_tasks SET status='failed', "

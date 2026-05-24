@@ -60,7 +60,7 @@ class RealtimeUpdateListener:
         self._listening = False
 
     async def _handle_notification(
-        self, connection: Any, pid: int, channel: str, payload: str
+        self, connection: Any, _pid: int, channel: str, payload: str
     ) -> None:
         """Handle incoming notification.
 

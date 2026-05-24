@@ -41,7 +41,7 @@ async def _wait_for_task_completion(
     failed_event = asyncio.Event()
 
     async def handle_completed(
-        connection: Any, pid: int, channel: str, payload: str
+        connection: Any, _pid: int, channel: str, payload: str
     ) -> None:
         """Handle task_completed notification."""
         try:
@@ -54,7 +54,7 @@ async def _wait_for_task_completion(
             logger.error("Unexpected error in task_completed handler: %s", e)
 
     async def handle_failed(
-        connection: Any, pid: int, channel: str, payload: str
+        connection: Any, _pid: int, channel: str, payload: str
     ) -> None:
         """Handle task_failed notification."""
         try:
