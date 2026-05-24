@@ -170,7 +170,7 @@ class BaseWSClient:
         """
         if not self._state.connected:
             logger.warning(
-                f"[{self.CLIENT_ID}] 未连接，无法订阅: {request.params}"
+                f"[{self.CLIENT_ID}] Not connected, cannot subscribe: {request.params}"
             )
             return
 

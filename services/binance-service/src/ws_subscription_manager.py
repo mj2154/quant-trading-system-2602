@@ -109,8 +109,12 @@ class WSSubscriptionManager:
         self._listener_task: Optional[asyncio.Task] = None
         self._BATCH_INTERVAL = 0.25  # 0.25秒批处理窗口
 
-        # 全量同步锁：防止多个 WS 客户端同时重连导致并发 full_sync()
+        # _full_sync_lock 保护 _full_sync_running 的原子检查与设置，
+        # 实际同步操作在锁外执行，避免阻塞其他调用者
         self._full_sync_lock = asyncio.Lock()
+        self._full_sync_running = False
+        self._FULL_SYNC_MAX_RETRIES = 5
+        self._FULL_SYNC_RETRY_DELAY = 2.0
 
     # ========== WS客户端注册 ==========
 
@@ -737,11 +741,8 @@ class WSSubscriptionManager:
                     logger.error(f"[EXEC_SUB] 现货批量订阅失败: {e}")
             elif client:
                 logger.warning(
-                    f"[EXEC_SUB] 现货客户端未连接，{len(spot_entries)} 个订阅重新入队"
+                    f"[EXEC_SUB] 现货客户端未连接，{len(spot_entries)} 个订阅将在重连后由 full_sync 恢复"
                 )
-                async with self._batch_lock:
-                    for key, _ in spot_entries:
-                        self._pending_subscribes.add(key)
             else:
                 logger.error("[EXEC_SUB] 现货客户端不存在")
 
@@ -760,11 +761,8 @@ class WSSubscriptionManager:
                     logger.error(f"[EXEC_SUB] 期货批量订阅失败: {e}")
             elif client:
                 logger.warning(
-                    f"[EXEC_SUB] 期货客户端未连接，{len(futures_entries)} 个订阅重新入队"
+                    f"[EXEC_SUB] 期货客户端未连接，{len(futures_entries)} 个订阅将在重连后由 full_sync 恢复"
                 )
-                async with self._batch_lock:
-                    for key, _ in futures_entries:
-                        self._pending_subscribes.add(key)
             else:
                 logger.error("[EXEC_SUB] 期货客户端不存在")
 
@@ -827,11 +825,8 @@ class WSSubscriptionManager:
                     logger.error(f"[EXEC_UNSUB] 现货批量取消订阅失败: {e}")
             elif client:
                 logger.warning(
-                    f"[EXEC_UNSUB] 现货客户端未连接，{len(spot_entries)} 个取消订阅重新入队"
+                    f"[EXEC_UNSUB] 现货客户端未连接，{len(spot_entries)} 个取消订阅将在重连后由 full_sync 处理"
                 )
-                async with self._batch_lock:
-                    for key, _ in spot_entries:
-                        self._pending_unsubscribes.add(key)
 
         # 期货客户端批量取消订阅（仅已连接时发送）
         if futures_entries:
@@ -848,11 +843,8 @@ class WSSubscriptionManager:
                     logger.error(f"[EXEC_UNSUB] 期货批量取消订阅失败: {e}")
             elif client:
                 logger.warning(
-                    f"[EXEC_UNSUB] 期货客户端未连接，{len(futures_entries)} 个取消订阅重新入队"
+                    f"[EXEC_UNSUB] 期货客户端未连接，{len(futures_entries)} 个取消订阅将在重连后由 full_sync 处理"
                 )
-                async with self._batch_lock:
-                    for key, _ in futures_entries:
-                        self._pending_unsubscribes.add(key)
 
     async def _handle_clean_all(self) -> None:
         """处理 clean_all 通知：触发WS客户端重连并恢复订阅"""
@@ -870,61 +862,81 @@ class WSSubscriptionManager:
 
         使用 _full_sync_lock 防止多个 WS 客户端同时重连导致并发执行。
         """
-        # 防止并发：如果已有 full_sync 正在执行，跳过本次调用
-        if self._full_sync_lock.locked():
-            logger.info("全量同步已在执行中，跳过重复调用")
-            return
-
+        # 原子检查并设置运行标志，避免 TOCTOU 竞态
         async with self._full_sync_lock:
-            logger.info("执行全量同步...")
-            try:
-                async with self._pool.acquire() as conn:
-                    rows = await conn.fetch(
-                        "SELECT subscription_key, data_type FROM realtime_data"
-                    )
+            if self._full_sync_running:
+                logger.info("全量同步已在执行中，跳过重复调用")
+                return
+            self._full_sync_running = True
 
-                if rows:
-                    market_subscription_keys = [
-                        row["subscription_key"] for row in rows
-                        if row["subscription_key"] not in (
-                            BinanceAccountSubscriptionKey.SPOT,
-                            BinanceAccountSubscriptionKey.FUTURES,
-                        )
-                    ]
-                    data_types = [
-                        row["data_type"] for row in rows
-                        if row["subscription_key"] not in (
-                            BinanceAccountSubscriptionKey.SPOT,
-                            BinanceAccountSubscriptionKey.FUTURES,
-                        )
-                    ]
-
-                    spot_user_client = self._user_stream_clients.get(self.SPOT_USER_STREAM_ID)
-                    futures_user_client = self._user_stream_clients.get(self.FUTURES_USER_STREAM_ID)
-
-                    for row in rows:
-                        if row["subscription_key"] == BinanceAccountSubscriptionKey.SPOT:
-                            self._account_subscriptions.add(row["subscription_key"])
-                            if spot_user_client:
-                                await spot_user_client.subscribe()
-                                logger.info("[FULL_SYNC] 现货用户数据流已触发动态订阅")
-                        elif row["subscription_key"] == BinanceAccountSubscriptionKey.FUTURES:
-                            self._account_subscriptions.add(row["subscription_key"])
-                            if futures_user_client:
-                                await futures_user_client.subscribe()
-                                logger.info("[FULL_SYNC] 期货用户数据流已触发动态订阅")
-
+        try:
+            for attempt in range(1, self._FULL_SYNC_MAX_RETRIES + 1):
+                try:
                     logger.info(
-                        f"全量同步：发现 {len(market_subscription_keys)} 个市场订阅: {data_types}"
+                        "执行全量同步... (第 %d/%d 次)",
+                        attempt, self._FULL_SYNC_MAX_RETRIES,
                     )
-                    if self._account_subscriptions:
-                        logger.info(
-                            f"全量同步：账户订阅已激活: {list(self._account_subscriptions)}"
+                    async with self._pool.acquire() as conn:
+                        rows = await conn.fetch(
+                            "SELECT subscription_key, data_type FROM realtime_data"
                         )
 
-                    await self._execute_batch_subscribe(market_subscription_keys)
-                else:
-                    logger.info("全量同步：无订阅")
+                    if rows:
+                        market_subscription_keys = [
+                            row["subscription_key"] for row in rows
+                            if row["subscription_key"] not in (
+                                BinanceAccountSubscriptionKey.SPOT,
+                                BinanceAccountSubscriptionKey.FUTURES,
+                            )
+                        ]
+                        data_types = [
+                            row["data_type"] for row in rows
+                            if row["subscription_key"] not in (
+                                BinanceAccountSubscriptionKey.SPOT,
+                                BinanceAccountSubscriptionKey.FUTURES,
+                            )
+                        ]
 
-            except Exception as e:
-                logger.error(f"全量同步失败: {e}")
+                        spot_user_client = self._user_stream_clients.get(self.SPOT_USER_STREAM_ID)
+                        futures_user_client = self._user_stream_clients.get(self.FUTURES_USER_STREAM_ID)
+
+                        for row in rows:
+                            if row["subscription_key"] == BinanceAccountSubscriptionKey.SPOT:
+                                self._account_subscriptions.add(row["subscription_key"])
+                                if spot_user_client:
+                                    await spot_user_client.subscribe()
+                                    logger.info("[FULL_SYNC] 现货用户数据流已触发动态订阅")
+                            elif row["subscription_key"] == BinanceAccountSubscriptionKey.FUTURES:
+                                self._account_subscriptions.add(row["subscription_key"])
+                                if futures_user_client:
+                                    await futures_user_client.subscribe()
+                                    logger.info("[FULL_SYNC] 期货用户数据流已触发动态订阅")
+
+                        logger.info(
+                            f"全量同步：发现 {len(market_subscription_keys)} 个市场订阅: {data_types}"
+                        )
+                        if self._account_subscriptions:
+                            logger.info(
+                                f"全量同步：账户订阅已激活: {list(self._account_subscriptions)}"
+                            )
+
+                        await self._execute_batch_subscribe(market_subscription_keys)
+                    else:
+                        logger.info("全量同步：无订阅")
+
+                    return  # 成功
+
+                except Exception as e:
+                    logger.error(
+                        "全量同步失败 (第 %d/%d 次): %s",
+                        attempt, self._FULL_SYNC_MAX_RETRIES, e,
+                    )
+                    if attempt < self._FULL_SYNC_MAX_RETRIES:
+                        await asyncio.sleep(self._FULL_SYNC_RETRY_DELAY)
+
+            logger.error(
+                "全量同步 %d 次重试全部失败，放弃，等待下次重连触发",
+                self._FULL_SYNC_MAX_RETRIES,
+            )
+        finally:
+            self._full_sync_running = False
