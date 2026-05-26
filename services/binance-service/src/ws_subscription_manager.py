@@ -579,7 +579,7 @@ class WSSubscriptionManager:
     ) -> None:
         """通知处理器"""
         logger.debug(
-            f"[LISTEN] 收到通知: channel={channel}, pid={pid}, payload={payload[:100]}"
+            f"[LISTEN] 收到通知: channel={channel}, pid={_pid}, payload={payload[:100]}"
         )
         asyncio.create_task(self._handle_notification(channel, payload))
 
