@@ -61,8 +61,8 @@ function handleClose() {
           <rect x="1.5" y="1.5" width="9" height="9" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" />
         </svg>
         <svg v-else width="12" height="12" viewBox="0 0 12 12">
-          <rect x="2.5" y="0.5" width="7" height="7" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" />
-          <rect x="0.5" y="2.5" width="7" height="7" rx="0.5" fill="#2d2d2d" stroke="currentColor" stroke-width="1" />
+          <rect x="2.5" y="0.5" width="8" height="8" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" />
+          <rect x="0.5" y="2.5" width="8" height="8" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" />
         </svg>
       </button>
       <button class="win-btn win-btn-close" title="Close" @click="handleClose">

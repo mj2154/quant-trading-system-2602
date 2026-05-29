@@ -35,8 +35,9 @@ async function createWindow() {
     },
   })
 
-  // 注册窗口控制 IPC handlers
-  registerWindowControlHandlers()
+  // 注册窗口控制 IPC handlers 和事件监听
+  registerWindowIpcHandlers()
+  bindWindowEvents()
 
   if (VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(VITE_DEV_SERVER_URL)
@@ -45,11 +46,9 @@ async function createWindow() {
   }
 }
 
-// 注册窗口控制相关的 IPC handlers
-function registerWindowControlHandlers() {
-  ipcMain.handle('window:minimize', () => {
-    mainWindow?.minimize()
-  })
+// 窗口控制 IPC handlers
+function registerWindowIpcHandlers() {
+  ipcMain.handle('window:minimize', () => mainWindow?.minimize())
 
   ipcMain.handle('window:maximize', () => {
     if (mainWindow?.isMaximized()) {
@@ -59,17 +58,9 @@ function registerWindowControlHandlers() {
     }
   })
 
-  ipcMain.handle('window:restore', () => {
-    mainWindow?.unmaximize()
-  })
-
-  ipcMain.handle('window:close', () => {
-    mainWindow?.close()
-  })
-
-  ipcMain.handle('window:isMaximized', () => {
-    return mainWindow?.isMaximized() ?? false
-  })
+  ipcMain.handle('window:restore', () => mainWindow?.unmaximize())
+  ipcMain.handle('window:close', () => mainWindow?.close())
+  ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false)
 
   ipcMain.handle('window:getSize', () => {
     if (!mainWindow) return [0, 0]
@@ -83,35 +74,23 @@ function registerWindowControlHandlers() {
     return [x, y]
   })
 
-  ipcMain.handle('window:setSize', (_event, width: number, height: number) => {
-    mainWindow?.setSize(width, height)
+  ipcMain.handle('window:setSize', (_event, w: number, h: number) => {
+    mainWindow?.setSize(w, h)
   })
 
   ipcMain.handle('window:setPosition', (_event, x: number, y: number) => {
     mainWindow?.setPosition(x, y)
   })
 
-  ipcMain.handle('window:isMinimized', () => {
-    return mainWindow?.isMinimized() ?? false
-  })
+  ipcMain.handle('window:isMinimized', () => mainWindow?.isMinimized() ?? false)
+  ipcMain.handle('window:isFocused', () => mainWindow?.isFocused() ?? false)
+  ipcMain.handle('app:getVersion', () => app.getVersion())
+  ipcMain.handle('app:getName', () => app.getName())
+  ipcMain.handle('app:quit', () => app.quit())
+}
 
-  ipcMain.handle('window:isFocused', () => {
-    return mainWindow?.isFocused() ?? false
-  })
-
-  ipcMain.handle('app:getVersion', () => {
-    return app.getVersion()
-  })
-
-  ipcMain.handle('app:getName', () => {
-    return app.getName()
-  })
-
-  ipcMain.handle('app:quit', () => {
-    app.quit()
-  })
-
-  // 窗口状态变化事件 -> 推送给渲染进程
+// 窗口状态变化事件 -> 推送给渲染进程
+function bindWindowEvents() {
   mainWindow?.on('resize', () => {
     if (mainWindow) {
       const [width, height] = mainWindow.getSize()
