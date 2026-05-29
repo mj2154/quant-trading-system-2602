@@ -30,7 +30,7 @@
     "@playwright/test": "^1.58.2",
     "@vitejs/plugin-vue": "^6.0.3",
     "@vue/test-utils": "^2.4.6",
-    "electron": "^39.2.7",
+    "electron": "^42.3.0",
     "electron-builder": "^26.0.0",
     "jsdom": "^28.0.0",
     "typescript": "^5.9.3",
@@ -45,8 +45,7 @@
     "@vicons/ionicons5": "^0.13.0",
     "naive-ui": "^2.43.2",
     "pinia": "^3.0.4",
-    "vue-router": "^5.1.0",
-    "ws": "^8.19.0"
+    "vue-router": "^5.1.0"
   },
   "directories": {
     "doc": "docs"
