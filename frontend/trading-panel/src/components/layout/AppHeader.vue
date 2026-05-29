@@ -1,9 +1,34 @@
 <script setup lang="ts">
 import { useRouter, useRoute } from 'vue-router'
+import { ref, onMounted } from 'vue'
 import { navItems } from '../../router'
 
 const router = useRouter()
 const route = useRoute()
+
+const isMaximized = ref(false)
+
+onMounted(() => {
+  window.electronWindow?.isMaximized().then((val: boolean) => {
+    isMaximized.value = val
+  }).catch(() => {})
+
+  window.electronWindow?.onMaximizeChanged((val: boolean) => {
+    isMaximized.value = val
+  })
+})
+
+function handleMinimize() {
+  window.electronWindow?.minimize()
+}
+
+function handleMaximize() {
+  window.electronWindow?.maximize()
+}
+
+function handleClose() {
+  window.electronWindow?.close()
+}
 </script>
 
 <template>
@@ -23,6 +48,30 @@ const route = useRoute()
         <span class="tab-title">{{ item.title }}</span>
       </div>
     </div>
+
+    <!-- 窗口控制按钮 -->
+    <div class="window-controls">
+      <button class="win-btn win-btn-minimize" title="Minimize" @click="handleMinimize">
+        <svg width="12" height="12" viewBox="0 0 12 12">
+          <rect x="1" y="5.5" width="10" height="1" fill="currentColor" />
+        </svg>
+      </button>
+      <button class="win-btn win-btn-maximize" title="Maximize" @click="handleMaximize">
+        <svg v-if="!isMaximized" width="12" height="12" viewBox="0 0 12 12">
+          <rect x="1.5" y="1.5" width="9" height="9" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" />
+        </svg>
+        <svg v-else width="12" height="12" viewBox="0 0 12 12">
+          <rect x="2.5" y="0.5" width="7" height="7" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" />
+          <rect x="0.5" y="2.5" width="7" height="7" rx="0.5" fill="#2d2d2d" stroke="currentColor" stroke-width="1" />
+        </svg>
+      </button>
+      <button class="win-btn win-btn-close" title="Close" @click="handleClose">
+        <svg width="12" height="12" viewBox="0 0 12 12">
+          <line x1="1" y1="1" x2="11" y2="11" stroke="currentColor" stroke-width="1.2" />
+          <line x1="1" y1="11" x2="11" y2="1" stroke="currentColor" stroke-width="1.2" />
+        </svg>
+      </button>
+    </div>
   </header>
 </template>
 
@@ -33,8 +82,9 @@ const route = useRoute()
   border-bottom: 1px solid #555;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 0 0 8px;
   flex-shrink: 0;
+  -webkit-app-region: drag;
 }
 
 .tabs-container {
@@ -55,6 +105,7 @@ const route = useRoute()
   min-width: 100px;
   max-width: 180px;
   transition: background-color 0.15s;
+  -webkit-app-region: no-drag;
 }
 
 .tab-item:hover {
@@ -82,6 +133,37 @@ const route = useRoute()
 }
 
 .tab-item.active .tab-title {
+  color: #fff;
+}
+
+/* 窗口控制按钮 */
+.window-controls {
+  display: flex;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.win-btn {
+  width: 46px;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.win-btn:hover {
+  background-color: #4a4a4a;
+  color: #ddd;
+}
+
+.win-btn-close:hover {
+  background-color: #e81123;
   color: #fff;
 }
 </style>

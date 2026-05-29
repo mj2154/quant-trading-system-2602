@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld('tabs', {
 })
 
 // --------- Expose Window API to the Renderer process ---------
-contextBridge.exposeInMainWorld('window', {
+contextBridge.exposeInMainWorld('electronWindow', {
   // 窗口控制
   minimize() {
     return ipcRenderer.invoke('window:minimize')
@@ -145,6 +145,10 @@ contextBridge.exposeInMainWorld('window', {
 
   onFocusChanged(callback: (focused: boolean) => void) {
     ipcRenderer.on('window:focus-changed', (_, focused) => callback(focused))
+  },
+
+  onMaximizeChanged(callback: (maximized: boolean) => void) {
+    ipcRenderer.on('window:maximize-changed', (_, maximized) => callback(maximized))
   },
 })
 
