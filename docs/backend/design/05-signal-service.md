@@ -96,8 +96,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_strategy_signals_computed
     ON strategy_signals (computed_at DESC);
 
--- 保留策略：保留30天
-SELECT add_retention_policy('strategy_signals', drop_after => INTERVAL '30 days');
+-- 永久保留，不设置保留策略
 ```
 
 **字段说明**：

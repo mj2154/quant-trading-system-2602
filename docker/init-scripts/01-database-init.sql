@@ -962,12 +962,8 @@ CREATE TRIGGER trigger_order_task_update
 -- tasks: 保留7天
 PERFORM add_retention_policy('tasks', drop_after => INTERVAL '7 days');
 
--- realtime_data: 保留1天（实时数据，及时清理）
-PERFORM add_retention_policy('realtime_data', drop_after => INTERVAL '1 day');
-
--- strategy_signals: 保留30天（策略信号需要长期跟踪）
-PERFORM add_retention_policy('strategy_signals', drop_after => INTERVAL '30 days');
-
+-- realtime_data: 永久保留（状态表，每个订阅键一条记录，预估 <100 条）
+-- strategy_signals: 永久保留（需查询所有历史记录）
 -- order_tasks: 永久保留（订单任务需要长期保存，用于分析和追溯）
 
 -- =============================================================================
@@ -1120,7 +1116,7 @@ BEGIN
     RAISE NOTICE '表: realtime_data, service_heartbeats, subscription_tasks, tasks, klines_history, exchange_info, alert_configs, strategy_signals, order_tasks';
     RAISE NOTICE 'Hypertable: 5个表已转换为TimescaleDB Hypertable';
     RAISE NOTICE '触发器: 13个触发器已创建';
-    RAISE NOTICE '保留策略: tasks(7天), realtime_data(1天), strategy_signals(30天), order_tasks(永久)';
+    RAISE NOTICE '保留策略: tasks(7天), realtime_data(永久), strategy_signals(永久), order_tasks(永久)';
     RAISE NOTICE '通知频道: subscription_task_new, task_new, task_completed, subscription_add, subscription_remove, subscription_clean, realtime_update, signal_new, alert_config.new, alert_config.update, alert_config.delete';
     RAISE NOTICE '========================================';
 END $$;

@@ -12,6 +12,7 @@
 | 任务与订阅管理 | [01-task-subscription.md](./01-task-subscription.md) |
 | 数据流设计 | [02-dataflow.md](./02-dataflow.md) |
 | 币安服务 | [03-binance-service.md](./03-binance-service.md) |
+| 订阅管理服务 | [01-task-subscription.md](./01-task-subscription.md) — subscription_tasks + service_heartbeats |
 | 信号服务 | [05-signal-service.md](./05-signal-service.md) |
 | 告警服务 | [06-alert-service.md](./06-alert-service.md) |
 | TradingView API | [07-websocket-protocol.md](./07-websocket-protocol.md) |
@@ -31,12 +32,16 @@
 
 | 表 | 用途 |
 |---|------|
-| `tasks` | 一次性请求任务 |
+| `tasks` | 一次性请求任务（如获取K线历史、报价） |
+| `subscription_tasks` | 订阅任务队列（subscribe / unsubscribe / heartbeat），由 subscription-manager 消费 |
+| `service_heartbeats` | 服务心跳表，各服务定期 UPSERT，消费者自行判断存活 |
+| `realtime_data` | 实时数据订阅状态（唯一写入权归属 subscription-manager） |
 | `klines_history` | K线历史数据 |
-| `realtime_data` | 实时数据状态 |
-| `exchange_info` | 交易对信息 |
-| `strategy_signals` | 策略信号 |
+| `exchange_info` | 交易对元信息 |
+| `order_tasks` | 订单任务队列（下单 / 撤单 / 查询） |
+| `strategy_signals` | 策略信号计算结果 |
 | `alert_configs` | 告警配置 |
+| `alert_strategy_metadata` | 告警策略元数据 |
 | `account_info` | 用户账户信息（期货/现货） |
 
 ### 事件流
@@ -48,6 +53,8 @@
 **K线事件链**: 采集 → 写入 → kline.new → 信号计算
 **信号事件链**: 信号写入 → signal.new → 交易决策
 **交易事件链**: 交易执行 → trade.completed → 账户更新
+**订阅任务链**: 前端订阅 → INSERT subscription_tasks → subscription_task_new 通知 → subscription-manager 消费 → 写入 realtime_data → 币安服务执行 WS 订阅
+**心跳链**: 各服务定时 UPSERT service_heartbeats → health_monitor 判断存活
 
 ### 数据命名转换
 
@@ -112,9 +119,10 @@ docs/backend/
 - **API服务**: `services/api-service/`
 - **币安服务**: `services/binance-service/`
 - **信号服务**: `services/signal-service/`
+- **订阅管理服务**: `services/subscription-manager/` — realtime_data 唯一写入权限
 
 ---
 
-**版本**：v3.2
-**更新**：2026-02-27 - 添加用户数据订阅服务设计（"GET 完整 + 订阅增量"策略）
-**上一版本**：v3.1 (2026-02-24)
+**版本**：v3.3
+**更新**：2026-05-25 - 补全数据模型表、订阅任务链、心跳机制
+**上一版本**：v3.2 (2026-02-27)

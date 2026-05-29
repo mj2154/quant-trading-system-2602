@@ -83,6 +83,7 @@ flowchart TB
 | `task_new` | INSERT tasks | 数据库 | 币安服务 | 任务ID、类型、payload |
 | `task_completed` | UPDATE tasks.status=completed | 数据库 | API网关 | 任务ID、类型、**payload（含requestId）、result** |
 | `task_failed` | UPDATE tasks.status=failed | 数据库 | API网关 | 任务ID、类型、错误信息 |
+| `subscription_task_new` | INSERT subscription_tasks | 数据库 | subscription-manager | 任务ID、类型(subscribe/unsubscribe/heartbeat)、订阅键、发起者 |
 | `subscription_add` | INSERT realtime_data | 数据库 | 币安服务 | 订阅键、数据类型 |
 | `subscription_remove` | DELETE realtime_data | 数据库 | 币安服务 | 订阅键、数据类型 |
 | `subscription_clean` | API网关手动通知 | API网关 | 币安服务 | 清空所有订阅（API网关重启） |
@@ -159,27 +160,37 @@ sequenceDiagram
 
 ## 5. 实时订阅详细流程
 
+> **架构变更 (2026-05)**: `realtime_data` 的唯一写入权已从 API网关 转移到 subscription-manager 服务。
+> API网关发起订阅时不再直接 INSERT realtime_data，而是 INSERT subscription_tasks，
+> 由 subscription-manager 消费后统一写入 realtime_data。
+
 ```mermaid
 sequenceDiagram
     participant Front as 前端
     participant GW as API网关
     participant DB as 数据库
+    participant SM as subscription-manager
     participant BN as 币安服务
     participant BWS as 币安WS
 
     Note over Front, BWS: 场景: 前端订阅K线实时更新
 
-    %% 订阅阶段
-    Front->>GW: {"type": "SUBSCRIBE", "requestId": "550e8400e29b41d4a716446655440000", "data": {"subscriptions": ["BINANCE:BTCUSDT@KLINE_1"]}}
+    %% 订阅阶段 — 通过 subscription_tasks 队列
+    Front->>GW: {"type": "SUBSCRIBE", "requestId": "...", "data": {"subscriptions": ["BINANCE:BTCUSDT@KLINE_1"]}}
     GW->>GW: 检查内存字典，判断新增订阅
-    GW->>DB: INSERT INTO realtime_data (subscription_key, data_type)
+    GW->>DB: INSERT INTO subscription_tasks (type='subscribe', subscription_key=..., subscriber='api-service')
+    DB->>DB: TRIGGER: pg_notify('subscription_task_new', {...})
+
+    DB-->>SM: subscription_task_new 通知
+    SM->>DB: INSERT INTO realtime_data (subscription_key, data_type) -- 唯一写入权限
     DB->>DB: TRIGGER: pg_notify('subscription_add', {...})
 
     DB-->>BN: subscription_add 通知
     BN->>BN: 0.25秒批处理窗口
     BN->>BWS: {"method": "SUBSCRIBE", "params": ["btcusdt@kline_1m"]}
 
-    GW->>Front: {"type": "ACK", "requestId": "550e8400e29b41d4a716446655440000", "data": {}}
+    SM->>DB: UPDATE subscription_tasks SET status='completed'
+    GW->>Front: {"type": "ACK", "requestId": "...", "data": {}}
 
     %% 数据推送阶段
     BWS->>BN: K线数据更新
@@ -187,7 +198,7 @@ sequenceDiagram
     DB->>DB: TRIGGER: pg_notify('realtime_update', {...})
 
     DB-->>GW: realtime_update 通知
-    GW->>Front: {"type": "UPDATE", "timestamp": 1234567890, "data": {"subscriptionKey": "BINANCE:BTCUSDT@KLINE_1", "bar": {...}}}
+    GW->>Front: {"type": "UPDATE", "timestamp": ..., "data": {"subscriptionKey": "...", "bar": {...}}}
 ```
 
 ## 6. 币安服务断线重连恢复
@@ -235,7 +246,70 @@ sequenceDiagram
 - **DELETE 而非 TRUNCATE**：精确清理 api-service 的订阅
 - **保留 signal-service 订阅**：其他服务的订阅不会被误删
 
-## 8. 数据流与组件映射表
+## 8. 心跳数据流
+
+系统使用 `service_heartbeats` 表实现服务存活性检测。各服务定期 UPSERT 自己的心跳行，消费者自行比较 `last_heartbeat` 与 `NOW()` 判断存活。
+
+### 8.1 心跳表结构
+
+```sql
+CREATE TABLE service_heartbeats (
+    subscriber_id VARCHAR(100) PRIMARY KEY,   -- 服务标识: api-service, signal-service, binance-service, subscription-manager
+    last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### 8.2 心跳写入模式
+
+各服务定期执行 UPSERT，更新自己的心跳时间：
+
+```sql
+INSERT INTO service_heartbeats (subscriber_id, last_heartbeat)
+VALUES ('api-service', NOW())
+ON CONFLICT (subscriber_id) DO UPDATE SET last_heartbeat = NOW();
+```
+
+### 8.3 存活判断
+
+消费者通过比较 `last_heartbeat` 与当前时间的差距判断服务是否存活：
+
+```sql
+-- 查询离线超过 30 秒的订阅者
+SELECT subscriber_id FROM service_heartbeats
+WHERE last_heartbeat < NOW() - INTERVAL '30 seconds';
+```
+
+### 8.4 心跳数据流图
+
+```mermaid
+sequenceDiagram
+    participant Services as 各应用服务
+    participant DB as 数据库
+    participant Consumer as 消费者 (health_monitor / subscription-manager)
+
+    loop 每5秒
+        Services->>DB: INSERT INTO service_heartbeats (subscriber_id, last_heartbeat)<br/>VALUES ('xxx', NOW()) ON CONFLICT DO UPDATE
+    end
+
+    Consumer->>DB: SELECT subscriber_id FROM service_heartbeats<br/>WHERE last_heartbeat < NOW() - INTERVAL '30 seconds'
+    DB-->>Consumer: 返回离线订阅者列表
+
+    alt 发现离线订阅者
+        Consumer->>Consumer: 清理该订阅者在 realtime_data 中的记录
+    end
+```
+
+### 8.5 设计要点
+
+| 特性 | 说明 |
+|------|------|
+| **自主上报** | 每个服务只负责自己的心跳行，不做跨服务操作 |
+| **无触发器** | 心跳表不设触发器，消费者主动轮询判断存活 |
+| **无清理机制** | 无自动清理过期心跳，消费者自行判断存活 |
+| **单行设计** | 每个 subscriber_id 只有一行，UPSERT 更新 |
+| **判定阈值** | 默认 30 秒无心跳判定为离线 |
+
+## 9. 数据流与组件映射表
 
 | 数据流类型 | 起点 | 中间节点 | 终点 | 触发器/监听 |
 |-----------|------|---------|------|-----------|
@@ -243,16 +317,19 @@ sequenceDiagram
 | 一次性请求-任务通知 | tasks表 | pg_notify | 币安服务 | INSERT触发器 |
 | 一次性请求-结果写入 | 币安服务 | UPDATE | tasks表 | 无 |
 | 一次性请求-完成通知 | tasks表 | pg_notify | API网关 | UPDATE触发器 |
-| 订阅-新增 | 前端 | API网关 | realtime_data表 | 无 |
+| 订阅-任务创建 | 前端 | API网关 | subscription_tasks表 | 无 |
+| 订阅-任务通知 | subscription_tasks表 | pg_notify | subscription-manager | INSERT触发器 |
+| 订阅-写入realtime_data | subscription-manager | INSERT/UPSERT | realtime_data表 | 无 |
 | 订阅-新增通知 | realtime_data表 | pg_notify | 币安服务 | INSERT触发器 |
 | 订阅-实时更新 | 币安WS | 币安服务 | realtime_data表 | 无 |
 | 订阅-更新通知 | realtime_data表 | pg_notify | API网关 | UPDATE触发器 |
-| 订阅-取消 | API网关 | DELETE | realtime_data表 | 无 |
 | 订阅-取消通知 | realtime_data表 | pg_notify | 币安服务 | DELETE触发器 |
+| 心跳-上报 | 各服务 | UPSERT | service_heartbeats表 | 无 |
+| 心跳-存活检测 | service_heartbeats表 | 消费者查询 | 消费者 | 无 |
 | 交易所信息-全量替换 | 系统任务 | DELETE+INSERT | exchange_info表 | 无 |
 | 交易所信息-自动清理 | exchange_info表 | 自动 | 无 | 无 |
 
-## 9. 交易所信息全量替换流程
+## 10. 交易所信息全量替换流程
 
 ```mermaid
 sequenceDiagram
@@ -293,29 +370,29 @@ sequenceDiagram
 - 状态准确：交易对状态变化会准确反映
 - 事务保证：整个替换过程具有原子性
 
-## 10. 用户数据订阅数据流
+## 11. 用户数据订阅数据流
 
-### 10.1 设计原则
+### 11.1 设计原则
 
 用户数据订阅采用"GET 完整 + 订阅增量"的策略：
 - **完整数据**：通过 REST API 获取，存储到 `account_info` 表
 - **增量更新**：通过 WebSocket 用户数据流推送，直接覆盖写入 `realtime_data` 表
 
-### 10.2 数据存储位置
+### 11.2 数据存储位置
 
 | 数据类型 | 存储位置 | 用途 |
 |---------|---------|------|
 | 完整账户信息 | `account_info` 表 | 前端 GET 请求获取 |
 | 实时增量数据 | `realtime_data` 表 | WebSocket 订阅推送 |
 
-### 10.3 订阅键格式
+### 11.3 订阅键格式
 
 | 账户类型 | 订阅键 | 数据类型 |
 |---------|--------|---------|
 | 现货账户 | `BINANCE:SPOT@ACCOUNT` | `ACCOUNT` |
 | 期货账户 | `BINANCE:FUTURES@ACCOUNT` | `ACCOUNT` |
 
-### 10.4 数据流流程
+### 11.4 数据流流程
 
 ```mermaid
 sequenceDiagram
@@ -359,7 +436,7 @@ sequenceDiagram
 
 ```
 
-### 10.5 增量数据说明
+### 11.5 增量数据说明
 
 **重要**：币安 WebSocket 用户数据流推送的是**增量数据**：
 
@@ -373,7 +450,7 @@ sequenceDiagram
 - 前端必须先 GET 完整数据初始化，再通过订阅增量更新
 - 定期完整快照作为兜底，确保数据一致性
 
-### 10.6 前端使用约定
+### 11.6 前端使用约定
 
 ```javascript
 // 正确的初始化流程
@@ -668,5 +745,5 @@ async def _handle_get_quotes(self, payload: TaskPayload):
 
 ---
 
-**版本**：v3.3
-**更新**：2026-02-27 - 添加用户数据订阅数据流设计
+**版本**：v3.4
+**更新**：2026-05-25 - 添加subscription-manager订阅任务队列、心跳数据流、更新数据流映射表

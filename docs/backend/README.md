@@ -52,6 +52,12 @@
 | `implementation/REPORT-binance-service-models-refactor.md` | 币安服务模型重构报告 |
 | `design/VERIFICATION_REPORT_USER_STREAM.md` | 用户数据流验证报告 |
 
+### 测试报告
+
+| 文档 | 说明 |
+|------|------|
+| `../testing/ALERT_SYSTEM_TEST_REPORT.md` | 告警系统E2E测试报告 |
+
 ## 目录结构
 
 ```
@@ -78,9 +84,11 @@ docs/backend/
 │   └── backup/                    # 历史版本备份
 ├── database/                       # 数据库设计
 │   └── Kline-Table-Event-Optimization.md
-└── implementation/                 # 实现报告
-    ├── REPORT-api-service-models-refactor.md
-    └── REPORT-binance-service-models-refactor.md
+├── implementation/                 # 实现报告
+│   ├── REPORT-api-service-models-refactor.md
+│   └── REPORT-binance-service-models-refactor.md
+└── ../testing/                     # 测试报告
+    └── ALERT_SYSTEM_TEST_REPORT.md
 ```
 
 ## 阅读指南
@@ -106,5 +114,5 @@ docs/backend/
 
 ---
 
-**版本**：v4.0
-**更新**：2026-03-17
+**版本**：v4.1
+**更新**：2026-05-25

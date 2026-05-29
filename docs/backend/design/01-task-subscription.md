@@ -770,6 +770,153 @@ $$ LANGUAGE plpgsql;
 | 适用规模 | 数万级交易对 | 数千级交易对 |
 | 实现复杂度 | 简单 | 简单 |
 
+### 2.6 subscription_tasks 订阅任务表
+
+> **架构变更 (2026-05)**: `realtime_data` 的唯一写入权归属 subscription-manager 服务。
+> API网关和 signal-service 发起订阅时不再直接 INSERT realtime_data，而是 INSERT subscription_tasks，
+> 由 subscription-manager 消费后统一写入 realtime_data。
+
+订阅任务队列表，遵循 `写入 → 触发 → 通知 → 订阅` 模式：
+
+```sql
+CREATE TABLE subscription_tasks (
+    id BIGSERIAL PRIMARY KEY,
+
+    -- 任务类型: subscribe, unsubscribe, heartbeat
+    type VARCHAR(50) NOT NULL,
+
+    -- 订阅键
+    subscription_key VARCHAR(255),
+
+    -- 数据类型: KLINE, QUOTES, TRADE, USERDATA
+    data_type VARCHAR(50),
+
+    -- 发起订阅者: api-service, signal-service
+    subscriber VARCHAR(100) NOT NULL,
+
+    -- 任务状态: pending, completed, failed
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+
+    -- 额外数据
+    payload JSONB DEFAULT '{}',
+
+    -- 时间戳
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_tasks_status ON subscription_tasks (status);
+CREATE INDEX IF NOT EXISTS idx_subscription_tasks_type ON subscription_tasks (type);
+CREATE INDEX IF NOT EXISTS idx_subscription_tasks_subscriber ON subscription_tasks (subscriber);
+CREATE INDEX IF NOT EXISTS idx_subscription_tasks_created ON subscription_tasks (created_at DESC);
+```
+
+**状态流转**：
+- `pending`：任务创建，等待 subscription-manager 消费
+- `completed`：处理完成
+- `failed`：处理失败
+
+#### 2.6.1 触发器实现
+
+```sql
+-- INSERT 时通知 subscription-manager
+CREATE OR REPLACE FUNCTION notify_subscription_task_new()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_notify('subscription_task_new', jsonb_build_object(
+        'event_id', uuidv7()::TEXT,
+        'event_type', 'subscription_task_new',
+        'timestamp', NOW()::TEXT,
+        'data', jsonb_build_object(
+            'id', NEW.id,
+            'type', NEW.type,
+            'subscription_key', NEW.subscription_key,
+            'data_type', NEW.data_type,
+            'subscriber', NEW.subscriber,
+            'status', NEW.status,
+            'payload', NEW.payload,
+            'created_at', NEW.created_at::TEXT
+        )
+    )::TEXT);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_subscription_task_new ON subscription_tasks;
+CREATE TRIGGER trigger_subscription_task_new
+    AFTER INSERT ON subscription_tasks
+    FOR EACH ROW
+    EXECUTE FUNCTION notify_subscription_task_new();
+```
+
+#### 2.6.2 subscription_task_new 通知格式
+
+```json
+{
+    "event_id": "0189a1b3-c4d5-6e7f-8901-bcde23456789",
+    "event_type": "subscription_task_new",
+    "timestamp": "2026-05-25T10:30:00Z",
+    "data": {
+        "id": 12345,
+        "type": "subscribe",
+        "subscription_key": "BINANCE:BTCUSDT@KLINE_1",
+        "data_type": "KLINE",
+        "subscriber": "api-service",
+        "status": "pending",
+        "payload": {},
+        "created_at": "2026-05-25T10:30:00Z"
+    }
+}
+```
+
+#### 2.6.3 订阅任务类型
+
+| type | 说明 | 发起者 |
+|------|------|--------|
+| `subscribe` | 新增订阅 | api-service, signal-service |
+| `unsubscribe` | 取消订阅 | api-service, signal-service |
+| `heartbeat` | 心跳保活 | api-service, signal-service |
+
+#### 2.6.4 恢复与去重
+
+subscription-manager 重启时执行恢复逻辑：
+
+1. **压缩**: 对每组 `(subscription_key, subscriber)` 只保留最后一条 pending 任务，其余标记为 completed
+2. **重放**: 按 id 顺序处理剩余的 pending 任务
+3. **状态协调**: 查询 `service_heartbeats` 移除已离线订阅者在 realtime_data 中的记录
+
+### 2.7 service_heartbeats 服务心跳表
+
+各服务定期 UPSERT 自己的心跳行，消费者自行比较 `last_heartbeat` 与 `NOW()` 判断存活。
+
+```sql
+CREATE TABLE service_heartbeats (
+    subscriber_id VARCHAR(100) PRIMARY KEY,         -- 服务标识
+    last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**心跳写入模式**：
+
+```sql
+INSERT INTO service_heartbeats (subscriber_id, last_heartbeat)
+VALUES ('api-service', NOW())
+ON CONFLICT (subscriber_id) DO UPDATE SET last_heartbeat = NOW();
+```
+
+**存活判断** (消费者查询):
+
+```sql
+SELECT subscriber_id FROM service_heartbeats
+WHERE last_heartbeat < NOW() - INTERVAL '30 seconds';
+```
+
+**设计要点**：
+- 每个服务只负责自己的心跳行，不做跨服务操作
+- 无触发器：心跳表不设触发器，消费者主动轮询
+- 单行设计：每个 subscriber_id 只有一行，UPSERT 更新
+- 判定阈值：默认 30 秒无心跳判定为离线
+
 ## 3. 一次性请求设计
 
 ### 3.1 payload 负载格式
@@ -919,7 +1066,11 @@ sequenceDiagram
 - 断线重连后无法恢复订阅
 - 缺乏统一的状态同步机制
 
-新的设计采用**realtime_data 统一表 + 内存字典 + 通知机制**：
+新设计采用 **subscription_tasks 任务队列 + realtime_data 统一表 + 内存字典 + 通知机制**：
+
+> **架构变更 (2026-05)**: `realtime_data` 的唯一写入权已从 API网关 转移到 subscription-manager。
+> API网关发起订阅时不再直接 INSERT realtime_data，而是 INSERT subscription_tasks，
+> 由 subscription-manager 消费后统一写入 realtime_data。
 
 ```mermaid
 flowchart LR
@@ -928,6 +1079,7 @@ flowchart LR
     classDef gateway fill:#4dabf7,stroke:#1864ab,stroke-width:2px,color:#fff
     classDef database fill:#9775fa,stroke:#6741d9,stroke-width:2px,color:#fff
     classDef binance fill:#51cf66,stroke:#2b8a3e,stroke-width:2px,color:#fff
+    classDef submanager fill:#ffd43b,stroke:#fab005,stroke-width:2px,color:#333
 
     subgraph "前端"
         TV[TradingView]
@@ -938,7 +1090,12 @@ flowchart LR
     end
 
     subgraph "数据库"
+        ST[subscription_tasks]
         RT[realtime_data]
+    end
+
+    subgraph "subscription-manager"
+        SM[订阅管理服务]
     end
 
     subgraph "币安服务"
@@ -949,12 +1106,15 @@ flowchart LR
     %% 应用样式
     class TV frontend
     class Mem gateway
-    class RT database
+    class ST,RT database
+    class SM submanager
     class Sync,WS binance
 
     %% 连接
     TV <-->|WebSocket| Mem
-    Mem --INSERT/DELETE--> RT
+    Mem --INSERT subscription_tasks--> ST
+    ST -.->|`subscription_task_new`| SM
+    SM --INSERT/UPSERT realtime_data--> RT
     RT -.->|`subscription_add`| Sync
     RT -.->|`subscription_remove`| Sync
     Sync --UPDATE data--> RT
@@ -966,8 +1126,9 @@ flowchart LR
 
 | 组件 | 职责 |
 |------|------|
-| **API网关** | 管理内存字典 `subscription_key -> {client_ids}`<br>判断何时新增/删除订阅键<br>INSERT/DELETE `realtime_data` 表<br>**INSERT/DELETE 触发器自动发送通知** |
-| **数据库** | 持久化 `realtime_data` 表<br>**INSERT 触发器发送** `subscription_add` 通知<br>**DELETE 触发器发送** `subscription_remove` 通知 |
+| **API网关** | 管理内存字典 `subscription_key -> {client_ids}`<br>判断何时新增/删除订阅键<br>INSERT `subscription_tasks` 表（不再直接操作 realtime_data）<br>监听 `realtime_update` 推送数据给前端 |
+| **subscription-manager** | 监听 `subscription_task_new` 通知<br>消费 subscription_tasks 队列<br>**realtime_data 唯一写入权限**：INSERT/UPSERT/DELETE<br>管理 subscribers 数组的添加/移除 |
+| **数据库** | 持久化 `subscription_tasks` 和 `realtime_data` 表<br>**subscription_tasks INSERT 触发器发送** `subscription_task_new` 通知<br>**realtime_data INSERT 触发器发送** `subscription_add` 通知<br>**realtime_data DELETE 触发器发送** `subscription_remove` 通知 |
 | **币安服务** | `SubscriptionSync` 监听 `subscription_add`/`subscription_remove`<br>执行币安WS订阅/取消<br>断线重连后主动查询数据库恢复<br>更新 `realtime_data.data` 触发 `realtime_update` 通知 |
 
 ### 4.3 订阅类型
@@ -992,18 +1153,24 @@ sequenceDiagram
     participant Front as 前端
     participant APIGW as API网关
     participant DB as 数据库
+    participant SM as subscription-manager
     participant Binance as 币安服务
 
     Front->>APIGW: {"action": "subscribe", "subscriptions": ["BINANCE:BTCUSDT@KLINE_1"]}
 
     APIGW->>APIGW: 检查内存字典
-    APIGW->>DB: INSERT realtime_data (subscription_key, data_type)
+    APIGW->>DB: INSERT subscription_tasks (type='subscribe', subscription_key, data_type, subscriber='api-service')
+    DB->>DB: TRIGGER: pg_notify('subscription_task_new', ...)
+
+    DB-->>SM: 收到 subscription_task_new 通知
+    SM->>DB: INSERT/UPSERT realtime_data (subscription_key, data_type, subscribers) -- 唯一写入权限
     DB->>DB: TRIGGER: pg_notify('subscription_add', ...)
 
-    Binance->>DB: 收到 subscription_add 通知
+    DB-->>Binance: 收到 subscription_add 通知
     Binance->>Binance: 加入待处理队列(0.25s窗口)
     Binance->>Binance: 批处理：WS订阅 btcusdt@kline_1m
 
+    SM->>DB: UPDATE subscription_tasks SET status='completed'
     APIGW->>Front: {"action": "success", ...}
 ```
 
@@ -1014,19 +1181,25 @@ sequenceDiagram
     participant Front as 前端
     participant APIGW as API网关
     participant DB as 数据库
+    participant SM as subscription-manager
     participant Binance as 币安服务
 
     Front->>APIGW: {"action": "unsubscribe", "subscriptions": [...]}
 
     APIGW->>APIGW: 检查内存字典中该key的客户端数
     Note over APIGW: 如果没有客户端订阅该key：
-    APIGW->>DB: DELETE FROM realtime_data
-    DB->>DB: TRIGGER: pg_notify('subscription_remove', ...)
+    APIGW->>DB: INSERT subscription_tasks (type='unsubscribe', subscription_key, subscriber='api-service')
+    DB->>DB: TRIGGER: pg_notify('subscription_task_new', ...)
 
-    Binance->>DB: 收到 subscription_remove 通知
+    DB-->>SM: 收到 subscription_task_new 通知
+    SM->>DB: 从 realtime_data.subscribers 数组移除 'api-service'；数组为空则 DELETE 整行
+    DB->>DB: TRIGGER (DELETE时): pg_notify('subscription_remove', ...)
+
+    DB-->>Binance: 收到 subscription_remove 通知
     Binance->>Binance: 加入待处理队列
     Binance->>Binance: 批处理：WS取消订阅
 
+    SM->>DB: UPDATE subscription_tasks SET status='completed'
     APIGW->>Front: {"action": "success", ...}
 ```
 
@@ -1098,12 +1271,16 @@ sequenceDiagram
 
 | 场景 | 设计决策 |
 |------|----------|
-| **取消订阅通知** | 从 `subscribers` 数组移除订阅源，如果数组变空则删除行并通知 |
-| **API网关启动** | DELETE WHERE `subscribers = ARRAY['api-service']`，发送 `subscription_clean` 通知 |
+| **订阅发起** | API网关/signal-service INSERT subscription_tasks，subscription-manager 消费后写入 realtime_data |
+| **realtime_data 写入权** | subscription-manager 拥有唯一写入权，其他服务通过 subscription_tasks 队列间接操作 |
+| **取消订阅通知** | subscription-manager 从 `subscribers` 数组移除订阅源，如果数组变空则 DELETE 行并触发 subscription_remove |
+| **API网关启动** | 清理内存字典后 INSERT subscription_tasks (type=unsubscribe)，由 subscription-manager 处理 |
+| **subscription-manager 启动** | 压缩 pending 任务（每组只保留最后一条）、重放、协调 dead subscriber 状态 |
 | **币安重连恢复** | 主动查询 realtime_data 重新订阅 |
 | **批处理窗口** | 0.25秒聚合多个订阅请求 |
 | **实时数据推送** | UPDATE realtime_data.data 触发 realtime_update 通知 |
 | **多服务订阅** | 使用 `subscribers` 数组追踪多个订阅源，避免相互覆盖 |
+| **心跳保活** | 各服务定期 UPSERT service_heartbeats，subscription-manager 启动时通过心跳判断 subscriber 存活 |
 
 ### 4.6 API网关启动与清理
 
@@ -1182,5 +1359,5 @@ class SubscriptionManager:
 
 ---
 
-**版本**：v3.1
-**更新**：2026-02-21
+**版本**：v3.2
+**更新**：2026-05-25 - 添加subscription_tasks订阅任务队列表、service_heartbeats心跳表、subscription-manager架构
