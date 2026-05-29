@@ -442,8 +442,10 @@ function formatPrice(value: number | undefined): string {
 
 // Initialize data on mount
 onMounted(async () => {
-  // Fetch account data (no subscription needed for spot order form)
-  await accountStore.refreshAccounts()
+  // 仅在账户数据未加载时才刷新（避免与其他页面的 WS 状态冲突）
+  if (!accountStore.spotDisplay && !accountStore.futuresDisplay) {
+    await accountStore.refreshAccounts()
+  }
 
   // Fetch quotes once via DataService
   try {

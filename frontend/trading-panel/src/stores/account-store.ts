@@ -578,7 +578,24 @@ export const useAccountStore = defineStore('account', () => {
   }
 
   /**
-   * 重置 Store
+   * 仅清理显示状态，保留 WS 订阅
+   *
+   * 用于组件卸载时清理本地状态，不取消 DataService 全局订阅。
+   * DataService 是全局单例，订阅生命周期独立于组件。
+   */
+  function clearDisplay() {
+    spotDisplay.value = null
+    spotLoading.value = false
+    spotError.value = null
+    futuresDisplay.value = null
+    futuresLoading.value = false
+    futuresError.value = null
+    leverageMap.value = {}
+    wsConnected.value = false
+  }
+
+  /**
+   * 重置 Store（含 WS 订阅取消）
    */
   function reset() {
     // 清理现货账户订阅
@@ -634,6 +651,7 @@ export const useAccountStore = defineStore('account', () => {
 
     // ==================== 生命周期 ====================
     initialize,
+    clearDisplay,
     reset,
   }
 })

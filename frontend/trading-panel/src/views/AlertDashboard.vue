@@ -130,6 +130,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useMessage, NIcon, NSwitch, NTooltip } from 'naive-ui'
+
+defineOptions({ name: 'AlertDashboard' })
 import {
   AlertCircleOutline,
   VolumeHighOutline,

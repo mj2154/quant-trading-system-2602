@@ -1,102 +1,28 @@
 <script setup lang="ts">
-import { h } from 'vue'
-import { NButton, NDropdown, NIcon } from 'naive-ui'
-import { Add } from '@vicons/ionicons5'
-import { useTabStore, MODULE_CONFIG, type ModuleType } from '../../stores/tab-store'
+import { useRouter, useRoute } from 'vue-router'
+import { navItems } from '../../router'
 
-const tabStore = useTabStore()
-
-// 下拉菜单选项
-const dropdownOptions = [
-  {
-    label: 'K线图表',
-    key: 'kline-chart',
-    props: {
-      style: { display: 'flex', alignItems: 'center', gap: '8px' }
-    }
-  },
-  {
-    label: 'Module B',
-    key: 'module-b',
-  },
-  {
-    label: 'Module C',
-    key: 'module-c',
-  },
-  {
-    type: 'divider',
-    key: 'd1',
-  },
-  {
-    label: '账户信息',
-    key: 'account-dashboard',
-  },
-  {
-    label: '告警管理',
-    key: 'alert-dashboard',
-  },
-  {
-    label: '告警测试',
-    key: 'alert-test',
-  },
-  {
-    label: '交易面板',
-    key: 'trading-dashboard',
-  },
-]
-
-const handleSelect = (key: ModuleType) => {
-  tabStore.addTab(key)
-}
-
-const handleCloseTab = (tabId: string, event: Event) => {
-  event.stopPropagation()
-  tabStore.closeTab(tabId)
-}
-
-const handleSwitchTab = (tabId: string) => {
-  tabStore.switchTab(tabId)
-}
+const router = useRouter()
+const route = useRoute()
 </script>
 
 <template>
   <header class="app-header">
-    <!-- 标签列表 -->
     <div class="tabs-container">
       <div
-        v-for="tab in tabStore.tabs"
-        :key="tab.id"
+        v-for="item in navItems"
+        :key="item.path"
         class="tab-item"
-        :class="{ active: tab.id === tabStore.activeTabId }"
-        @click="handleSwitchTab(tab.id)"
+        :class="{ active: route.path === item.path }"
+        @click="router.push(item.path)"
       >
         <span
           class="tab-indicator"
-          :style="{ backgroundColor: MODULE_CONFIG[tab.type].color }"
+          :style="{ backgroundColor: item.color }"
         ></span>
-        <span class="tab-title">{{ tab.title }}</span>
-        <button
-          v-if="tabStore.tabCount > 1"
-          class="tab-close"
-          @click="handleCloseTab(tab.id, $event)"
-        >
-          ×
-        </button>
+        <span class="tab-title">{{ item.title }}</span>
       </div>
     </div>
-
-    <!-- 新建标签按钮 - 使用 Naive UI Dropdown -->
-    <NDropdown
-      trigger="click"
-      :options="dropdownOptions"
-      @select="handleSelect"
-    >
-      <NButton quaternary circle size="small">
-        <template #icon>
-          <NIcon><Add /></NIcon>
-        </template>
-      </NButton>
-    </NDropdown>
   </header>
 </template>
 
@@ -156,26 +82,6 @@ const handleSwitchTab = (tabId: string) => {
 }
 
 .tab-item.active .tab-title {
-  color: #fff;
-}
-
-.tab-close {
-  width: 18px;
-  height: 18px;
-  border: none;
-  background: transparent;
-  color: #888;
-  font-size: 14px;
-  cursor: pointer;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.tab-close:hover {
-  background-color: #555;
   color: #fff;
 }
 </style>

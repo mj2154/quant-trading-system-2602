@@ -128,10 +128,10 @@ onDeactivated(() => {
   // 切换回来时订阅仍然有效
 })
 
-// 组件真正销毁时清理
+// 组件销毁时仅清理显示状态，不取消 WS 订阅
+// DataService 是全局单例，订阅由它管理生命周期，不应在组件卸载时取消
 onUnmounted(() => {
-  // 重置 Store 状态并取消订阅
-  store.reset()
+  store.clearDisplay()
 })
 
 // 计算账户风险等级

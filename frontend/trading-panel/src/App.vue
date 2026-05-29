@@ -1,18 +1,11 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
 import { NConfigProvider, darkTheme, NMessageProvider, NDialogProvider, NNotificationProvider } from 'naive-ui'
-import { useTabStore } from './stores/tab-store'
 import { alertThemeOverrides } from './theme/alert-theme'
 import AppHeader from './components/layout/AppHeader.vue'
 import AppContent from './components/layout/AppContent.vue'
 import AppFooter from './components/layout/AppFooter.vue'
 import GlobalAlertHandler from './components/GlobalAlertHandler.vue'
-
-const tabStore = useTabStore()
-
-onMounted(() => {
-  tabStore.initialize()
-})
+import PersistentChartHost from './components/PersistentChartHost.vue'
 </script>
 
 <template>
@@ -28,7 +21,10 @@ onMounted(() => {
             <AppHeader />
 
             <!-- Content: 内容区 -->
-            <AppContent />
+            <div class="content-wrapper">
+              <AppContent />
+              <PersistentChartHost />
+            </div>
 
             <!-- Footer: 状态栏 -->
             <AppFooter />
@@ -45,6 +41,12 @@ onMounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.content-wrapper {
+  flex: 1;
+  position: relative;
   overflow: hidden;
 }
 </style>

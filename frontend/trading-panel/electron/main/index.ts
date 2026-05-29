@@ -28,7 +28,6 @@ async function createWindow() {
 
   if (VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(VITE_DEV_SERVER_URL)
-    mainWindow.webContents.openDevTools()
   } else {
     await mainWindow.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }

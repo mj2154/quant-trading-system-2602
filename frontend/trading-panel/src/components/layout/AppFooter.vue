@@ -1,18 +1,17 @@
 <script setup lang="ts">
-import { useTabStore } from '../../stores/tab-store'
+import { useRoute } from 'vue-router'
+import { computed } from 'vue'
 
-const tabStore = useTabStore()
+const route = useRoute()
+
+const currentTitle = computed(() => (route.meta.title as string) || '-')
 </script>
 
 <template>
   <footer class="app-footer">
     <div class="footer-left">
       <span class="footer-item">
-        标签数: <strong>{{ tabStore.tabCount }}</strong>
-      </span>
-      <span class="footer-divider">|</span>
-      <span class="footer-item">
-        当前: <strong>{{ tabStore.activeTab?.title || '-' }}</strong>
+        当前: <strong>{{ currentTitle }}</strong>
       </span>
     </div>
     <div class="footer-right">
@@ -47,9 +46,5 @@ const tabStore = useTabStore()
 
 .footer-item strong {
   color: #aaa;
-}
-
-.footer-divider {
-  color: #555;
 }
 </style>

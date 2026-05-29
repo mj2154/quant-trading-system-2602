@@ -1,25 +1,26 @@
 <script setup lang="ts">
-// K线图表模块
-import TradingViewChart from '../components/TradingViewChart/index.vue'
+import { onActivated, onDeactivated, onBeforeUnmount } from 'vue'
+import { useChartPersistenceStore } from '../stores/chart-persistence-store'
 
-defineOptions({ name: 'KLineChart' })
+defineOptions({ name: 'KlineChart' })
 
-const handleChartReady = (widget: any) => {
-}
+const store = useChartPersistenceStore()
 
-const handleChartError = (error: any) => {
-}
+onActivated(() => {
+  store.show()
+})
+
+onDeactivated(() => {
+  store.hide()
+})
+
+onBeforeUnmount(() => {
+  store.hide()
+})
 </script>
 
 <template>
-  <div class="module kline-chart">
-    <TradingViewChart
-      height="100%"
-      width="100%"
-      @ready="handleChartReady"
-      @error="handleChartError"
-    />
-  </div>
+  <div class="module kline-chart" />
 </template>
 
 <style scoped>
