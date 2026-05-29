@@ -1,0 +1,80 @@
+# ================================================
+# Git 行尾归一化配置
+# 保证 Windows / WSL2 / Linux 协作时行尾一致
+# ================================================
+
+# 自动检测文本文件，归一化为 LF
+* text=auto
+
+# ========== 后端 (Python) ==========
+*.py              text eol=lf
+*.sh              text eol=lf
+*.sql             text eol=lf
+*.yaml            text eol=lf
+*.yml             text eol=lf
+*.toml            text eol=lf
+*.ini             text eol=lf
+*.cfg             text eol=lf
+*.conf            text eol=lf
+*.env             text eol=lf
+*.env.*           text eol=lf
+*.txt             text eol=lf
+*.lock            text eol=lf
+Dockerfile        text eol=lf
+.python-version   text eol=lf
+
+# ========== 前端 (TypeScript/Vue/JS) ==========
+*.ts              text eol=lf
+*.tsx             text eol=lf
+*.vue             text eol=lf
+*.js              text eol=lf
+*.jsx             text eol=lf
+*.css             text eol=lf
+*.scss            text eol=lf
+*.less            text eol=lf
+*.html            text eol=lf
+*.json            text eol=lf
+*.json5           text eol=lf
+*.svg             text eol=lf
+
+# ========== 文档 ==========
+*.md              text eol=lf
+*.rst             text eol=lf
+
+# ========== 点文件 ==========
+.gitignore        text eol=lf
+.gitattributes    text eol=lf
+.dockerignore     text eol=lf
+.npmrc            text eol=lf
+.editorconfig     text eol=lf
+.prettierrc       text eol=lf
+.eslintrc*        text eol=lf
+
+# ========== 二进制文件（不做行尾转换） ==========
+*.png             binary
+*.jpg             binary
+*.jpeg            binary
+*.gif             binary
+*.ico             binary
+*.cur             binary
+*.woff            binary
+*.woff2           binary
+*.ttf             binary
+*.eot             binary
+*.whl             binary
+*.gz              binary
+*.zip             binary
+*.tar             binary
+*.bz2             binary
+*.7z              binary
+*.rar             binary
+*.mp4             binary
+*.webm            binary
+*.mp3             binary
+*.wav             binary
+*.pdf             binary
+*.db              binary
+*.sqlite          binary
+*.bin             binary
+*.dat             binary
+*.coverage        binary
